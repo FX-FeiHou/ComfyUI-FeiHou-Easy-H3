@@ -1,0 +1,6 @@
+__pycache__/
+*.py[cod]
+prompt_optimizer.json
+.prompt_optimizer.*
+SYNC_TARGETS.json
+.DS_Store

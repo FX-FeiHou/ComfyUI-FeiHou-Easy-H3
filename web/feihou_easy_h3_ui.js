@@ -1,0 +1,5604 @@
+import { app } from "../../scripts/app.js";
+import { api } from "../../scripts/api.js";
+
+// FeiHou Easy H3 frontend: embedded media gallery and prompt references.
+
+const NODE_CLASS = "FeiHouEasyH3";
+const LOADER_CLASS = "FeiHouEasyH3Loader";
+const ADAPTER_CLASS = "FeiHouEasyH3ModelAdapter";
+const OUTPUT_CLASS = "FeiHouEasyH3Output";
+const PROMPT_PREVIEW_CLASS = "FeiHouEasyH3PromptPreview";
+const LINKS_PROP = "minimax_h3_virtual_media_links";
+const EMBEDDED_MEDIA_PROP = "feihou_h3_embedded_media";
+const PROMPT_DOC_PROP = "minimax_h3_prompt_reference_doc";
+const PROMPT_VIEW_PROP = "minimax_h3_prompt_view_mode";
+const PROMPT_OPTIMIZER_SETTINGS_ENDPOINT = "/feihou_easy_h3/prompt_optimizer_settings";
+const PROMPT_OPTIMIZER_SETTINGS_DEFAULTS = Object.freeze({
+    active_provider: "zhipu",
+    providers: [],
+    active_scheme: "none",
+    custom_schemes: [],
+    schemes: [],
+    read_media: false,
+});
+let promptOptimizerSettingsCache = { ...PROMPT_OPTIMIZER_SETTINGS_DEFAULTS };
+let promptOptimizerSettingsLoaded = false;
+let promptOptimizerSettingsPromise = null;
+const RUNTIME_REF_PREFIX = "__MINIMAX_H3_REF_";
+const UNRESOLVED_REF_PREFIX = "__MINIMAX_H3_UNRESOLVED_REF_";
+const DIALOGUE_CLASS = "h3-dialogue-block";
+const PROMPT_VIEW_STRUCTURED = "structured";
+const PROMPT_VIEW_RAW = "raw";
+const PROMPT_GUIDES = [
+    { value: "none", zh: "\u4ec5\u901a\u7528\u65b9\u6848", en: "General only" },
+    { value: "3d_animation_short", zh: "3D \u52a8\u753b\u77ed\u7247", en: "3D Animation Short" },
+    { value: "brand_promo", zh: "\u54c1\u724c\u5ba3\u4f20\u7247", en: "Brand Promo Video" },
+    { value: "coop_game_intro", zh: "\u5408\u4f5c\u6e38\u620f\u5f00\u573a", en: "Co-op Game Intro" },
+    { value: "handdrawn_live", zh: "\u624b\u7ed8\u5b9e\u62cd\u878d\u5408", en: "Hand-drawn Live-action" },
+    { value: "minimalist_product_ad", zh: "\u6781\u7b80\u4ea7\u54c1\u5e7f\u544a", en: "Minimalist Product Ad" },
+    { value: "music_video_subtitle", zh: "\u97f3\u4e50\u89c6\u9891\u5b57\u5e55", en: "Music Video Subtitle" },
+    { value: "paper_collage", zh: "\u7eb8\u5f20\u62fc\u8d34\u89e3\u8bf4", en: "Paper Collage Explainer" },
+    { value: "papercraft_stop_motion", zh: "\u7eb8\u827a\u5b9a\u683c\u89e3\u8bf4", en: "Papercraft Stop-motion" },
+];
+const MODE_IMAGE = "image";
+const MODE_REFERENCE = "reference";
+const KEYFRAME_FIRST = "first";
+const RESOLUTION_CUSTOM = "custom";
+const REF_IMAGE_DEFAULT = "480";
+const REF_IMAGE_SHORT_EDGES = ["480", "544", "640", "736", "768", "832", "928", "1024", "1088"];
+const MAX_MEDIA = 15;
+const MIN_SECONDS = 0.2;
+const MAX_SECONDS = 30;
+const PROMPT_HISTORY_LIMIT = 120;
+const PROMPT_UNDO_VERSION = "2026-08-05-editor-undo-shield-v1";
+const CARET_SENTINEL = "\u200B";
+const AUDIO_ICON_SVG = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect x='0.5' y='10' width='3' height='4' rx='1.5' fill='%2300e2bb'/%3E%3Crect x='5.5' y='7' width='3' height='10' rx='1.5' fill='%2300e2bb'/%3E%3Crect x='10.5' y='4' width='3' height='16' rx='1.5' fill='%2300e2bb'/%3E%3Crect x='15.5' y='7' width='3' height='10' rx='1.5' fill='%2300e2bb'/%3E%3Crect x='20.5' y='10' width='3' height='4' rx='1.5' fill='%2300e2bb'/%3E%3C/svg%3E";
+const PRIMARY_BROWSER_LANGUAGE = String(globalThis.navigator?.language || globalThis.navigator?.languages?.[0] || "");
+const ZH_BROWSER = /^(zh)(?:[-_]|$)/i.test(PRIMARY_BROWSER_LANGUAGE);
+const TEXT = {
+    image: ZH_BROWSER ? "\u56fe\u7247" : "Image",
+    video: ZH_BROWSER ? "\u89c6\u9891" : "Video",
+    audio: ZH_BROWSER ? "\u97f3\u9891" : "Audio",
+    loadImage: ZH_BROWSER ? "\u52a0\u8f7d\u56fe\u7247" : "Load image",
+    loadVideo: ZH_BROWSER ? "\u52a0\u8f7d\u89c6\u9891" : "Load video",
+    loadAudio: ZH_BROWSER ? "\u52a0\u8f7d\u97f3\u9891" : "Load audio",
+    deleteLink: ZH_BROWSER ? "\u5220\u9664" : "Delete",
+    promptPlaceholder: "Prompt...",
+    rawPromptPlaceholder: ZH_BROWSER ? "\u539f\u59cb\u63d0\u793a\u8bcd..." : "Raw prompt...",
+    showRawPrompt: ZH_BROWSER ? "\u663e\u793a\u539f\u59cb\u63d0\u793a\u8bcd" : "Show raw prompt",
+    showStructuredPrompt: ZH_BROWSER ? "\u8fd4\u56de\u7ed3\u6784\u5316\u7f16\u8f91" : "Back to structured editor",
+    optimizePrompt: ZH_BROWSER ? "\u63d0\u793a\u8bcd\u4f18\u5316" : "Prompt optimization",
+    regeneratePrompt: ZH_BROWSER ? "\u91cd\u65b0\u751f\u6210" : "Regenerate",
+    optimizerSettings: ZH_BROWSER ? "\u63d0\u793a\u8bcd\u4f18\u5316\u8bbe\u7f6e" : "Prompt optimization settings",
+    settingsOpen: ZH_BROWSER ? "\u6253\u5f00\u63d0\u793a\u8bcd\u4f18\u5316 API \u8bbe\u7f6e" : "Open prompt optimization API settings",
+    settingsSave: ZH_BROWSER ? "\u4fdd\u5b58" : "Save",
+    settingsCancel: ZH_BROWSER ? "\u53d6\u6d88" : "Cancel",
+    settingsClose: ZH_BROWSER ? "\u5173\u95ed" : "Close",
+    settingsSaved: ZH_BROWSER ? "\u63d0\u793a\u8bcd\u4f18\u5316 API \u8bbe\u7f6e\u5df2\u4fdd\u5b58" : "Prompt optimization API settings saved",
+    settingsLoadFailed: ZH_BROWSER ? "\u65e0\u6cd5\u8bfb\u53d6\u63d0\u793a\u8bcd\u4f18\u5316 API \u8bbe\u7f6e" : "Unable to load prompt optimization API settings",
+    apiFormat: ZH_BROWSER ? "API \u683c\u5f0f" : "API format",
+    apiUrl: ZH_BROWSER ? "API \u5730\u5740" : "API URL",
+    apiKey: "API Key",
+    apiModel: ZH_BROWSER ? "\u6a21\u578b\u540d" : "Model",
+    promptGuide: ZH_BROWSER ? "\u63d0\u793a\u8bcd\u65b9\u6848" : "Prompt Guide",
+    readMedia: ZH_BROWSER ? "\u8bfb\u53d6\u5df2\u8fde\u63a5\u5a92\u4f53" : "Read connected media",
+    optimizerMissing: ZH_BROWSER ? "\u8bf7\u5148\u6253\u5f00 API \u8bbe\u7f6e\u5e76\u586b\u5199 API \u5730\u5740\u3001API Key \u548c\u6a21\u578b\u540d\u3002" : "Open API settings and enter the API URL, API key, and model first.",
+    optimizerDisabled: ZH_BROWSER ? "\u8bf7\u5148\u6253\u5f00\u9ad8\u7ea7\u9009\u9879\uff0c\u5e76\u9009\u62e9\u4e00\u4e2a API \u63a5\u53e3\u3002" : "Enable Advanced options and select an API provider first.",
+    optimizerFailed: ZH_BROWSER ? "\u63d0\u793a\u8bcd\u4f18\u5316\u5931\u8d25" : "Prompt optimization failed",
+    optimizerRunning: ZH_BROWSER ? "\u6b63\u5728\u4f18\u5316" : "Optimizing",
+    optimizerDone: ZH_BROWSER ? "\u4f18\u5316\u5b8c\u6210" : "Optimization complete",
+    optimizerError: ZH_BROWSER ? "\u4f18\u5316\u5931\u8d25" : "Optimization failed",
+    promptExternalConnected: ZH_BROWSER ? "\u63d0\u793a\u8bcd\u6765\u81ea\u5916\u90e8\u6587\u672c\u8fde\u63a5" : "Prompt supplied by external text input",
+    referencePromptPlaceholder: ZH_BROWSER ? "Prompt... \u8f93\u5165 @ \u5f15\u7528\u5df2\u8fde\u63a5\u7d20\u6750" : "Prompt... Type @ to reference connected media",
+    mentionTitle: ZH_BROWSER ? "\u5f15\u7528\u7d20\u6750" : "Reference media",
+    mentionEmpty: ZH_BROWSER ? "\u5148\u5c06\u7d20\u6750\u8fde\u63a5\u5230\u4e3b\u8282\u70b9" : "Connect media to the main node first",
+    mainTitle: "ComfyUI-FeiHou-Easy-H3 · modified · 改编自 github.com/nkxx188/ComfyUI-MiniMaxH3-Easy",
+    loaderTitle: ZH_BROWSER ? "FeiHou Easy H3 \u52a0\u8f7d\u5668" : "FeiHou Easy H3 Loader",
+    adapterTitle: ZH_BROWSER ? "FeiHou Easy H3 \u6a21\u578b\u4e2d\u8f6c" : "FeiHou Easy H3 Model Bridge",
+    outputTitle: ZH_BROWSER ? "FeiHou Easy H3 \u8f93\u51fa" : "FeiHou Easy H3 Output",
+    category: "FeiHou Easy H3",
+    mode: ZH_BROWSER ? "\u6a21\u5f0f" : "Mode",
+    prompt: ZH_BROWSER ? "\u63d0\u793a\u8bcd" : "Prompt",
+    resolution: ZH_BROWSER ? "\u5206\u8fa8\u7387" : "Resolution",
+    aspectRatio: ZH_BROWSER ? "\u5bbd\u9ad8\u6bd4" : "Aspect ratio",
+    width: ZH_BROWSER ? "\u5bbd\u5ea6" : "Width",
+    height: ZH_BROWSER ? "\u9ad8\u5ea6" : "Height",
+    seconds: ZH_BROWSER ? "\u79d2\u6570" : "Seconds",
+    advanced: ZH_BROWSER ? "\u9ad8\u7ea7\u9009\u9879" : "Advanced options",
+    promptOptimizerSettings: ZH_BROWSER ? "\u6253\u5f00\u63d0\u793a\u8bcd\u4f18\u5316 API \u8bbe\u7f6e" : "Optimizer settings",
+    promptOptimizerSceneGuide: ZH_BROWSER ? "\u63d0\u793a\u8bcd\u65b9\u6848" : "Prompt Guide",
+    promptOptimizerProvider: ZH_BROWSER ? "API \u670d\u52a1/\u6a21\u578b" : "API service/model",
+    promptOptimizerDisabled: ZH_BROWSER ? "\u4e0d\u542f\u7528" : "Disabled",
+    fps: ZH_BROWSER ? "\u5e27\u7387 (FPS)" : "Frame rate (FPS)",
+    keyframeRole: ZH_BROWSER ? "\u9996\u5c3e\u5e27\u8bbe\u7f6e" : "First/last frame setup",
+    refImageSize: ZH_BROWSER ? "\u53c2\u8003\u56fe\u5c3a\u5bf8\uff08\u77ed\u8fb9\uff09" : "Reference image size (short edge)",
+    referenceMentionMode: ZH_BROWSER ? "@\u5f15\u7528\u65b9\u5f0f" : "@ reference mode",
+    mentionByFilename: ZH_BROWSER ? "\u6309\u6587\u4ef6\u540d" : "By filename",
+    mentionByIndex: ZH_BROWSER ? "\u6309\u5e8f\u53f7" : "By index",
+    bundle: ZH_BROWSER ? "H3 \u6a21\u578b\u7ec4\u5408" : "H3 model bundle",
+    fl2vaModel: ZH_BROWSER ? "FL2VA \u6a21\u578b" : "FL2VA model",
+    ref2vaModel: ZH_BROWSER ? "REF2VA \u6a21\u578b" : "REF2VA model",
+    textEncoder: ZH_BROWSER ? "\u6587\u672c\u7f16\u7801\u5668" : "Text encoder",
+    videoVae: ZH_BROWSER ? "\u89c6\u9891 VAE" : "Video VAE",
+    audioVae: ZH_BROWSER ? "\u97f3\u9891 VAE" : "Audio VAE",
+    noneModel: ZH_BROWSER ? "\u65e0" : "None",
+    outputModel: "Model",
+    outputConditioning: "Conditioning",
+    outputLatent: "Latent",
+    outputVideoVae: "Video VAE",
+    outputAudioVae: "Audio VAE",
+    outputFps: "FPS",
+    outputPromptPreview: ZH_BROWSER ? "\u63d0\u793a\u8bcd\u53cd\u63a8\u8f93\u51fa" : "Prompt inference output",
+    outputContext: "H3 Context",
+    inputMedia: "Media",
+    embeddedMedia: ZH_BROWSER ? "\u8282\u70b9\u5185\u5d4c\u5a92\u4f53" : "Embedded media",
+    embeddedImages: ZH_BROWSER ? "\u53c2\u8003\u56fe\u7247 \u00b7 9" : "Reference images \u00b7 9",
+    embeddedVideos: ZH_BROWSER ? "\u53c2\u8003\u89c6\u9891 \u00b7 3" : "Reference videos \u00b7 3",
+    embeddedAudios: ZH_BROWSER ? "\u53c2\u8003\u97f3\u9891 \u00b7 3" : "Reference audio \u00b7 3",
+    embeddedPick: ZH_BROWSER ? "\u70b9\u51fb\u6216\u62d6\u5165\u6587\u4ef6" : "Click or drop a file",
+    embeddedDisabled: ZH_BROWSER ? "\u56fe\u751f\u89c6\u9891\u6a21\u5f0f\u4ec5\u4f7f\u7528\u524d 2 \u5f20\u56fe" : "Image mode uses the first 2 images",
+    embeddedUploading: ZH_BROWSER ? "\u4e0a\u4f20\u4e2d\u2026" : "Uploading\u2026",
+};
+const OPTION_DEFS = {
+    mode: {
+        [MODE_IMAGE]: ZH_BROWSER ? "\u56fe\u751f\u6216\u9996\u5c3e\u5e27" : "I2V or First/Last Frame",
+        [MODE_REFERENCE]: ZH_BROWSER ? "\u53c2\u8003\u751f\u89c6\u9891" : "Reference-to-video",
+    },
+    keyframe_role: {
+        first: ZH_BROWSER ? "\u9996\u5e27\u4f18\u5148" : "First frame priority",
+        last: ZH_BROWSER ? "\u5c3e\u5e27\u4f18\u5148" : "Last frame priority",
+    },
+    ref_image_size: {
+        ...Object.fromEntries(REF_IMAGE_SHORT_EDGES.map((value) => [value, value])),
+    },
+    reference_mention_mode: {
+        filename: ZH_BROWSER ? "\u6309\u6587\u4ef6\u540d" : "By filename",
+        index: ZH_BROWSER ? "\u6309\u5e8f\u53f7" : "By index",
+    },
+    prompt_optimizer_scene_guide: {
+        none: ZH_BROWSER ? "\u4ec5\u901a\u7528\u65b9\u6848" : "General only",
+    },
+    prompt_optimizer_provider: {
+        disabled: ZH_BROWSER ? "\u4e0d\u542f\u7528" : "Disabled",
+    },
+    resolution: {
+        "360P": "360P",
+        "416P": "416P",
+        "480P": "480P",
+        "540P": "540P",
+        "640P": "640P",
+        "720P": "720P",
+        "768P": "768P",
+        "832P": "832P",
+        "928P": "928P",
+        "1024P": "1024P",
+        "1080P": "1080P",
+        [RESOLUTION_CUSTOM]: "Custom",
+    },
+    aspect_ratio: {
+        "1:1": "1:1",
+        "2:3": "2:3",
+        "3:2": "3:2",
+        "3:4": "3:4",
+        "4:3": "4:3",
+        "9:16": "9:16",
+        "16:9": "16:9",
+        "21:9": "21:9",
+    },
+};
+const OPTION_ALIASES = {
+    mode: {
+        [MODE_IMAGE]: MODE_IMAGE,
+        "\u56fe\u751f\u6216\u9996\u5c3e\u5e27": MODE_IMAGE,
+        "\u56fe\u751f\u6216\u9996\u5c3e\u5e27\u89c6\u9891": MODE_IMAGE,
+        "I2V or First/Last Frame": MODE_IMAGE,
+        [MODE_REFERENCE]: MODE_REFERENCE,
+        "\u53c2\u8003\u751f\u89c6\u9891": MODE_REFERENCE,
+        "Reference-to-video": MODE_REFERENCE,
+    },
+    keyframe_role: {
+        first: "first",
+        "\u9996\u5e27\u4f18\u5148": "first",
+        "First frame priority": "first",
+        last: "last",
+        "\u5c3e\u5e27\u4f18\u5148": "last",
+        "Last frame priority": "last",
+    },
+    ref_image_size: {
+        ...Object.fromEntries(REF_IMAGE_SHORT_EDGES.flatMap((value) => [
+            [value, value],
+            [`\u77ed\u8fb9 ${value}`, value],
+            [`Short edge ${value}`, value],
+        ])),
+        match: "480",
+        "\u5339\u914d\u751f\u6210\u5206\u8fa8\u7387": "480",
+        "Match generation size": "480",
+        "1k": "1024",
+        "1.5k": "1088",
+        "2k": "1088",
+        original: "1088",
+    },
+    reference_mention_mode: {
+        filename: "filename",
+        "\u6309\u6587\u4ef6\u540d": "filename",
+        "By filename": "filename",
+        index: "index",
+        "\u6309\u5e8f\u53f7": "index",
+        "By index": "index",
+    },
+};
+const COLOR_IMAGE = "#5aa9f0";
+const COLOR_LINK_BORDER = "rgba(0,0,0,0.5)";
+const COMFY_NATIVE_LINK_COLOR = "#9A9";
+const LABELS = {
+    image: TEXT.image,
+    video: TEXT.video,
+    audio: TEXT.audio,
+};
+const LOADERS = {
+    image: { classType: "LoadImage", label: TEXT.loadImage },
+    video: { classType: "LoadVideo", label: TEXT.loadVideo },
+    audio: { classType: "LoadAudio", label: TEXT.loadAudio },
+};
+
+let installed = false;
+let patchedCanvas = false;
+let patchedPrompt = false;
+let linkMenu = null;
+let createMenu = null;
+let quickCreateCaptureCanvas = null;
+let quickCreateCaptureCleanup = null;
+let activePromptNode = null;
+let lastCapturedDropAt = 0;
+let deferredCreateMenuPending = false;
+let deferredCreateMenuToken = 0;
+const videoThumbnailCache = new Map();
+let mentionPreviewRefreshTimer = null;
+let suppressNativeDropUntil = 0;
+let nativeSearchSuppressStyle = null;
+let releaseCreateMenuLinkHold = null;
+let nativeThemeWatcherInstalled = false;
+let lastVueNodesMode = null;
+
+function nodeMatchesClass(node, className, displayName, installedMarker) {
+    if (!node) return false;
+    if (node.constructor?.prototype?.[installedMarker]) return true;
+    const candidates = [
+        node.comfyClass,
+        node.type,
+        node.constructor?.comfyClass,
+        node.constructor?.type,
+        node.constructor?.nodeData?.name,
+        node.constructor?.nodeData?.display_name,
+        node.title,
+    ];
+    return candidates.some((value) => value != null && [className, displayName].includes(String(value)));
+}
+
+function isTarget(node) {
+    return nodeMatchesClass(node, NODE_CLASS, TEXT.mainTitle, "__h3EasyNodeInstalled");
+}
+
+function isLoader(node) {
+    return nodeMatchesClass(node, LOADER_CLASS, TEXT.loaderTitle, "__h3EasyLoaderInstalled");
+}
+
+function isAdapter(node) {
+    return nodeMatchesClass(node, ADAPTER_CLASS, TEXT.adapterTitle, "__h3EasyAdapterInstalled");
+}
+
+function isOutput(node) {
+    return nodeMatchesClass(node, OUTPUT_CLASS, TEXT.outputTitle, "__h3EasyOutputInstalled");
+}
+
+function canonicalOption(name, value) {
+    const raw = String(value ?? "");
+    const alias = OPTION_ALIASES[name]?.[raw];
+    if (alias !== undefined) return alias;
+    const definition = OPTION_DEFS[name];
+    if (definition) {
+        for (const [key, label] of Object.entries(definition)) {
+            if (raw === key || raw === label) return key;
+        }
+    }
+    return raw;
+}
+
+function canonicalPromptGuide(value) {
+    const raw = String(value ?? "");
+    const found = PROMPT_GUIDES.find((item) => raw === item.value || raw === item.zh || raw === item.en);
+    if (found) return found.value;
+    // Preserve a custom scheme while the global settings are still loading.
+    // Once settings arrive, localizeComboWidget replaces it with its display name.
+    return raw.startsWith("custom_") ? raw : "none";
+}
+
+function promptOptimizerServiceEntries() {
+    const entries = [{ value: "disabled", label: TEXT.promptOptimizerDisabled, provider_id: "", model: "" }];
+    for (const provider of promptOptimizerSettingsCache.providers) {
+        const models = [...new Set([...(provider.llm_models || []), ...(provider.vlm_models || [])].map(String).filter(Boolean))];
+        for (const model of models) {
+            entries.push({
+                value: `${provider.id}/${model}`,
+                label: `${provider.name}/${model}`,
+                provider_id: provider.id,
+                model,
+            });
+        }
+    }
+    return entries;
+}
+
+function canonicalPromptProvider(value) {
+    const raw = String(value ?? "").trim();
+    if (!raw || raw === "disabled" || raw === TEXT.promptOptimizerDisabled) return "disabled";
+    const entry = promptOptimizerServiceEntries().find((item) => raw === item.value || raw === item.label);
+    if (entry) return entry.value;
+    // Migrate v0.4 workflows that stored only a provider id/name by selecting
+    // that provider's configured default model, matching prompt-assistant.
+    const provider = promptOptimizerSettingsCache.providers.find((item) => raw === item.id || raw === item.name);
+    const model = provider?.llm_model || provider?.vlm_model || provider?.llm_models?.[0] || provider?.vlm_models?.[0];
+    return provider && model ? `${provider.id}/${model}` : raw;
+}
+
+function localizeComboWidget(widget) {
+    const name = String(widget?.name || "");
+    if (name === "prompt_optimizer_scene_guide") {
+        const current = canonicalPromptGuide(widget?.value);
+        widget.options ||= {};
+        widget.options.values = PROMPT_GUIDES.map((item) => ZH_BROWSER ? item.zh : item.en);
+        widget.value = PROMPT_GUIDES.find((item) => item.value === current)?.[ZH_BROWSER ? "zh" : "en"] || widget.value;
+        widget.__h3PromptGuideLocalized = true;
+        return;
+    }
+    if (name === "prompt_optimizer_provider") {
+        const current = canonicalPromptProvider(widget?.value);
+        const entries = promptOptimizerServiceEntries();
+        widget.options ||= {};
+        widget.options.values = entries.map((item) => item.label);
+        widget.value = entries.find((item) => item.value === current)?.label || widget.value;
+        widget.__h3PromptProviderLocalized = true;
+        return;
+    }
+    const definition = OPTION_DEFS[name];
+    if (!widget || !definition) return;
+    const current = canonicalOption(name, widget.value);
+    widget.__h3OptionName = name;
+    widget.options ||= {};
+    widget.options.values = Object.values(definition);
+    widget.value = definition[current] ?? widget.value;
+}
+
+function isNoneModelValue(value) {
+    const normalized = String(value ?? "").trim().toLowerCase();
+    return normalized === "none" || normalized === "\u65e0";
+}
+
+function localizeOptionalModelWidget(widget) {
+    if (!widget) return;
+    widget.options ||= {};
+    const values = Array.isArray(widget.options.values) ? widget.options.values : [];
+    widget.options.values = [...new Set(values.map((value) => isNoneModelValue(value) ? TEXT.noneModel : value))];
+    if (isNoneModelValue(widget.value)) widget.value = TEXT.noneModel;
+}
+
+function setLocalizedSlotLabel(slot, label) {
+    if (!slot || !label) return;
+    slot.label = label;
+    slot.localized_name = label;
+}
+
+function localizeNodeInstance(node) {
+    if (!node) return;
+    if (isLoader(node)) {
+        node.title = TEXT.loaderTitle;
+        const labels = { lora_stack: "LoRA \u5806\u6808", fl2va_model: TEXT.fl2vaModel, ref2va_model: TEXT.ref2vaModel, text_encoder: TEXT.textEncoder, video_vae: TEXT.videoVae, audio_vae: TEXT.audioVae };
+        for (const widget of node.widgets || []) {
+            if (labels[widget.name]) widget.label = labels[widget.name];
+            if (widget.name === "fl2va_model" || widget.name === "ref2va_model") localizeOptionalModelWidget(widget);
+        }
+        for (const input of node.inputs || []) if (labels[input.name]) setLocalizedSlotLabel(input, labels[input.name]);
+        return;
+    }
+    if (isAdapter(node)) {
+        node.title = TEXT.adapterTitle;
+        const labels = { fl2va_model: TEXT.fl2vaModel, ref2va_model: TEXT.ref2vaModel, text_encoder: TEXT.textEncoder, video_vae: TEXT.videoVae, audio_vae: TEXT.audioVae };
+        for (const input of node.inputs || []) if (labels[input.name]) setLocalizedSlotLabel(input, labels[input.name]);
+        for (const output of node.outputs || []) if (String(output.name || "").toLowerCase() === "h3_bundle") setLocalizedSlotLabel(output, TEXT.bundle);
+        return;
+    }
+    if (isOutput(node)) {
+        node.title = TEXT.outputTitle;
+        for (const input of node.inputs || []) {
+            if (input.name === "h3_context") setLocalizedSlotLabel(input, TEXT.outputContext);
+        }
+        const outputLabels = { positive: TEXT.outputConditioning, latent: TEXT.outputLatent, video_vae: TEXT.outputVideoVae, audio_vae: TEXT.outputAudioVae, fps: TEXT.outputFps, prompt_preview: TEXT.outputPromptPreview };
+        for (const output of node.outputs || []) {
+            const key = String(output.name || "").toLowerCase();
+            if (outputLabels[key]) setLocalizedSlotLabel(output, outputLabels[key]);
+        }
+        return;
+    }
+    if (!isTarget(node)) return;
+    node.title = TEXT.mainTitle;
+    const labels = { mode: TEXT.mode, prompt: TEXT.prompt, resolution: TEXT.resolution, aspect_ratio: TEXT.aspectRatio, width: TEXT.width, height: TEXT.height, seconds: TEXT.seconds, advanced: TEXT.advanced, prompt_optimizer_provider: TEXT.promptOptimizerProvider, prompt_optimizer_scene_guide: TEXT.promptOptimizerSceneGuide, fps: TEXT.fps, keyframe_role: TEXT.keyframeRole, ref_image_size: TEXT.refImageSize, reference_mention_mode: TEXT.referenceMentionMode };
+    for (const widget of node.widgets || []) {
+        if (labels[widget.name]) widget.label = labels[widget.name];
+        localizeComboWidget(widget);
+    }
+    for (const input of node.inputs || []) {
+        if (input.name === "h3_bundle") setLocalizedSlotLabel(input, TEXT.bundle);
+        if (input.name === "media") setLocalizedSlotLabel(input, TEXT.inputMedia);
+    }
+    const outputLabels = { model: TEXT.outputModel, h3_context: TEXT.outputContext };
+    for (const output of node.outputs || []) {
+        const key = String(output.name || "").toLowerCase();
+        if (outputLabels[key]) setLocalizedSlotLabel(output, outputLabels[key]);
+    }
+}
+
+function localizeNodeDefinition(nodeData) {
+    if (!nodeData || ![NODE_CLASS, LOADER_CLASS, ADAPTER_CLASS, OUTPUT_CLASS].includes(nodeData.name)) return;
+    nodeData.display_name = nodeData.name === LOADER_CLASS
+        ? TEXT.loaderTitle
+        : nodeData.name === ADAPTER_CLASS
+            ? TEXT.adapterTitle
+            : nodeData.name === OUTPUT_CLASS
+            ? TEXT.outputTitle
+            : TEXT.mainTitle;
+    nodeData.category = TEXT.category;
+}
+
+function getWidget(node, name) {
+    return node?.widgets?.find((widget) => widget?.name === name) || null;
+}
+
+function getWidgetValue(node, name, fallback = "") {
+    const widget = getWidget(node, name);
+    return widget?.value ?? fallback;
+}
+
+function asBoolean(value, fallback = false) {
+    if (typeof value === "boolean") return value;
+    if (typeof value === "number") return value !== 0;
+    if (typeof value === "string") {
+        const normalized = value.trim().toLowerCase();
+        if (["", "0", "false", "off", "no"].includes(normalized)) return false;
+        if (["1", "true", "on", "yes"].includes(normalized)) return true;
+    }
+    return value == null ? fallback : Boolean(value);
+}
+
+function isReferenceMode(node) {
+    return canonicalOption("mode", getWidgetValue(node, "mode", MODE_IMAGE)) === MODE_REFERENCE;
+}
+
+function isCustomResolution(node) {
+    return canonicalOption("resolution", getWidgetValue(node, "resolution", "480P")) === RESOLUTION_CUSTOM;
+}
+
+function isAdvancedEnabled(node) {
+    return asBoolean(getWidgetValue(node, "advanced", false));
+}
+
+function referenceMentionMode(node) {
+    const value = canonicalOption("reference_mention_mode", getWidgetValue(node, "reference_mention_mode", "index"));
+    return value === "index" ? "index" : "filename";
+}
+
+const EMBEDDED_MEDIA_LIMITS = Object.freeze({ image: 9, video: 3, audio: 3 });
+const EMBEDDED_MEDIA_ORDER = Object.freeze({ image: 0, video: 1, audio: 2 });
+const EMBEDDED_MEDIA_ACCEPT = Object.freeze({
+    image: "image/png,image/jpeg,image/webp,image/gif,image/bmp",
+    video: "video/mp4,video/webm,video/quicktime,video/x-matroska,video/x-msvideo",
+    audio: "audio/*,video/mp4,video/webm,video/quicktime",
+});
+
+function embeddedMediaKey(mediaType, ordinal) {
+    return `${String(mediaType)}_${Number(ordinal)}`;
+}
+
+function embeddedSyntheticSourceId(mediaType, ordinal) {
+    const base = { image: 0, video: 100, audio: 200 }[String(mediaType)] ?? 300;
+    return -(base + Math.max(1, Number(ordinal) || 1));
+}
+
+function ensureEmbeddedMedia(node) {
+    node.properties ||= {};
+    const source = Array.isArray(node.properties[EMBEDDED_MEDIA_PROP])
+        ? node.properties[EMBEDDED_MEDIA_PROP]
+        : [];
+    const normalized = [];
+    const seen = new Set();
+    for (const item of source) {
+        const mediaType = String(item?.media_type || item?.type || "").toLowerCase();
+        const ordinal = Number(item?.ordinal);
+        const filename = String(item?.filename || "").trim();
+        if (!Object.hasOwn(EMBEDDED_MEDIA_LIMITS, mediaType) || !Number.isInteger(ordinal)) continue;
+        if (ordinal < 1 || ordinal > EMBEDDED_MEDIA_LIMITS[mediaType] || !filename) continue;
+        const key = embeddedMediaKey(mediaType, ordinal);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        normalized.push({
+            media_type: mediaType,
+            ordinal,
+            filename,
+            subfolder: String(item?.subfolder || ""),
+            storage: String(item?.storage || item?.type_name || "input"),
+        });
+    }
+    normalized.sort((left, right) => (
+        (EMBEDDED_MEDIA_ORDER[left.media_type] ?? 9) - (EMBEDDED_MEDIA_ORDER[right.media_type] ?? 9)
+        || left.ordinal - right.ordinal
+    ));
+    node.properties[EMBEDDED_MEDIA_PROP] = normalized;
+    return normalized;
+}
+
+function embeddedMediaRecords(node, { activeOnly = true } = {}) {
+    const reference = isReferenceMode(node);
+    return ensureEmbeddedMedia(node)
+        .filter((item) => !activeOnly || reference || (item.media_type === "image" && item.ordinal <= 2))
+        .map((item) => ({
+            ...item,
+            source_id: embeddedSyntheticSourceId(item.media_type, item.ordinal),
+            source_slot: 0,
+        }));
+}
+
+function embeddedMediaViewUrl(item) {
+    if (!item?.filename) return "";
+    const params = new URLSearchParams({
+        filename: String(item.filename),
+        type: String(item.storage || "input"),
+    });
+    if (item.subfolder) params.set("subfolder", String(item.subfolder));
+    return `/view?${params.toString()}`;
+}
+
+function embeddedMediaFilename(item) {
+    return String(item?.filename || "").split(/[\\/]/).pop() || "";
+}
+
+function setEmbeddedMedia(node, mediaType, ordinal, value) {
+    const key = embeddedMediaKey(mediaType, ordinal);
+    const next = ensureEmbeddedMedia(node).filter((item) => embeddedMediaKey(item.media_type, item.ordinal) !== key);
+    if (value?.filename) {
+        next.push({
+            media_type: String(mediaType),
+            ordinal: Number(ordinal),
+            filename: String(value.filename),
+            subfolder: String(value.subfolder || ""),
+            storage: String(value.storage || "input"),
+        });
+    }
+    node.properties[EMBEDDED_MEDIA_PROP] = next;
+    ensureEmbeddedMedia(node);
+    renderEmbeddedMediaGallery(node);
+    renderEditorFromNode(node);
+    requestMentionPreviewRefresh();
+    node.setDirtyCanvas?.(true, true);
+    app.graph?.change?.();
+}
+
+function ensureLinks(node) {
+    node.properties ||= {};
+    if (!Array.isArray(node.properties[LINKS_PROP])) {
+        node.properties[LINKS_PROP] = [];
+    }
+    return node.properties[LINKS_PROP];
+}
+
+function isSameNode(left, right) {
+    if (!left || !right) return false;
+    if (left === right) return true;
+    const leftId = Number(left.id);
+    const rightId = Number(right.id);
+    return Number.isFinite(leftId) && Number.isFinite(rightId) && leftId === rightId;
+}
+
+function resequence(node) {
+    const counts = { image: 0, video: 0, audio: 0 };
+    ensureLinks(node).forEach((link) => {
+        const mediaType = String(link.media_type || "image").toLowerCase();
+        const sequenceType = Object.hasOwn(counts, mediaType) ? mediaType : "image";
+        counts[sequenceType] += 1;
+        link.order = counts[sequenceType];
+    });
+}
+
+function normalizeLinks(node, removeMissing = true) {
+    const links = ensureLinks(node);
+    const normalized = [];
+    const seen = new Set();
+    for (const link of links) {
+        const sourceId = Number(link?.source_id);
+        const sourceSlot = Number(link?.source_slot) || 0;
+        const mediaType = String(link?.media_type || "image").toLowerCase();
+        if (!Number.isFinite(sourceId) || !["image", "video", "audio"].includes(mediaType)) continue;
+        if (Number.isFinite(Number(node?.id)) && sourceId === Number(node.id)) continue;
+        const key = `${sourceId}:${sourceSlot}:${mediaType}`;
+        if (seen.has(key)) continue;
+        const canResolveSource = typeof app.graph?.getNodeById === "function";
+        const source = canResolveSource ? app.graph.getNodeById(sourceId) : null;
+        if (removeMissing && canResolveSource && !source) continue;
+        seen.add(key);
+        normalized.push({ ...link, source_id: sourceId, source_slot: sourceSlot, media_type: mediaType });
+    }
+    const changed = normalized.length !== links.length || normalized.some((link, index) => {
+        const previous = links[index];
+        return !previous
+            || Number(previous.source_id) !== link.source_id
+            || Number(previous.source_slot) !== link.source_slot
+            || String(previous.media_type || "image").toLowerCase() !== link.media_type;
+    });
+    if (changed) node.properties[LINKS_PROP] = normalized;
+    else if (links.some((link) => !Number.isFinite(Number(link?.order)))) node.properties[LINKS_PROP] = normalized;
+    resequence(node);
+    return ensureLinks(node);
+}
+
+function getSlotType(slot) {
+    return String(slot?.type || slot?.datatype || slot?.label || "").toUpperCase();
+}
+
+function getMediaType(sourceType, sourceNode = null) {
+    const type = String(sourceType || "").toUpperCase();
+    if (type.includes("AUDIO")) return "audio";
+    if (type.includes("VIDEO")) return "video";
+    if (type.includes("IMAGE")) return "image";
+    const name = String(sourceNode?.comfyClass || sourceNode?.type || "").toLowerCase();
+    if (name.includes("audio")) return "audio";
+    if (name.includes("video")) return "video";
+    return "image";
+}
+
+function mediaLimits(node) {
+    if (!isReferenceMode(node)) {
+        return { image: 2, video: 0, audio: 0, total: 2 };
+    }
+    return { image: 9, video: 3, audio: 3, total: MAX_MEDIA };
+}
+
+function canAccept(node, mediaType) {
+    const limits = mediaLimits(node);
+    if (!limits[mediaType]) return false;
+    const links = ensureLinks(node);
+    if (links.length >= limits.total) return false;
+    const count = links.filter((link) => String(link.media_type || "image") === mediaType).length;
+    return count < limits[mediaType];
+}
+
+function pruneLinksForMode(node) {
+    const limits = mediaLimits(node);
+    const counts = { image: 0, video: 0, audio: 0 };
+    const kept = [];
+    for (const link of ensureLinks(node)) {
+        const type = String(link.media_type || "image");
+        if (!limits[type] || counts[type] >= limits[type] || kept.length >= limits.total) continue;
+        counts[type] += 1;
+        kept.push(link);
+    }
+    node.properties[LINKS_PROP] = kept;
+    resequence(node);
+}
+
+function getMediaInputIndex(node) {
+    return node?.inputs?.findIndex((input) => String(input?.name || "") === "media") ?? -1;
+}
+
+function getConnectionPosition(node, isInput, slotIndex) {
+    const normalize = (point) => Array.isArray(point) && Number.isFinite(point[0]) && Number.isFinite(point[1])
+        ? [point[0], point[1]]
+        : null;
+    const modern = isInput
+        ? normalize(node?.getInputPos?.(slotIndex))
+        : normalize(node?.getOutputPos?.(slotIndex));
+    if (modern) return modern;
+    const out = [0, 0];
+    try {
+        if (typeof node?.getConnectionPos === "function") {
+            const legacy = normalize(node.getConnectionPos(isInput, slotIndex, out)) || normalize(out);
+            if (legacy) return legacy;
+        }
+    } catch {
+        // Fall through to stable LiteGraph geometry.
+    }
+    const slot = 40 + Math.max(0, slotIndex) * 20;
+    return isInput
+        ? [Number(node?.pos?.[0] || 0), Number(node?.pos?.[1] || 0) + slot]
+        : [Number(node?.pos?.[0] || 0) + Number(node?.size?.[0] || 160), Number(node?.pos?.[1] || 0) + slot];
+}
+
+function getMediaDot(node) {
+    const index = getMediaInputIndex(node);
+    if (index < 0) return null;
+    const point = getConnectionPosition(node, true, index);
+    return { x: point[0], y: point[1] };
+}
+
+function graphPosition(canvas, event) {
+    try {
+        canvas.adjustMouseEvent?.(event);
+    } catch {
+        // Older LiteGraph builds do not expose adjustMouseEvent.
+    }
+    if (Array.isArray(canvas?.graph_mouse)) return [canvas.graph_mouse[0], canvas.graph_mouse[1]];
+    if (Number.isFinite(event?.canvasX) && Number.isFinite(event?.canvasY)) return [event.canvasX, event.canvasY];
+    const rect = canvas?.canvas?.getBoundingClientRect?.();
+    const scale = canvas?.ds?.scale || 1;
+    const offset = canvas?.ds?.offset || [0, 0];
+    if (rect && Number.isFinite(event?.clientX) && Number.isFinite(event?.clientY)) {
+        return [(event.clientX - rect.left) / scale - offset[0], (event.clientY - rect.top) / scale - offset[1]];
+    }
+    return [0, 0];
+}
+
+function pointerGraphPosition(canvas, event) {
+    if (Number.isFinite(event?.canvasX) && Number.isFinite(event?.canvasY)) return [event.canvasX, event.canvasY];
+    const rect = canvas?.canvas?.getBoundingClientRect?.();
+    if (rect && Number.isFinite(event?.clientX) && Number.isFinite(event?.clientY)) {
+        const scale = canvas?.ds?.scale || 1;
+        const offset = canvas?.ds?.offset || [0, 0];
+        return [(event.clientX - rect.left) / scale - offset[0], (event.clientY - rect.top) / scale - offset[1]];
+    }
+    return graphPosition(canvas, event);
+}
+
+function clientPosition(canvas, point) {
+    const rect = canvas?.canvas?.getBoundingClientRect?.();
+    if (!rect) return null;
+    const scale = canvas?.ds?.scale || 1;
+    const offset = canvas?.ds?.offset || [0, 0];
+    return { x: rect.left + (point[0] + offset[0]) * scale, y: rect.top + (point[1] + offset[1]) * scale };
+}
+
+function connectingOutput(canvas) {
+    const node = canvas?.connecting_node || canvas?.connectingNode;
+    if (!node) return null;
+    const raw = canvas.connecting_output ?? canvas.connecting_slot ?? canvas.connecting_output_slot;
+    if (raw == null && canvas.connecting_input) return null;
+    const index = typeof raw === "number" ? raw : Number(raw?.slot_index ?? raw?.slot ?? 0);
+    const output = node.outputs?.[Number.isFinite(index) ? index : 0] || raw || {};
+    return {
+        sourceNode: node,
+        sourceSlot: Number.isFinite(index) ? index : 0,
+        sourceType: getSlotType(output),
+    };
+}
+
+function connectingInput(canvas) {
+    const node = canvas?.connecting_node || canvas?.connectingNode;
+    const input = canvas?.connecting_input || canvas?.connectingInput;
+    if (!node || !input || !isTarget(node)) return null;
+    const index = typeof input === "number" ? input : node.inputs?.indexOf(input);
+    const slot = node.inputs?.[Number.isFinite(index) ? index : -1];
+    if (String(slot?.name || input?.name || "") !== "media") return null;
+    return { targetNode: node };
+}
+
+function clearConnecting(canvas) {
+    canvas.connecting_node = null;
+    canvas.connecting_output = null;
+    canvas.connecting_slot = null;
+    canvas.connecting_pos = null;
+    canvas.connecting_input = null;
+}
+
+function addVirtualLink(targetNode, sourceNode, sourceSlot, sourceType, mediaType = null) {
+    if (!targetNode || !sourceNode || isSameNode(targetNode, sourceNode)) return false;
+    const sourceId = Number(sourceNode.id);
+    if (!Number.isFinite(sourceId)) return false;
+    mediaType ||= getMediaType(sourceType, sourceNode);
+    if (!canAccept(targetNode, mediaType)) return false;
+    const links = ensureLinks(targetNode);
+    const exists = links.some((link) => Number(link.source_id) === sourceId && Number(link.source_slot) === Number(sourceSlot));
+    if (exists) return false;
+    links.push({
+        source_id: sourceId,
+        source_slot: Number(sourceSlot) || 0,
+        source_type: sourceType || "*",
+        media_type: mediaType,
+        order: links.length + 1,
+    });
+    resequence(targetNode);
+    targetNode.setDirtyCanvas?.(true, true);
+    app.graph?.setDirtyCanvas?.(true, true);
+    app.graph?.change?.();
+    requestMentionPreviewRefresh();
+    return true;
+}
+
+function removeVirtualLink(node, index) {
+    const links = ensureLinks(node);
+    if (index < 0 || index >= links.length) return false;
+    links.splice(index, 1);
+    resequence(node);
+    node.setDirtyCanvas?.(true, true);
+    app.graph?.setDirtyCanvas?.(true, true);
+    app.graph?.change?.();
+    requestMentionPreviewRefresh();
+    return true;
+}
+
+function getNativeGraphLink(graph, linkId) {
+    if (!graph || linkId == null) return null;
+    for (const links of [graph.links, graph._links]) {
+        if (!links) continue;
+        if (typeof links.get === "function") {
+            const link = links.get(linkId) ?? links.get(String(linkId));
+            if (link) return link;
+        }
+        const link = links[linkId] ?? links[String(linkId)];
+        if (link) return link;
+    }
+    return null;
+}
+
+function convertNativeMediaConnection(targetNode, inputIndex, linkInfo = null) {
+    if (!isTarget(targetNode) || targetNode.__h3VirtualWireClearing) return false;
+    const input = targetNode.inputs?.[inputIndex];
+    if (!input || !/^media(?:_\d+)?$/i.test(String(input.name || ""))) return false;
+
+    const graph = targetNode.graph || app.graph;
+    const linkId = input.link ?? linkInfo?.id ?? linkInfo?.link_id ?? linkInfo?.linkId;
+    const nativeLink = getNativeGraphLink(graph, linkId) || linkInfo;
+    if (!nativeLink) return false;
+
+    const directSourceCandidate = nativeLink.origin_node || nativeLink.originNode
+        || nativeLink.fromNode || nativeLink.sourceNode;
+    const directSource = directSourceCandidate && typeof directSourceCandidate === "object"
+        ? directSourceCandidate
+        : null;
+    const sourceId = nativeLink.origin_id ?? nativeLink.originId
+        ?? nativeLink.from_id ?? nativeLink.fromId
+        ?? (directSourceCandidate && typeof directSourceCandidate !== "object" ? directSourceCandidate : directSource?.id);
+    const sourceNode = directSource || graph?.getNodeById?.(Number(sourceId));
+    if (!sourceNode || isSameNode(targetNode, sourceNode)) return false;
+
+    const rawSourceSlot = nativeLink.origin_slot ?? nativeLink.originSlot
+        ?? nativeLink.from_slot ?? nativeLink.fromSlot ?? nativeLink.from?.slot ?? 0;
+    const parsedSourceSlot = Number(rawSourceSlot);
+    const sourceSlot = Number.isFinite(parsedSourceSlot) ? parsedSourceSlot : 0;
+    const output = sourceNode.outputs?.[sourceSlot] || {};
+    const sourceType = getSlotType(output)
+        || String(nativeLink.type || nativeLink.origin_type || nativeLink.originType || "*").toUpperCase();
+
+    const added = addVirtualLink(targetNode, sourceNode, sourceSlot, sourceType);
+    targetNode.__h3VirtualWireClearing = true;
+    try {
+        if (targetNode.inputs?.[inputIndex]?.link != null && typeof targetNode.disconnectInput === "function") {
+            targetNode.disconnectInput(inputIndex);
+        } else if (linkId != null && typeof graph?.removeLink === "function") {
+            graph.removeLink(linkId);
+        }
+        if (targetNode.inputs?.[inputIndex]) targetNode.inputs[inputIndex].link = null;
+    } finally {
+        targetNode.__h3VirtualWireClearing = false;
+    }
+
+    targetNode.setDirtyCanvas?.(true, true);
+    graph?.setDirtyCanvas?.(true, true);
+    requestMentionPreviewRefresh();
+    return added;
+}
+
+function scheduleNativeMediaConnectionConversion(targetNode, inputIndex, linkInfo = null) {
+    setTimeout(() => convertNativeMediaConnection(targetNode, inputIndex, linkInfo), 0);
+    if (!linkInfo) setTimeout(() => convertNativeMediaConnection(targetNode, inputIndex), 50);
+}
+
+function cubicPoint(start, end, t) {
+    const cp1 = [start[0] + 80, start[1]];
+    const cp2 = [end[0] - 80, end[1]];
+    const mt = 1 - t;
+    return [
+        mt * mt * mt * start[0] + 3 * mt * mt * t * cp1[0] + 3 * mt * t * t * cp2[0] + t * t * t * end[0],
+        mt * mt * mt * start[1] + 3 * mt * mt * t * cp1[1] + 3 * mt * t * t * cp2[1] + t * t * t * end[1],
+    ];
+}
+
+function linkGeometry(targetNode, link) {
+    const sourceNode = targetNode.graph?.getNodeById?.(Number(link.source_id));
+    const dot = getMediaDot(targetNode);
+    if (!sourceNode || !dot) return null;
+    const source = getConnectionPosition(sourceNode, false, Number(link.source_slot) || 0);
+    const target = [dot.x, dot.y];
+    return { sourceNode, source, target, mid: cubicPoint(source, target, 0.5) };
+}
+
+function getComfyLinkTypeColor(type) {
+    const colors = globalThis.LGraphCanvas?.link_type_colors || {};
+    const raw = String(type || "");
+    const candidates = [raw, raw.toUpperCase(), raw.toLowerCase()].filter(Boolean);
+    for (const candidate of candidates) {
+        if (colors[candidate]) return colors[candidate];
+    }
+    return "";
+}
+
+function getComfyDefaultLinkColor(canvas) {
+    return canvas?.default_link_color || globalThis.LiteGraph?.LINK_COLOR || COMFY_NATIVE_LINK_COLOR;
+}
+
+function linkColor(canvas, targetNode, sourceNode, link) {
+    if (linkHighlighted(canvas, targetNode, sourceNode)) return "#FFF";
+    const typedColor = getComfyLinkTypeColor(link?.source_type);
+    if (typedColor) return typedColor;
+    return String(link?.media_type || "image") === "image" ? COLOR_IMAGE : getComfyDefaultLinkColor(canvas);
+}
+
+function linkHighlighted(canvas, targetNode, sourceNode) {
+    return Boolean(
+        targetNode?.selected || sourceNode?.selected ||
+        canvas?.selectedItems?.has?.(targetNode) || canvas?.selectedItems?.has?.(sourceNode) ||
+        canvas?.selected_nodes?.[targetNode?.id] || canvas?.selected_nodes?.[sourceNode?.id]
+    );
+}
+
+function hitTestLinks(graph, x, y) {
+    let best = null;
+    for (const targetNode of graph?._nodes || []) {
+        if (!isTarget(targetNode)) continue;
+        const links = ensureLinks(targetNode);
+        links.forEach((link, index) => {
+            const geometry = linkGeometry(targetNode, link);
+            if (!geometry) return;
+            const distance = Math.hypot(x - geometry.mid[0], y - geometry.mid[1]);
+            if (distance <= 18 && (!best || distance < best.distance)) best = { targetNode, index, point: geometry.mid, distance };
+        });
+    }
+    return best;
+}
+
+function closeContextMenuCompat(menu) {
+    menu?.close?.();
+    menu?.remove?.();
+    globalThis.LiteGraph?.ContextMenu?.closeAllContextMenus?.(globalThis.window);
+    if (typeof document !== "undefined") {
+        document.querySelectorAll(".litecontextmenu").forEach((element) => element.remove());
+    }
+}
+
+function closeLinkMenu() {
+    linkMenu?.close?.();
+    linkMenu?.remove?.();
+    linkMenu = null;
+}
+
+function openLinkMenu(canvas, hit, event) {
+    closeLinkMenu();
+    const anchor = clientPosition(canvas, hit.point) || { x: event?.clientX || 0, y: event?.clientY || 0 };
+    const menuEvent = typeof PointerEvent === "function"
+        ? new PointerEvent("pointerdown", { clientX: anchor.x + 8, clientY: anchor.y + 8, bubbles: true, cancelable: true })
+        : new MouseEvent("mousedown", { clientX: anchor.x + 8, clientY: anchor.y + 8, bubbles: true, cancelable: true });
+    let menuInstance = null;
+    const remove = () => {
+        removeVirtualLink(hit.targetNode, hit.index);
+        closeContextMenuCompat(menuInstance);
+        if (linkMenu === menuInstance) linkMenu = null;
+    };
+    if (globalThis.LiteGraph?.ContextMenu) {
+        menuInstance = new globalThis.LiteGraph.ContextMenu([
+            { content: TEXT.deleteLink, callback: remove },
+        ], { event: menuEvent });
+        linkMenu = menuInstance;
+    }
+}
+
+function openCreateMenu(canvas, targetNode, event, allowedTypes) {
+    if (!targetNode) return;
+    closeContextMenuCompat(createMenu);
+    createMenu = null;
+    releaseCreateMenuLinkHold?.();
+    releaseCreateMenuLinkHold = null;
+    const [x, y] = Number.isFinite(event?.canvasX) && Number.isFinite(event?.canvasY)
+        ? [event.canvasX, event.canvasY]
+        : graphPosition(canvas, event);
+    const anchor = clientPosition(canvas, [x, y]) || { x: event?.clientX || 0, y: event?.clientY || 0 };
+    const menuEvent = typeof PointerEvent === "function"
+        ? new PointerEvent("pointerdown", { clientX: anchor.x, clientY: anchor.y, bubbles: true, cancelable: true })
+        : new MouseEvent("mousedown", { clientX: anchor.x, clientY: anchor.y, bubbles: true, cancelable: true });
+    let menuInstance = null;
+    const finish = () => {
+        closeContextMenuCompat(menuInstance);
+        if (createMenu === menuInstance) createMenu = null;
+        releaseCreateMenuLinkHold?.();
+        releaseCreateMenuLinkHold = null;
+        deferredCreateMenuPending = false;
+        setNativeSearchVisualSuppression(false);
+        clearTemporaryRenderLink(canvas);
+    };
+    const items = allowedTypes.filter((type) => canAccept(targetNode, type)).map((type) => ({
+        content: LOADERS[type].label,
+        callback: () => {
+            createResourceNode(canvas, targetNode, type, [x, y]);
+            finish();
+        },
+    }));
+    if (!globalThis.LiteGraph?.ContextMenu || !items.length) {
+        deferredCreateMenuPending = false;
+        setNativeSearchVisualSuppression(false);
+        clearTemporaryRenderLink(canvas);
+        return;
+    }
+    releaseCreateMenuLinkHold = holdDroppedLinkForMenu(canvas, { canvasX: x, canvasY: y });
+    setNativeSearchVisualSuppression(true);
+    menuInstance = new globalThis.LiteGraph.ContextMenu(items, { event: menuEvent });
+    createMenu = menuInstance;
+    menuInstance.controller?.signal?.addEventListener?.("abort", () => {
+        if (createMenu === menuInstance) createMenu = null;
+        releaseCreateMenuLinkHold?.();
+        releaseCreateMenuLinkHold = null;
+        deferredCreateMenuPending = false;
+        setNativeSearchVisualSuppression(false);
+        clearTemporaryRenderLink(canvas);
+    }, { once: true });
+}
+
+function alignNodeOutputToDrop(node, slot, position) {
+    if (!node || slot < 0 || !Number.isFinite(position?.[0]) || !Number.isFinite(position?.[1])) return false;
+    const current = node.pos || [0, 0];
+    const connection = getConnectionPosition(node, false, slot);
+    if (!Number.isFinite(connection?.[0]) || !Number.isFinite(connection?.[1])) return false;
+    node.pos = [current[0] + position[0] - connection[0], current[1] + position[1] - connection[1]];
+    node.setDirtyCanvas?.(true, true);
+    return true;
+}
+
+function createResourceNode(canvas, targetNode, mediaType, position) {
+    const spec = LOADERS[mediaType];
+    const graph = canvas?.graph || app.graph;
+    const LiteGraph = globalThis.LiteGraph;
+    if (!spec || !graph || !LiteGraph?.createNode) return false;
+    const node = LiteGraph.createNode(spec.classType);
+    if (!node) return false;
+    node.pos = [position[0], position[1]];
+    graph.add(node);
+    const slot = node.outputs?.findIndex((output) => getMediaType(getSlotType(output), node) === mediaType) ?? 0;
+    alignNodeOutputToDrop(node, slot, position);
+    if (isVueNodesMode() && typeof requestAnimationFrame === "function") {
+        const placedPosition = [Number(node.pos?.[0]) || 0, Number(node.pos?.[1]) || 0];
+        requestAnimationFrame(() => {
+            const stillAtPlacedPosition = Math.abs((Number(node.pos?.[0]) || 0) - placedPosition[0]) < 0.5
+                && Math.abs((Number(node.pos?.[1]) || 0) - placedPosition[1]) < 0.5;
+            if (stillAtPlacedPosition) alignNodeOutputToDrop(node, slot, position);
+        });
+    }
+    const output = node.outputs?.[slot] || {};
+    addVirtualLink(targetNode, node, slot, getSlotType(output) || mediaType.toUpperCase(), mediaType);
+    graph.setDirtyCanvas?.(true, true);
+    return true;
+}
+
+function getSlotIndex(slots, rawSlot) {
+    if (typeof rawSlot === "number") return slots?.[rawSlot] ? rawSlot : -1;
+    for (const key of ["slot_index", "slot", "index"]) {
+        const value = rawSlot?.[key];
+        if (typeof value === "number" && slots?.[value]) return value;
+    }
+    if (Array.isArray(slots) && rawSlot) {
+        const direct = slots.indexOf(rawSlot);
+        if (direct >= 0) return direct;
+        const name = typeof rawSlot === "string" ? rawSlot : rawSlot?.name;
+        if (name) return slots.findIndex((slot) => slot?.name === name);
+    }
+    return -1;
+}
+
+function getPendingConnectorLink(canvas) {
+    const link = canvas?.linkConnector?.renderLinks?.at?.(0);
+    if (!link) return null;
+    const endpointNode = link.node || link.fromNode || link.originNode || link.sourceNode || link.toNode || link.targetNode
+        || link.inputNode || link.outputNode;
+    const endpointSlot = link.fromSlot ?? link.slot ?? link.output ?? link.input ?? link.toSlot ?? {};
+    const toType = String(link.toType || link.targetType || link.targetSlotType || "").toLowerCase();
+    let direction = toType.includes("output") ? "from_input" : "from_output";
+    const inputIndex = getSlotIndex(endpointNode?.inputs, endpointSlot);
+    const outputIndex = getSlotIndex(endpointNode?.outputs, endpointSlot);
+    if (inputIndex >= 0 && outputIndex < 0) direction = "from_input";
+    if (outputIndex >= 0 && inputIndex < 0) direction = "from_output";
+    if (direction === "from_input") {
+        const input = endpointNode?.inputs?.[inputIndex] || endpointSlot;
+        if (!isTarget(endpointNode) || String(input?.name || "") !== "media") return null;
+        return { direction, targetNode: endpointNode, targetSlot: inputIndex };
+    }
+    const output = endpointNode?.outputs?.[outputIndex] || endpointSlot || {};
+    return {
+        direction,
+        sourceNode: endpointNode,
+        sourceSlot: Math.max(0, outputIndex),
+        sourceType: getSlotType(output),
+    };
+}
+
+function nodeAtGraphPoint(canvas, x, y, ignoredNode = null) {
+    const nodes = canvas?.graph?._nodes || app.graph?._nodes || [];
+    for (let index = nodes.length - 1; index >= 0; index -= 1) {
+        const node = nodes[index];
+        if (!node || node === ignoredNode) continue;
+        const pos = node.pos || [0, 0];
+        const size = node.size || node.computeSize?.() || [0, 0];
+        if (x >= pos[0] && y >= pos[1] && x <= pos[0] + Number(size[0] || 0) && y <= pos[1] + Number(size[1] || 0)) return node;
+    }
+    return null;
+}
+
+function findNativeSearchContainer() {
+    const active = document.activeElement;
+    const activeRoot = active?.closest?.("[role='search'], .node-search-box-dialog-mask, .invisible-dialog-root, .p-dialog, [data-pc-name='dialog']");
+    return document.querySelector(".node-search-box-dialog-mask .comfy-vue-node-search-container")
+        || document.querySelector(".invisible-dialog-root .comfy-vue-node-search-container")
+        || document.querySelector(".comfy-vue-node-search-container")
+        || activeRoot
+        || document.querySelector("[role='search']");
+}
+
+function findNativeSearchInput(container) {
+    const active = document.activeElement;
+    if (active?.tagName === "INPUT" && (!container || container.contains(active))) return active;
+    return container?.querySelector?.('input[id^="comfy-vue-node-search-box-input-"]')
+        || container?.querySelector?.(".comfy-vue-node-search-box input")
+        || container?.querySelector?.("input")
+        || document.querySelector('input[id^="comfy-vue-node-search-box-input-"]');
+}
+
+function setNativeSearchVisualSuppression(enabled) {
+    const className = "minimax-h3-easy-hide-native-search";
+    if (enabled) {
+        if (!nativeSearchSuppressStyle) {
+            nativeSearchSuppressStyle = document.createElement("style");
+            nativeSearchSuppressStyle.textContent = `
+body.${className} .node-search-box-dialog-mask,
+body.${className} .p-dialog-mask:has(.comfy-vue-node-search-container),
+body.${className} .invisible-dialog-root:has(.comfy-vue-node-search-container),
+body.${className} .comfy-vue-node-search-container {
+    opacity: 0 !important;
+    pointer-events: none !important;
+}`;
+            document.head?.appendChild(nativeSearchSuppressStyle);
+        }
+        document.body?.classList?.add(className);
+    } else {
+        document.body?.classList?.remove(className);
+    }
+}
+
+function closeNativeNodeSearchSoon() {
+    const close = () => {
+        const container = findNativeSearchContainer();
+        const input = findNativeSearchInput(container);
+        if (!container && !input) return;
+        const init = { key: "Escape", code: "Escape", keyCode: 27, which: 27, bubbles: true, cancelable: true };
+        input?.dispatchEvent?.(new KeyboardEvent("keydown", init));
+        container?.dispatchEvent?.(new KeyboardEvent("keydown", init));
+        document.dispatchEvent(new KeyboardEvent("keydown", init));
+    };
+    for (const delay of [0, 16, 50, 120]) setTimeout(close, delay);
+}
+
+function holdDroppedLinkForMenu(canvas, detail) {
+    const events = canvas?.linkConnector?.events;
+    if (!events) return null;
+    const preventReset = (event) => event.preventDefault?.();
+    canvas.linkConnector.state ||= {};
+    if (Number.isFinite(detail?.canvasX) && Number.isFinite(detail?.canvasY)) {
+        canvas.linkConnector.state.snapLinksPos = [detail.canvasX, detail.canvasY];
+    }
+    events.addEventListener("reset", preventReset, { once: true });
+    return () => events.removeEventListener("reset", preventReset);
+}
+
+function clearTemporaryRenderLink(canvas) {
+    const connector = canvas?.linkConnector;
+    connector?.reset?.();
+    if (Array.isArray(connector?.renderLinks)) connector.renderLinks.length = 0;
+    canvas?.setDirty?.(true, true);
+    (canvas?.graph || app.graph)?.setDirtyCanvas?.(true, true);
+}
+
+function shouldSuppressNativeDrop(type) {
+    return type === "dropped-on-canvas"
+        && (Boolean(createMenu) || deferredCreateMenuPending)
+        && performance.now() < suppressNativeDropUntil;
+}
+
+function suppressNativeDrop(event) {
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    event?.stopImmediatePropagation?.();
+    closeNativeNodeSearchSoon();
+}
+
+function primeInputDropSuppression(canvas) {
+    const pending = getPendingConnectorLink(canvas);
+    if (pending?.direction !== "from_input") return false;
+    deferredCreateMenuPending = true;
+    suppressNativeDropUntil = performance.now() + 1000;
+    setNativeSearchVisualSuppression(true);
+    closeNativeNodeSearchSoon();
+    return true;
+}
+
+function getTargetInputLinkId(pending) {
+    if (!pending?.targetNode) return null;
+    const inputIndex = getSlotIndex(pending.targetNode.inputs, pending.targetSlot);
+    return inputIndex >= 0 ? pending.targetNode.inputs?.[inputIndex]?.link ?? null : null;
+}
+
+function getVirtualLinkCount(node) {
+    return isTarget(node) ? ensureLinks(node).length : 0;
+}
+
+function hasDeferredInputDropConnected(canvas, pending, before, nativeLinkCreated = false) {
+    if (nativeLinkCreated) return true;
+    const inputLinkId = getTargetInputLinkId(pending);
+    if (inputLinkId != null && inputLinkId !== before.inputLinkId) return true;
+    if (getVirtualLinkCount(pending?.targetNode) > before.virtualLinkCount) return true;
+    const graphVersion = Number((canvas?.graph || app.graph)?._version) || 0;
+    return graphVersion > before.graphVersion;
+}
+
+function buildInputDropDetail(canvas, event) {
+    const [canvasX, canvasY] = pointerGraphPosition(canvas, event);
+    return {
+        clientX: event?.clientX,
+        clientY: event?.clientY,
+        canvasX,
+        canvasY,
+        shiftKey: Boolean(event?.shiftKey),
+        ctrlKey: Boolean(event?.ctrlKey),
+        metaKey: Boolean(event?.metaKey),
+        altKey: Boolean(event?.altKey),
+        pointerType: event?.pointerType,
+        originalEvent: event,
+        target: event?.target,
+    };
+}
+
+function scheduleDeferredInputCreateMenu(canvas, event, pending, allowed) {
+    if (pending?.direction !== "from_input") return false;
+    const token = ++deferredCreateMenuToken;
+    const detail = buildInputDropDetail(canvas, event);
+    const linkSnapshot = { ...pending };
+    const before = {
+        inputLinkId: getTargetInputLinkId(linkSnapshot),
+        virtualLinkCount: getVirtualLinkCount(linkSnapshot.targetNode),
+        graphVersion: Number((canvas?.graph || app.graph)?._version) || 0,
+    };
+
+    deferredCreateMenuPending = true;
+    suppressNativeDropUntil = performance.now() + 1000;
+    setNativeSearchVisualSuppression(true);
+    closeNativeNodeSearchSoon();
+    const releaseDeferredHold = holdDroppedLinkForMenu(canvas, detail);
+    const events = canvas?.linkConnector?.events;
+    let settled = false;
+    let nativeLinkCreated = false;
+
+    const cleanupNativeListeners = () => {
+        events?.removeEventListener?.("link-created", onNativeLinkCreated);
+        events?.removeEventListener?.("after-drop-links", onAfterDropLinks);
+    };
+    const releaseHold = () => releaseDeferredHold?.();
+    const finishConnected = () => {
+        if (settled || token !== deferredCreateMenuToken) return false;
+        if (!hasDeferredInputDropConnected(canvas, linkSnapshot, before, nativeLinkCreated)) return false;
+        settled = true;
+        deferredCreateMenuPending = false;
+        cleanupNativeListeners();
+        releaseHold();
+        setNativeSearchVisualSuppression(false);
+        clearTemporaryRenderLink(canvas);
+        return true;
+    };
+    const onNativeLinkCreated = () => {
+        nativeLinkCreated = true;
+        setTimeout(() => finishConnected(), 0);
+    };
+    const onAfterDropLinks = () => setTimeout(() => finishConnected(), 0);
+    const checkConnectedSoon = () => {
+        if (settled || token !== deferredCreateMenuToken || finishConnected()) return;
+        if (typeof requestAnimationFrame === "function") requestAnimationFrame(() => finishConnected());
+    };
+
+    events?.addEventListener?.("link-created", onNativeLinkCreated);
+    events?.addEventListener?.("after-drop-links", onAfterDropLinks);
+    if (typeof requestAnimationFrame === "function") requestAnimationFrame(checkConnectedSoon);
+    setTimeout(checkConnectedSoon, 16);
+    setTimeout(checkConnectedSoon, 32);
+
+    setTimeout(() => {
+        if (settled) return;
+        if (token !== deferredCreateMenuToken) {
+            settled = true;
+            cleanupNativeListeners();
+            releaseHold();
+            setNativeSearchVisualSuppression(false);
+            return;
+        }
+        deferredCreateMenuPending = false;
+        if (createMenu) {
+            settled = true;
+            cleanupNativeListeners();
+            releaseHold();
+            return;
+        }
+        if (finishConnected()) return;
+
+        settled = true;
+        cleanupNativeListeners();
+        releaseHold();
+        suppressNativeDropUntil = performance.now() + 800;
+        openCreateMenu(canvas, linkSnapshot.targetNode, detail, allowed);
+        closeNativeNodeSearchSoon();
+    }, 70);
+    return true;
+}
+
+function installQuickCreateCapture(canvas) {
+    if (!canvas?.canvas || !canvas?.linkConnector?.events) return false;
+    if (canvas === quickCreateCaptureCanvas && canvas.__h3EasyQuickCreateCaptureInstalled) return true;
+
+    // Nodes 2.0 can replace app.canvas while the page is starting. A module-global
+    // "installed" flag leaves the handlers attached to the discarded canvas and
+    // makes the live canvas rely on the less reliable mouse-up fallback. Remove the
+    // old global listeners and install against the current canvas instance instead.
+    quickCreateCaptureCleanup?.();
+    quickCreateCaptureCleanup = null;
+    quickCreateCaptureCanvas = canvas;
+    canvas.__h3EasyQuickCreateCaptureInstalled = true;
+    const handler = (event) => {
+        // A ContextMenu item click also bubbles through the global pointer-up
+        // listeners while the temporary connector is still being held. Without
+        // this guard, the first menu click is mistaken for another canvas drop:
+        // the temporary line is reset and the menu is reopened before its item
+        // callback can create the resource node.
+        if (createMenu || deferredCreateMenuPending || event?.target?.closest?.(".litecontextmenu")) return;
+        if (event?.button > 0 || performance.now() - lastCapturedDropAt < 80) return;
+        const pending = getPendingConnectorLink(canvas);
+        if (!pending) return;
+        const [x, y] = pointerGraphPosition(canvas, event);
+        if (pending.direction === "from_output") {
+            const target = (canvas.graph?._nodes || []).find((node) => {
+                if (!isTarget(node)) return false;
+                const dot = getMediaDot(node);
+                return dot && Math.hypot(x - dot.x, y - dot.y) <= 18;
+            });
+            if (!target) return;
+            if (isSameNode(target, pending.sourceNode)) return;
+            const added = addVirtualLink(target, pending.sourceNode, pending.sourceSlot, pending.sourceType);
+            if (!added) return;
+            lastCapturedDropAt = performance.now();
+            event.preventDefault?.();
+            event.stopPropagation?.();
+            event.stopImmediatePropagation?.();
+            canvas.linkConnector.reset?.();
+            closeNativeNodeSearchSoon();
+            return;
+        }
+        const allowed = isReferenceMode(pending.targetNode) ? ["image", "video", "audio"] : ["image"];
+        if (scheduleDeferredInputCreateMenu(canvas, event, pending, allowed)) {
+            lastCapturedDropAt = performance.now();
+        }
+    };
+    const pointerTargets = [window, document, canvas.canvas];
+    for (const target of pointerTargets) {
+        target.addEventListener?.("pointerup", handler, true);
+        target.addEventListener?.("mouseup", handler, true);
+    }
+
+    const events = canvas.linkConnector.events;
+    const originalDispatch = typeof events.dispatch === "function" ? events.dispatch : null;
+    const originalDispatchEvent = events.dispatchEvent;
+    let wrappedDispatch = null;
+    let wrappedDispatchEvent = null;
+    if (originalDispatch) {
+        wrappedDispatch = function dispatchWithMediaDropGuard(type, detail) {
+            if (type === "before-drop-links") primeInputDropSuppression(canvas);
+            if (shouldSuppressNativeDrop(type)) {
+                closeNativeNodeSearchSoon();
+                return false;
+            }
+            return originalDispatch.call(events, type, detail);
+        };
+        events.dispatch = wrappedDispatch;
+    }
+    wrappedDispatchEvent = function dispatchEventWithMediaDropGuard(event) {
+        if (event?.type === "before-drop-links") primeInputDropSuppression(canvas);
+        if (shouldSuppressNativeDrop(event?.type)) {
+            suppressNativeDrop(event);
+            return false;
+        }
+        return originalDispatchEvent.call(events, event);
+    };
+    events.dispatchEvent = wrappedDispatchEvent;
+    const beforeDropLinksHandler = () => primeInputDropSuppression(canvas);
+    const droppedOnCanvasHandler = (event) => {
+        if (shouldSuppressNativeDrop(event?.type)) suppressNativeDrop(event);
+    };
+    events.addEventListener("before-drop-links", beforeDropLinksHandler, { capture: true });
+    events.addEventListener("dropped-on-canvas", droppedOnCanvasHandler, { capture: true });
+
+    quickCreateCaptureCleanup = () => {
+        for (const target of pointerTargets) {
+            target.removeEventListener?.("pointerup", handler, true);
+            target.removeEventListener?.("mouseup", handler, true);
+        }
+        events.removeEventListener?.("before-drop-links", beforeDropLinksHandler, { capture: true });
+        events.removeEventListener?.("dropped-on-canvas", droppedOnCanvasHandler, { capture: true });
+        if (wrappedDispatch && events.dispatch === wrappedDispatch) events.dispatch = originalDispatch;
+        if (events.dispatchEvent === wrappedDispatchEvent) events.dispatchEvent = originalDispatchEvent;
+        canvas.__h3EasyQuickCreateCaptureInstalled = false;
+        if (quickCreateCaptureCanvas === canvas) quickCreateCaptureCanvas = null;
+    };
+    return true;
+}
+
+function drawLinks(canvas, ctx) {
+    const graph = canvas?.graph || app.graph;
+    if (!graph?._nodes || canvas.links_render_mode === globalThis.LiteGraph?.HIDDEN_LINK) return;
+    let missingLinkFound = false;
+    for (const targetNode of graph._nodes) {
+        if (!isTarget(targetNode)) continue;
+        const links = ensureLinks(targetNode);
+        for (const link of links) {
+            const geometry = linkGeometry(targetNode, link);
+            if (!geometry) {
+                missingLinkFound = true;
+                continue;
+            }
+            const highlighted = linkHighlighted(canvas, targetNode, geometry.sourceNode);
+            const color = linkColor(canvas, targetNode, geometry.sourceNode, link);
+            const width = canvas.connections_width || 3;
+            ctx.save();
+            ctx.lineJoin = "round";
+            ctx.shadowBlur = 0;
+            ctx.shadowColor = "transparent";
+            ctx.beginPath();
+            ctx.moveTo(geometry.source[0], geometry.source[1]);
+            ctx.bezierCurveTo(geometry.source[0] + 80, geometry.source[1], geometry.target[0] - 80, geometry.target[1], geometry.target[0], geometry.target[1]);
+            ctx.lineWidth = width + 4;
+            ctx.strokeStyle = canvas.render_connections_border !== false && !canvas.low_quality ? COLOR_LINK_BORDER : "transparent";
+            if (ctx.strokeStyle !== "transparent") ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(geometry.source[0], geometry.source[1]);
+            ctx.bezierCurveTo(geometry.source[0] + 80, geometry.source[1], geometry.target[0] - 80, geometry.target[1], geometry.target[0], geometry.target[1]);
+            ctx.lineWidth = width;
+            ctx.strokeStyle = color;
+            ctx.stroke();
+            if (canvas.linkMarkerShape !== 0 && (canvas.ds?.scale ?? 1) >= 0.6 && canvas.highquality_render !== false) {
+                ctx.beginPath();
+                ctx.arc(geometry.mid[0], geometry.mid[1], 5, 0, Math.PI * 2);
+                ctx.fillStyle = color;
+                ctx.fill();
+                ctx.fillStyle = highlighted ? "#222" : "#fff";
+                ctx.font = "bold 7px sans-serif";
+                ctx.textAlign = "center";
+                ctx.textBaseline = "middle";
+                ctx.fillText(String(link.order || 1), geometry.mid[0], geometry.mid[1] + 0.3);
+            }
+            ctx.restore();
+        }
+    }
+    if (missingLinkFound) requestMentionPreviewRefresh();
+}
+
+function patchCanvas() {
+    const canvas = app.canvas;
+    if (!canvas || canvas.__h3EasyCanvasPatched || typeof canvas.drawConnections !== "function") return;
+    canvas.__h3EasyCanvasPatched = true;
+    patchedCanvas = true;
+    const originalDraw = canvas.drawConnections;
+    canvas.drawConnections = function drawConnectionsWithH3Links(ctx) {
+        const result = originalDraw?.apply(this, arguments);
+        const connectionContext = ctx || this.bgctx || this.ctx;
+        const onConnectionLayer = connectionContext?.canvas === this?.bgcanvas || connectionContext === this?.bgctx || !this?.bgcanvas;
+        if (connectionContext && onConnectionLayer) drawLinks(this, connectionContext);
+        return result;
+    };
+
+    const originalDown = canvas.processMouseDown;
+    canvas.processMouseDown = function processMouseDownWithH3Links(event) {
+        if (!getInputConnection(this)) {
+            const [x, y] = graphPosition(this, event);
+            const hit = hitTestLinks(this.graph || app.graph, x, y);
+            if (hit) {
+                openLinkMenu(this, hit, event);
+                event?.preventDefault?.();
+                event?.stopImmediatePropagation?.();
+                return true;
+            }
+        }
+        const result = originalDown?.apply(this, arguments);
+        return result;
+    };
+
+    const linkPointerHandler = (event) => {
+        if (getPendingConnectorLink(canvas) || connectingOutput(canvas) || connectingInput(canvas)) return;
+        const [x, y] = graphPosition(canvas, event);
+        const hit = hitTestLinks(canvas.graph || app.graph, x, y);
+        if (!hit) return;
+        openLinkMenu(canvas, hit, event);
+        event.preventDefault?.();
+        event.stopPropagation?.();
+        event.stopImmediatePropagation?.();
+    };
+    canvas.canvas?.addEventListener?.("pointerdown", linkPointerHandler, true);
+    installQuickCreateCapture(canvas);
+}
+
+function getInputConnection(canvas) {
+    const node = canvas?.connecting_node || canvas?.connectingNode;
+    const input = canvas?.connecting_input || canvas?.connectingInput;
+    if (!node || !isTarget(node) || !input) return null;
+    const slot = typeof input === "number" ? node.inputs?.[input] : input;
+    if (String(slot?.name || "") !== "media") return null;
+    return { targetNode: node };
+}
+
+function promptInputSlot(node) {
+    return (node?.inputs || []).find((input) => String(input?.name || "") === "prompt") || null;
+}
+
+function promptInputIsConnected(node) {
+    return promptInputSlot(node)?.link != null;
+}
+
+function buildRuntimePrompt(node, runtimeLinks) {
+    const promptWidget = getWidget(node, "prompt");
+    const fallback = String(promptWidget?.value || "");
+    const doc = node?.properties?.[PROMPT_DOC_PROP];
+    if (!Array.isArray(doc?.parts)) return fallback;
+    return doc.parts.map((part) => {
+        if (part?.type === "dialogue") return `<d>${String(part.text || "")}</d>`;
+        if (part?.type !== "mention") return String(part?.text || "");
+        const mediaType = String(part.mediaType || "image").toLowerCase();
+        const partSourceId = part.sourceId != null && Number.isFinite(Number(part.sourceId)) ? Number(part.sourceId) : null;
+        const partOrdinal = Number(part.ordinal);
+        let index = -1;
+        if ((referenceMentionMode(node) === "index" || partSourceId == null) && Number.isFinite(partOrdinal) && partOrdinal > 0) {
+            let ordinal = 0;
+            for (let runtimeIndex = 0; runtimeIndex < runtimeLinks.length; runtimeIndex += 1) {
+                const link = runtimeLinks[runtimeIndex];
+                if (String(link.media_type || "image").toLowerCase() !== mediaType) continue;
+                ordinal += 1;
+                if (ordinal === partOrdinal) {
+                    index = runtimeIndex;
+                    break;
+                }
+            }
+        }
+        if (index < 0 && partSourceId != null) {
+            index = runtimeLinks.findIndex((link) =>
+                Number(link.source_id) === partSourceId
+                && Number(link.source_slot) === Number(part.sourceSlot || 0)
+                && String(link.media_type || "image").toLowerCase() === mediaType
+            );
+        }
+        if (index >= 0) return `${RUNTIME_REF_PREFIX}${index + 1}__`;
+        if (!isReferenceMode(node)) return String(part.tag || part.token || "");
+        return `${UNRESOLVED_REF_PREFIX}${mediaType}__`;
+    }).join("");
+}
+
+function patchGraphToPrompt() {
+    if (patchedPrompt || typeof app.graphToPrompt !== "function") return;
+    patchedPrompt = true;
+    const original = app.graphToPrompt;
+    app.graphToPrompt = async function graphToPromptWithOrderedMedia() {
+        const promptData = await original.apply(this, arguments);
+        const output = promptData?.output || {};
+        for (const node of app.graph?._nodes || []) {
+            if (!isTarget(node)) continue;
+            const promptNode = output[String(node.id)];
+            if (!promptNode) continue;
+            promptNode.inputs ||= {};
+            delete promptNode.inputs.media;
+            for (let index = 1; index <= MAX_MEDIA; index += 1) {
+                delete promptNode.inputs[`media_${index}`];
+                delete promptNode.inputs[`media_type_${index}`];
+            }
+            if (node.__h3Editor) syncPromptFromEditor(node, false);
+            const runtimeLinks = embeddedMediaRecords(node);
+            runtimeLinks.forEach((link, index) => {
+                const path = link.subfolder ? `${link.subfolder}/${link.filename}` : link.filename;
+                promptNode.inputs[`media_${index + 1}`] = path;
+                promptNode.inputs[`media_type_${index + 1}`] = String(link.media_type || "image");
+            });
+            const promptInput = promptInputSlot(node);
+            const promptLinkId = promptInput?.link;
+            const existingPromptLink = promptNode.inputs.prompt;
+            const hasPromptConnection = promptLinkId != null || Array.isArray(existingPromptLink);
+            if (!hasPromptConnection) {
+                promptNode.inputs.prompt = buildRuntimePrompt(node, runtimeLinks);
+            } else if (promptLinkId != null && (!Array.isArray(existingPromptLink) || existingPromptLink.length < 2)) {
+                // ComfyUI normally preserves connected widget inputs in graphToPrompt.
+                // Reconstruct the link as a fallback for frontends that omit it after
+                // the custom DOM editor replaces the native prompt widget.
+                const promptLink = getNativeGraphLink(node.graph || app.graph, promptLinkId);
+                const originId = promptLink?.origin_id ?? promptLink?.originId;
+                const originSlot = promptLink?.origin_slot ?? promptLink?.originSlot ?? 0;
+                if (originId != null) promptNode.inputs.prompt = [String(originId), Number(originSlot) || 0];
+            }
+            promptNode.inputs.mode = canonicalOption("mode", getWidgetValue(node, "mode", MODE_IMAGE));
+            promptNode.inputs.resolution = canonicalOption("resolution", getWidgetValue(node, "resolution", "480P"));
+            promptNode.inputs.aspect_ratio = canonicalOption("aspect_ratio", getWidgetValue(node, "aspect_ratio", "16:9"));
+            promptNode.inputs.width = Number(getWidgetValue(node, "width", 1344));
+            promptNode.inputs.height = Number(getWidgetValue(node, "height", 768));
+            promptNode.inputs.seconds = Math.min(MAX_SECONDS, Math.max(MIN_SECONDS, Number(getWidgetValue(node, "seconds", 10)) || 10));
+            const advanced = asBoolean(getWidgetValue(node, "advanced", false));
+            const providerId = advanced
+                ? canonicalPromptProvider(getWidgetValue(node, "prompt_optimizer_provider", "disabled"))
+                : "disabled";
+            promptNode.inputs.advanced = advanced;
+            delete promptNode.inputs.prompt_optimizer_settings;
+            promptNode.inputs.prompt_optimizer_provider = providerId;
+            promptNode.inputs.prompt_optimizer_scene_guide = providerId === "disabled"
+                ? "none"
+                : canonicalPromptGuide(getWidgetValue(node, "prompt_optimizer_scene_guide", "none"));
+            const currentPromptText = String(getWidgetValue(node, "prompt", ""));
+            promptNode.inputs.prompt_optimizer_applied = Boolean(
+                node.__h3OptimizerLastResult
+                && currentPromptText === String(node.__h3OptimizerLastResult),
+            );
+            promptNode.inputs.fps = Number(getWidgetValue(node, "fps", 24));
+            promptNode.inputs.keyframe_role = canonicalOption("keyframe_role", getWidgetValue(node, "keyframe_role", KEYFRAME_FIRST));
+            promptNode.inputs.ref_image_size = canonicalOption("ref_image_size", getWidgetValue(node, "ref_image_size", REF_IMAGE_DEFAULT));
+            promptNode.inputs.reference_mention_mode = canonicalOption("reference_mention_mode", getWidgetValue(node, "reference_mention_mode", "index"));
+        }
+        return promptData;
+    };
+}
+
+function editorText(editor) {
+    let result = "";
+    const visit = (node) => {
+        if (node.nodeType === Node.TEXT_NODE) {
+            result += String(node.textContent || "").replaceAll("\u200B", "");
+            return;
+        }
+        if (node.nodeType !== Node.ELEMENT_NODE) return;
+        if (node.classList?.contains("h3-mention-chip")) {
+            result += node.dataset.token || "";
+            return;
+        }
+        if (node.tagName === "BR") {
+            result += "\n";
+            return;
+        }
+        const block = ["DIV", "P"].includes(node.tagName);
+        if (block && result && !result.endsWith("\n")) result += "\n";
+        for (const child of node.childNodes || []) visit(child);
+    };
+    for (const child of editor.childNodes || []) visit(child);
+    return result;
+}
+
+function sourceLabel(node) {
+    return String(node?.title || node?.comfyClass || node?.type || "Media");
+}
+
+function widgetFilename(value) {
+    const candidate = typeof value === "object" ? (value?.filename || value?.name || "") : value;
+    const text = String(candidate || "").trim();
+    if (!text || /^data:|^blob:|^https?:/i.test(text)) return "";
+    return text.split(/[\\/]/).pop() || text;
+}
+
+function sourceFilename(node, mediaType) {
+    if (!node) return "";
+    const preferred = {
+        image: ["image", "filename", "file"],
+        video: ["video", "file", "filename", "video_file", "videofile"],
+        audio: ["audio", "file", "filename", "audio_file", "audiofile"],
+    }[mediaType] || ["file", "filename"];
+    const preferredSet = new Set(preferred);
+    const widgets = Array.isArray(node.widgets) ? node.widgets : [];
+    const ordered = [
+        ...widgets.filter((widget) => preferredSet.has(String(widget?.name || "").toLowerCase())),
+        ...widgets,
+    ];
+    for (const widget of ordered) {
+        const name = String(widget?.name || "").toLowerCase();
+        const filename = widgetFilename(widget?.value);
+        if (!filename) continue;
+        if (preferredSet.has(name) || /\.(png|jpe?g|webp|gif|bmp|mp4|webm|mov|mkv|avi|m4v|mp3|wav|flac|ogg|m4a)$/i.test(filename)) return filename;
+    }
+    return widgetFilename(node?.properties?.filename || node?.properties?.file || "");
+}
+
+function truncateMentionLabel(value, maxLength = 22) {
+    const text = String(value || "");
+    if (text.length <= maxLength) return text;
+    return `${text.slice(0, Math.max(4, maxLength - 1))}\u2026`;
+}
+
+function mentionOptions(node) {
+    if (!isReferenceMode(node)) return [];
+    const orderedLinks = embeddedMediaRecords(node);
+    const counts = { image: 0, video: 0, audio: 0 };
+    const mode = referenceMentionMode(node);
+    return orderedLinks.map((link) => {
+        const type = String(link.media_type || "image");
+        counts[type] = (counts[type] || 0) + 1;
+        const ordinal = counts[type];
+        const tag = type === "image" ? `<Picture ${ordinal}>` : type === "video" ? `<Video ${ordinal}>` : `<Audio ${ordinal}>`;
+        const fullLabel = embeddedMediaFilename(link) || tag;
+        const label = mode === "index" ? `${LABELS[type] || type}${ordinal}` : truncateMentionLabel(fullLabel);
+        const viewUrl = embeddedMediaViewUrl(link);
+        return {
+            type,
+            tag,
+            token: `@${mode === "index" ? label : fullLabel}`,
+            label,
+            fullLabel,
+            ordinal,
+            referenceMode: mode,
+            source: TEXT.embeddedMedia,
+            sourceId: Number(link.source_id),
+            sourceSlot: Number(link.source_slot) || 0,
+            previewUrl: type === "image" ? viewUrl : type === "video" ? getVideoFrameThumbnail(viewUrl) : "",
+        };
+    });
+}
+
+function findMentionOption(options, reference, mode) {
+    const type = String(reference?.mediaType || reference?.type || "image").toLowerCase();
+    const ordinal = Number(reference?.ordinal);
+    const rawSourceId = reference?.sourceId;
+    const sourceId = rawSourceId == null || rawSourceId === "" ? Number.NaN : Number(rawSourceId);
+    const sourceSlot = Number(reference?.sourceSlot) || 0;
+    const findByOrdinal = () => Number.isFinite(ordinal) && ordinal > 0
+        ? options.find((item) => item.type === type && Number(item.ordinal) === ordinal)
+        : null;
+    if (mode === "index") return findByOrdinal();
+    if (Number.isFinite(sourceId)) {
+        return options.find((item) => Number(item.sourceId) === sourceId
+            && Number(item.sourceSlot) === sourceSlot
+            && item.type === type) || null;
+    }
+    // Official tags pasted before their media exists only carry a type and an
+    // ordinal. In filename mode, use that ordinal once to claim the future
+    // source; after resolution updateMentionChip stores sourceId/sourceSlot and
+    // the reference becomes source-bound like any other filename-mode chip.
+    return findByOrdinal();
+}
+
+function isLikelyVideoUrl(url) {
+    const value = String(url || "").toLowerCase();
+    return /\.(mp4|webm|mov|mkv|avi|m4v)(?:[?#].*)?$/.test(value)
+        || /[?&]filename=[^&]*\.(mp4|webm|mov|mkv|avi|m4v)(?:[&#]|$)/.test(value);
+}
+
+function mediaViewUrlFromWidgets(node, preferredNames) {
+    const widgets = Array.isArray(node?.widgets) ? node.widgets : [];
+    const preferred = new Set(preferredNames);
+    const candidates = [
+        ...widgets.filter((widget) => preferred.has(String(widget?.name || "").toLowerCase())),
+        ...widgets,
+    ];
+    for (const widget of candidates) {
+        const value = widget?.value;
+        if (!value) continue;
+        const filename = typeof value === "object" ? value?.filename : value;
+        if (!filename) continue;
+        const name = String(widget?.name || "").toLowerCase();
+        if (!preferred.has(name) && !/\.(mp4|webm|mov|mkv|avi|m4v)$/i.test(String(filename))) continue;
+        const params = new URLSearchParams({
+            filename: String(filename),
+            type: typeof value === "object" ? String(value.type || "input") : "input",
+        });
+        if (typeof value === "object" && value.subfolder) params.set("subfolder", String(value.subfolder));
+        return `/view?${params.toString()}`;
+    }
+    return "";
+}
+
+function getNodeVideoSrc(node) {
+    for (const widget of node?.widgets || []) {
+        const element = widget?.element;
+        const video = element?.matches?.("video") ? element : element?.querySelector?.("video");
+        if (video?.currentSrc || video?.src) return video.currentSrc || video.src;
+    }
+    return mediaViewUrlFromWidgets(node, ["video", "file", "filename", "video_file", "videofile"]);
+}
+
+function refreshMentionPreviews() {
+    for (const node of app.graph?._nodes || []) {
+        if (!isTarget(node)) continue;
+        normalizeLinks(node);
+        if (!isReferenceMode(node)) {
+            closeMentionMenu(node);
+            continue;
+        }
+        const options = mentionOptions(node);
+        const currentMode = referenceMentionMode(node);
+        for (const chip of node.__h3Editor?.querySelectorAll?.(".h3-mention-chip") || []) {
+            const sourceId = chip.dataset.sourceId ? Number(chip.dataset.sourceId) : null;
+            const ordinal = Number(chip.dataset.ordinal) || null;
+            const option = findMentionOption(options, {
+                mediaType: chip.dataset.mediaType || "image",
+                ordinal,
+                sourceId,
+                sourceSlot: Number(chip.dataset.sourceSlot) || 0,
+            }, currentMode);
+            updateMentionChip(chip, option || {
+                type: chip.dataset.mediaType || "image",
+                token: chip.dataset.token || "",
+                label: chip.dataset.label || chip.dataset.fullLabel || "",
+                fullLabel: chip.dataset.fullLabel || chip.dataset.label || "",
+                referenceMode: currentMode,
+                ordinal,
+                sourceId,
+                sourceSlot: Number(chip.dataset.sourceSlot) || 0,
+                previewUrl: "",
+                unresolved: true,
+                pending: sourceId == null && ordinal != null,
+            });
+        }
+        if (node.__h3Editor) syncPromptFromEditor(node, false);
+        const menu = node.__h3MentionMenu;
+        if (menu) {
+            const query = String(menu.mention?.query || "").toLowerCase();
+            menu.options = options.filter((option) => !query || `${option.label} ${option.fullLabel || ""} ${option.source}`.toLowerCase().includes(query));
+            menu.activeIndex = Math.min(menu.activeIndex, Math.max(0, menu.options.length - 1));
+            renderMentionMenu(node);
+        }
+        node.setDirtyCanvas?.(true, true);
+    }
+    app.graph?.setDirtyCanvas?.(true, true);
+}
+
+function updateMentionChip(chip, option) {
+    if (!chip || !option) return;
+    const nextToken = option.token || option.tag || chip.dataset.token || "";
+    const nextTag = option.tag || chip.dataset.tag || nextToken;
+    const nextLabel = option.label || chip.dataset.label || nextToken;
+    const nextFullLabel = option.fullLabel || nextLabel;
+    const nextPreviewUrl = option.previewUrl || "";
+    chip.classList.toggle("is-pending", Boolean(option.pending));
+    chip.classList.toggle("is-unresolved", Boolean(option.unresolved) && !option.pending);
+    chip.dataset.token = nextToken;
+    chip.dataset.tag = nextTag;
+    chip.dataset.label = nextLabel;
+    chip.dataset.fullLabel = nextFullLabel;
+    chip.dataset.mediaType = option.type || chip.dataset.mediaType || "image";
+    chip.dataset.referenceMode = option.referenceMode || chip.dataset.referenceMode || "index";
+    chip.dataset.ordinal = Number(option.ordinal) || chip.dataset.ordinal || "";
+    chip.dataset.pendingReference = option.pending ? "true" : "";
+    if (option.sourceId != null) chip.dataset.sourceId = String(option.sourceId);
+    if (option.sourceSlot != null) chip.dataset.sourceSlot = String(Number(option.sourceSlot) || 0);
+    chip.dataset.previewUrl = nextPreviewUrl;
+    chip.title = option.pending
+        ? (ZH_BROWSER ? "\u7b49\u5f85\u8fde\u63a5\u5bf9\u5e94\u5e8f\u53f7\u7684\u5a92\u4f53\u7d20\u6750" : "Waiting for media with the matching index")
+        : option.unresolved
+            ? (ZH_BROWSER ? "\u5df2\u65ad\u5f00\uff1a\u8bf7\u91cd\u65b0\u8fde\u63a5\u6216\u5220\u9664\u8be5\u5f15\u7528" : "Disconnected: reconnect or remove this reference")
+        : nextFullLabel;
+    const label = chip.querySelector?.(".h3-mention-chip-label");
+    if (label) label.textContent = `@${nextLabel}`;
+    const thumb = chip.querySelector?.(".h3-mention-chip-thumb");
+    if (thumb && (thumb.dataset?.previewUrl !== nextPreviewUrl || thumb.dataset?.mediaType !== (option.type || "image"))) {
+        const replacement = makeMentionThumb(option);
+        replacement.dataset.previewUrl = nextPreviewUrl;
+        thumb.replaceWith(replacement);
+    } else if (!thumb) {
+        const replacement = makeMentionThumb(option);
+        replacement.dataset.previewUrl = nextPreviewUrl;
+        chip.prepend(replacement);
+    }
+}
+
+function requestMentionPreviewRefresh() {
+    if (mentionPreviewRefreshTimer) return;
+    mentionPreviewRefreshTimer = setTimeout(() => {
+        mentionPreviewRefreshTimer = null;
+        refreshMentionPreviews();
+    }, 0);
+}
+
+function watchMediaSourceNode(node) {
+    if (!node) return;
+    node.__h3MediaSourceWatchInstalled = true;
+    for (const widget of node.widgets || []) {
+        if (!widget || widget.__h3MediaSourceWatchInstalled) continue;
+        widget.__h3MediaSourceWatchInstalled = true;
+        const originalCallback = widget.callback;
+        widget.callback = function onMediaSourceWidgetChange(value) {
+            const result = originalCallback?.apply(this, arguments);
+            requestMentionPreviewRefresh();
+            return result;
+        };
+        const element = widget.inputEl || widget.element;
+        element?.addEventListener?.("change", requestMentionPreviewRefresh, true);
+        element?.addEventListener?.("input", requestMentionPreviewRefresh, true);
+    }
+}
+
+function installMediaSourceNode(nodeType, nodeData) {
+    const name = String(nodeData?.name || "").toLowerCase();
+    if (!name.includes("loadimage") && !name.includes("loadvideo") && !name.includes("loadaudio")) return;
+    if (nodeType.prototype.__h3MediaSourceInstalled) return;
+    nodeType.prototype.__h3MediaSourceInstalled = true;
+    const originalCreated = nodeType.prototype.onNodeCreated;
+    nodeType.prototype.onNodeCreated = function onNodeCreatedH3MediaSource() {
+        const result = originalCreated?.apply(this, arguments);
+        watchMediaSourceNode(this);
+        return result;
+    };
+    const originalConfigure = nodeType.prototype.onConfigure;
+    nodeType.prototype.onConfigure = function onConfigureH3MediaSource(info) {
+        const result = originalConfigure?.apply(this, arguments);
+        watchMediaSourceNode(this);
+        requestMentionPreviewRefresh();
+        return result;
+    };
+}
+
+function getVideoFrameThumbnail(videoUrl) {
+    if (!videoUrl) return "";
+    const cached = videoThumbnailCache.get(videoUrl);
+    if (cached?.dataUrl) return cached.dataUrl;
+    if (cached?.loading) return "";
+    if (cached?.failed) {
+        if (Date.now() - Number(cached.failedAt || 0) < 1800) return "";
+        videoThumbnailCache.delete(videoUrl);
+    }
+    if (!isLikelyVideoUrl(videoUrl) && !/^blob:|^data:video\//i.test(videoUrl)) return "";
+
+    const entry = { loading: true, dataUrl: "" };
+    videoThumbnailCache.set(videoUrl, entry);
+    const video = document.createElement("video");
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = "metadata";
+    let finished = false;
+    let sampleTimes = [];
+    let sampleIndex = 0;
+    let bestFrame = null;
+
+    const cleanup = () => {
+        video.removeAttribute("src");
+        video.load?.();
+    };
+    const succeed = (dataUrl) => {
+        if (finished || !dataUrl) return;
+        finished = true;
+        entry.loading = false;
+        entry.dataUrl = dataUrl;
+        cleanup();
+        requestMentionPreviewRefresh();
+    };
+    const fail = () => {
+        if (finished) return;
+        finished = true;
+        entry.loading = false;
+        entry.failed = true;
+        entry.failedAt = Date.now();
+        cleanup();
+    };
+    const measureFrame = (context, width, height) => {
+        try {
+            const data = context.getImageData(0, 0, width, height).data;
+            let total = 0;
+            let bright = 0;
+            let count = 0;
+            const stride = 4 * Math.max(1, Math.floor((width * height) / 1600));
+            for (let index = 0; index < data.length; index += stride) {
+                const luminance = (data[index] * 0.2126) + (data[index + 1] * 0.7152) + (data[index + 2] * 0.0722);
+                total += luminance;
+                if (luminance > 24) bright += 1;
+                count += 1;
+            }
+            const average = count ? total / count : 0;
+            const brightRatio = count ? bright / count : 0;
+            return { score: average + brightRatio * 90, usable: average > 18 || brightRatio > 0.035 };
+        } catch {
+            return { score: 255, usable: true };
+        }
+    };
+    const capture = () => {
+        if (finished || !video.videoWidth || !video.videoHeight) return;
+        try {
+            const canvas = document.createElement("canvas");
+            const scale = Math.min(1, 96 / Math.max(video.videoWidth, video.videoHeight));
+            canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+            canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
+            const context = canvas.getContext("2d");
+            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const quality = measureFrame(context, canvas.width, canvas.height);
+            const dataUrl = canvas.toDataURL("image/jpeg", 0.8);
+            if (!bestFrame || quality.score > bestFrame.score) bestFrame = { dataUrl, score: quality.score };
+            if (quality.usable) succeed(dataUrl);
+            else seekNextSample();
+        } catch {
+            fail();
+        }
+    };
+    const captureDecodedFrame = () => {
+        if (finished) return;
+        if (typeof video.requestVideoFrameCallback === "function") video.requestVideoFrameCallback(capture);
+        else setTimeout(capture, 80);
+    };
+    const seekNextSample = () => {
+        if (finished) return;
+        if (sampleIndex >= sampleTimes.length) {
+            if (bestFrame?.dataUrl && bestFrame.score > 18) succeed(bestFrame.dataUrl);
+            else fail();
+            return;
+        }
+        const nextTime = sampleTimes[sampleIndex++];
+        try {
+            if (Math.abs(Number(video.currentTime || 0) - nextTime) < 0.015) captureDecodedFrame();
+            else video.currentTime = nextTime;
+        } catch {
+            captureDecodedFrame();
+        }
+    };
+
+    setTimeout(fail, 4500);
+    video.addEventListener("loadedmetadata", () => {
+        const duration = Number(video.duration);
+        if (!Number.isFinite(duration) || duration <= 0) sampleTimes = [0];
+        else {
+            const end = Math.max(0, duration - 0.06);
+            sampleTimes = Array.from(new Set([
+                duration * 0.12,
+                0.5,
+                duration * 0.3,
+                duration * 0.55,
+                duration * 0.8,
+            ].map((time) => Number(Math.min(end, Math.max(0, time)).toFixed(3)))));
+        }
+        seekNextSample();
+    }, { once: true });
+    video.addEventListener("seeked", captureDecodedFrame);
+    video.addEventListener("error", fail, { once: true });
+    video.src = videoUrl;
+    video.load?.();
+    return "";
+}
+
+function sourcePreviewUrl(node, mediaType) {
+    if (!node) return "";
+    if (mediaType === "audio") return "";
+    if (mediaType === "image") {
+        const currentImageUrl = mediaViewUrlFromWidgets(node, ["image", "file", "filename"]);
+        if (currentImageUrl) return currentImageUrl;
+    }
+    const image = (node.imgs || []).find((item) => item?.src && !isLikelyVideoUrl(item.src));
+    if (image?.src) return image.src;
+    for (const widget of node.widgets || []) {
+        const element = widget?.element;
+        const img = element?.matches?.("img") ? element : element?.querySelector?.("img");
+        if (img?.src) return img.src;
+        const video = element?.matches?.("video") ? element : element?.querySelector?.("video");
+        if (mediaType === "video" && video?.poster) return video.poster;
+    }
+    if (mediaType === "video") return getVideoFrameThumbnail(getNodeVideoSrc(node));
+    const value = getWidget(node, "image")?.value;
+    const filename = typeof value === "object" ? value?.filename : value;
+    if (!filename) return "";
+    const params = new URLSearchParams({ filename: String(filename), type: typeof value === "object" ? String(value.type || "input") : "input" });
+    if (typeof value === "object" && value.subfolder) params.set("subfolder", String(value.subfolder));
+    return `/view?${params.toString()}`;
+}
+
+function makeAudioIcon(className) {
+    const image = document.createElement("img");
+    image.className = className;
+    image.alt = "";
+    image.draggable = false;
+    image.setAttribute("aria-hidden", "true");
+    image.src = AUDIO_ICON_SVG;
+    image.style.background = "transparent";
+    return image;
+}
+
+function makeMentionThumb(option, menu = false) {
+    const className = menu ? "h3-mention-menu-thumb" : "h3-mention-chip-thumb";
+    if (option.type === "audio") {
+        const audio = makeAudioIcon(className);
+        audio.dataset.previewUrl = "";
+        audio.dataset.mediaType = "audio";
+        return audio;
+    }
+    if (option.previewUrl) {
+        const image = document.createElement("img");
+        image.className = className;
+        image.alt = "";
+        image.draggable = false;
+        image.src = option.previewUrl;
+        image.dataset.previewUrl = option.previewUrl;
+        image.dataset.mediaType = option.type || "image";
+        image.addEventListener("error", () => image.replaceWith(makeMentionThumb({ ...option, previewUrl: "" }, menu)), { once: true });
+        return image;
+    }
+    const icon = document.createElement("span");
+    icon.className = `${className} is-${option.type || "image"}`;
+    icon.setAttribute("aria-hidden", "true");
+    icon.dataset.previewUrl = "";
+    icon.dataset.mediaType = option.type || "image";
+    return icon;
+}
+
+function makeMentionChip(option) {
+    const chip = document.createElement("span");
+    chip.className = `h3-mention-chip${option.pending ? " is-pending" : option.unresolved ? " is-unresolved" : ""}`;
+    chip.contentEditable = "false";
+    chip.dataset.token = option.token || option.tag || "";
+    chip.dataset.tag = option.tag || option.token || "";
+    chip.dataset.label = option.label || "";
+    chip.dataset.fullLabel = option.fullLabel || option.label || "";
+    chip.dataset.mediaType = option.type || "image";
+    chip.dataset.referenceMode = option.referenceMode || "index";
+    chip.dataset.ordinal = Number(option.ordinal) || "";
+    chip.dataset.sourceId = option.sourceId != null ? String(option.sourceId) : "";
+    chip.dataset.sourceSlot = String(option.sourceSlot || 0);
+    chip.dataset.previewUrl = option.previewUrl || "";
+    chip.dataset.pendingReference = option.pending ? "true" : "";
+    chip.title = option.pending
+        ? (ZH_BROWSER ? "\u7b49\u5f85\u8fde\u63a5\u5bf9\u5e94\u5e8f\u53f7\u7684\u5a92\u4f53\u7d20\u6750" : "Waiting for media with the matching index")
+        : option.unresolved
+            ? (ZH_BROWSER ? "\u5df2\u65ad\u5f00\uff1a\u8bf7\u91cd\u65b0\u8fde\u63a5\u6216\u5220\u9664\u8be5\u5f15\u7528" : "Disconnected: reconnect or remove this reference")
+        : (option.fullLabel || option.label || "");
+    const label = document.createElement("span");
+    label.className = "h3-mention-chip-label";
+    label.textContent = `@${option.label || ""}`;
+    chip.append(makeMentionThumb(option), label);
+    chip.addEventListener("pointerdown", (event) => {
+        if (event.target?.closest?.(".h3-mention-chip-label")) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const selection = window.getSelection?.();
+        if (!selection) return;
+        const range = document.createRange();
+        const before = event.clientX < chip.getBoundingClientRect().left + chip.getBoundingClientRect().width / 2;
+        before ? range.setStartBefore(chip) : range.setStartAfter(chip);
+        range.collapse(true);
+        selection.removeAllRanges();
+        selection.addRange(range);
+    });
+    return chip;
+}
+
+function isDialogueBlock(node) {
+    return node?.nodeType === Node.ELEMENT_NODE && node.classList?.contains(DIALOGUE_CLASS);
+}
+
+function dialogueBlockText(block) {
+    return editorText(block);
+}
+
+function makeDialogueBlock(value = "") {
+    const block = document.createElement("span");
+    block.className = DIALOGUE_CLASS;
+    block.spellcheck = false;
+    block.dataset.dialogue = "true";
+    appendTextWithBreaks(block, value);
+    if (!String(value || "")) block.append(makeCaretSentinel());
+    return block;
+}
+
+function ensureDialogueInnerCaret(block) {
+    if (!block || dialogueBlockText(block)) return;
+    if (![...(block.childNodes || [])].some((node) => isCaretSentinelText(node))) {
+        block.append(makeCaretSentinel());
+    }
+}
+
+function appendDialogueBlock(container, value = "") {
+    container.append(makeCaretSentinel(), makeDialogueBlock(value), makeCaretSentinel());
+}
+
+function appendPromptTextWithDialogueBlocks(container, value) {
+    const source = String(value || "");
+    const pattern = /<d>([\s\S]*?)<\/d>/gi;
+    let cursor = 0;
+    let match;
+    while ((match = pattern.exec(source))) {
+        appendTextWithBreaks(container, source.slice(cursor, match.index));
+        appendDialogueBlock(container, match[1]);
+        cursor = match.index + match[0].length;
+    }
+    appendTextWithBreaks(container, source.slice(cursor));
+}
+
+function promptViewMode(node) {
+    return String(node?.properties?.[PROMPT_VIEW_PROP] || PROMPT_VIEW_STRUCTURED) === PROMPT_VIEW_RAW
+        ? PROMPT_VIEW_RAW
+        : PROMPT_VIEW_STRUCTURED;
+}
+
+function isRawPromptMode(node) {
+    return promptViewMode(node) === PROMPT_VIEW_RAW;
+}
+
+function setPromptViewMode(node, mode) {
+    if (!node) return;
+    node.properties ||= {};
+    node.properties[PROMPT_VIEW_PROP] = mode === PROMPT_VIEW_RAW ? PROMPT_VIEW_RAW : PROMPT_VIEW_STRUCTURED;
+}
+
+function promptMentionTag(type, ordinal) {
+    const mediaType = String(type || "image").toLowerCase();
+    const index = Number(ordinal);
+    if (!Number.isFinite(index) || index <= 0) return "";
+    if (mediaType === "image") return "<Picture " + index + ">";
+    if (mediaType === "video") return "<Video " + index + ">";
+    if (mediaType === "audio") return "<Audio " + index + ">";
+    return "";
+}
+
+function promptTextFromPart(part) {
+    if (part?.type === "dialogue") return "<d>" + String(part.text || "") + "</d>";
+    if (part?.type !== "mention") return String(part?.text || "");
+    return String(part.tag || part.token || promptMentionTag(part.mediaType, part.ordinal) || "");
+}
+
+function promptDocTextFromParts(parts) {
+    return (Array.isArray(parts) ? parts : []).map((part) => promptTextFromPart(part)).join("");
+}
+
+function promptPartsFromText(node, value) {
+    const text = String(value || "");
+    const parts = [];
+    const pushText = (chunk) => {
+        const next = String(chunk || "");
+        if (!next) return;
+        if (parts.at(-1)?.type === "text") parts[parts.length - 1].text += next;
+        else parts.push({ type: "text", text: next });
+    };
+    let plainStart = 0;
+    let cursor = 0;
+    const candidates = pastedMentionCandidates(node);
+    while (cursor < text.length) {
+        const dialogueMatch = text.slice(cursor).match(/^<d>([\s\S]*?)<\/d>/i);
+        const match = dialogueMatch ? {
+            raw: dialogueMatch[0],
+            kind: "dialogue",
+            text: dialogueMatch[1] || "",
+        } : pastedOfficialMediaTagMatch(node, text, cursor)
+            || candidates.find((candidate) => text.slice(cursor, cursor + candidate.raw.length).toLocaleLowerCase() === candidate.raw.toLocaleLowerCase());
+        if (!match) {
+            cursor += 1;
+            continue;
+        }
+        if (plainStart < cursor) pushText(text.slice(plainStart, cursor));
+        if (match.kind === "dialogue") {
+            parts.push({ type: "dialogue", text: match.text });
+            cursor += match.raw.length;
+            plainStart = cursor;
+            continue;
+        }
+        const option = match.option || {};
+        parts.push({
+            type: "mention",
+            token: match.raw || option.token || "",
+            tag: option.tag || match.raw || option.token || "",
+            label: option.label || "",
+            fullLabel: option.fullLabel || option.label || "",
+            mediaType: option.type || "image",
+            referenceMode: option.referenceMode || referenceMentionMode(node),
+            ordinal: Number(option.ordinal) || null,
+            sourceId: option.sourceId != null ? Number(option.sourceId) : null,
+            sourceSlot: Number(option.sourceSlot) || 0,
+            previewUrl: option.previewUrl || "",
+            unresolved: Boolean(option.unresolved),
+            pending: Boolean(option.pending),
+        });
+        cursor += match.raw.length;
+        plainStart = cursor;
+    }
+    if (plainStart < text.length) pushText(text.slice(plainStart));
+    return parts;
+}
+
+function serializeRawPromptDoc(node, editor) {
+    let text = "";
+    const parts = [];
+    const pushText = (value) => {
+        const next = String(value || "").replaceAll(CARET_SENTINEL, "");
+        if (!next) return;
+        text += next;
+    };
+    const visit = (item) => {
+        if (item.nodeType === Node.TEXT_NODE) {
+            pushText(item.textContent);
+            return;
+        }
+        if (item.nodeType !== Node.ELEMENT_NODE) return;
+        if (isDialogueBlock(item)) {
+            const dialogue = dialogueBlockText(item);
+            text += `<d>${dialogue}</d>`;
+            return;
+        }
+        if (isMentionChip(item)) {
+            text += String(item.dataset.tag || item.dataset.token || "");
+            return;
+        }
+        if (item.tagName === "BR") {
+            text += "\n";
+            return;
+        }
+        for (const child of item.childNodes || []) visit(child);
+    };
+    for (const child of editor.childNodes || []) visit(child);
+    return {
+        version: 1,
+        text,
+        parts: promptPartsFromText(node, text),
+    };
+}
+
+function appendRawPromptText(container, value) {
+    appendTextWithBreaks(container, String(value || ""));
+}
+
+function serializeEditorDoc(editor) {
+    const node = editorPromptNode(editor);
+    if (isRawPromptMode(node)) {
+        const current = node?.properties?.[PROMPT_DOC_PROP];
+        if (!node?.__h3RawPromptNeedsSync && current) return clonePromptDoc(current);
+        return serializeRawPromptDoc(node, editor);
+    }
+    const parts = [];
+    const pushText = (text) => {
+        const value = String(text || "").replaceAll("\u200B", "");
+        if (!value) return;
+        if (parts.at(-1)?.type === "text") parts[parts.length - 1].text += value;
+        else parts.push({ type: "text", text: value });
+    };
+    const visit = (item) => {
+        if (item.nodeType === Node.TEXT_NODE) {
+            pushText(item.textContent);
+            return;
+        }
+        if (item.nodeType !== Node.ELEMENT_NODE) return;
+        if (isDialogueBlock(item)) {
+            const text = dialogueBlockText(item);
+            parts.push({ type: "dialogue", text });
+            return;
+        }
+        if (item.classList?.contains("h3-mention-chip")) {
+            parts.push({
+                type: "mention",
+                token: item.dataset.token || "",
+                tag: item.dataset.tag || item.dataset.token || "",
+                label: item.dataset.label || "",
+                fullLabel: item.dataset.fullLabel || item.dataset.label || "",
+                mediaType: item.dataset.mediaType || "image",
+                referenceMode: item.dataset.referenceMode || "index",
+                ordinal: Number(item.dataset.ordinal) || null,
+                sourceId: item.dataset.sourceId ? Number(item.dataset.sourceId) : null,
+                sourceSlot: Number(item.dataset.sourceSlot) || 0,
+                previewUrl: item.dataset.previewUrl || "",
+            });
+            return;
+        }
+        if (item.tagName === "BR") {
+            pushText("\n");
+            return;
+        }
+        const block = ["DIV", "P"].includes(item.tagName);
+        if (block && parts.length && !(parts.at(-1)?.type === "text" && parts.at(-1).text.endsWith("\n"))) pushText("\n");
+        for (const child of item.childNodes || []) visit(child);
+    };
+    for (const child of editor.childNodes || []) visit(child);
+    return {
+        version: 1,
+        text: promptDocTextFromParts(parts),
+        parts,
+    };
+}
+
+function appendTextWithBreaks(container, value) {
+    String(value || "").split("\n").forEach((part, index) => {
+        if (index) container.append(document.createElement("br"));
+        if (part) container.append(document.createTextNode(part));
+    });
+}
+
+function renderEditorFromNode(node, force = false) {
+    const editor = node?.__h3Editor;
+    const widget = getWidget(node, "prompt");
+    if (!editor || !widget || (document.activeElement === editor && !force)) return;
+    const doc = node.properties?.[PROMPT_DOC_PROP];
+    editor.textContent = "";
+    const raw = isRawPromptMode(node);
+    editor.classList.toggle("is-raw", raw);
+    node.__h3EditorWrap?.classList?.toggle("is-raw", raw);
+    if (raw) {
+        closeMentionMenu(node);
+        appendRawPromptText(editor, Array.isArray(doc?.parts) ? promptDocTextFromParts(doc.parts) : String(doc?.text ?? widget.value ?? ""));
+        return;
+    }
+    if (!Array.isArray(doc?.parts)) {
+        appendPromptTextWithDialogueBlocks(editor, String(widget.value || ""));
+        return;
+    }
+    const live = mentionOptions(node);
+    for (const part of doc.parts) {
+        if (part?.type === "dialogue") {
+            appendDialogueBlock(editor, String(part.text || ""));
+            continue;
+        }
+        if (part?.type !== "mention") {
+            appendTextWithBreaks(editor, part?.text || "");
+            continue;
+        }
+        const currentMode = referenceMentionMode(node);
+        const partSourceId = part.sourceId != null && Number.isFinite(Number(part.sourceId)) ? Number(part.sourceId) : null;
+        const partOrdinal = Number(part.ordinal) || null;
+        const option = findMentionOption(live, {
+            mediaType: part.mediaType || "image",
+            ordinal: partOrdinal,
+            sourceId: partSourceId,
+            sourceSlot: Number(part.sourceSlot) || 0,
+        }, currentMode);
+        editor.append(makeMentionChip({
+            type: part.mediaType || option?.type || "image",
+            token: option?.token || part.token || option?.tag || "",
+            tag: option?.tag || part.tag || part.token || "",
+            label: option?.label || part.label || part.token || "",
+            fullLabel: option?.fullLabel || part.fullLabel || part.label || part.token || "",
+            referenceMode: currentMode,
+            ordinal: option?.ordinal ?? part.ordinal,
+            sourceId: option?.sourceId ?? part.sourceId,
+            sourceSlot: option?.sourceSlot ?? part.sourceSlot ?? 0,
+            previewUrl: option?.previewUrl || "",
+            unresolved: !option,
+            pending: !option && partSourceId == null && partOrdinal != null,
+        }));
+    }
+}
+
+function syncPromptFromEditor(node, markDirty = true) {
+    const editor = node?.__h3Editor;
+    const widget = getWidget(node, "prompt");
+    if (!editor || !widget || node.__h3EditorSyncing) return;
+    node.__h3EditorSyncing = true;
+    try {
+        const doc = serializeEditorDoc(editor);
+        widget.value = doc.text;
+        if (widget._state) widget._state.value = doc.text;
+        node.properties ||= {};
+        node.properties[PROMPT_DOC_PROP] = doc;
+        if (isRawPromptMode(node)) node.__h3RawPromptNeedsSync = false;
+        if (markDirty) {
+            node.setDirtyCanvas?.(true, true);
+            app.graph?.setDirtyCanvas?.(true, true);
+            app.graph?.change?.();
+        }
+    } finally {
+        node.__h3EditorSyncing = false;
+    }
+}
+
+function clonePromptDoc(doc) {
+    const source = doc && typeof doc === "object" ? doc : {};
+    return {
+        version: 1,
+        text: String(source.text || ""),
+        parts: Array.isArray(source.parts) ? source.parts.map((part) => ({ ...part })) : [],
+    };
+}
+
+function promptDocKey(doc) {
+    return JSON.stringify(clonePromptDoc(doc));
+}
+
+function editorPromptNode(editor) {
+    return editor?.__h3PromptNode || null;
+}
+
+function editorFromEvent(event) {
+    const target = event?.target;
+    if (target?.closest) {
+        const editor = target.closest(".h3-prompt-editor");
+        if (editor) return editor;
+    }
+    const active = typeof document !== "undefined" ? document.activeElement : null;
+    return active?.closest?.(".h3-prompt-editor") || activePromptNode?.__h3Editor || null;
+}
+
+function isPromptUndoRedoEvent(event) {
+    if (!(event?.ctrlKey || event?.metaKey)) return false;
+    const key = String(event.key || "").toLowerCase();
+    const code = String(event.code || "");
+    return key === "z" || key === "y" || code === "KeyZ" || code === "KeyY";
+}
+
+function ensurePromptHistory(node) {
+    const editor = node?.__h3Editor;
+    if (!editor) return null;
+    if (node.__h3PromptHistory) return node.__h3PromptHistory;
+    const doc = clonePromptDoc(serializeEditorDoc(editor));
+    node.__h3PromptHistory = {
+        undo: [{ doc }],
+        redo: [],
+        lastKey: promptDocKey(doc),
+        applying: false,
+    };
+    return node.__h3PromptHistory;
+}
+
+function resetPromptHistory(node) {
+    node.__h3PromptHistory = null;
+    ensurePromptHistory(node);
+}
+
+function pushPromptHistory(node) {
+    const history = ensurePromptHistory(node);
+    const editor = node?.__h3Editor;
+    if (!history || !editor || history.applying) return;
+    const doc = clonePromptDoc(serializeEditorDoc(editor));
+    const key = promptDocKey(doc);
+    if (key === history.lastKey) return;
+    history.undo.push({ doc });
+    if (history.undo.length > PROMPT_HISTORY_LIMIT) history.undo.shift();
+    history.redo = [];
+    history.lastKey = key;
+}
+
+function setEditorCaretAtEnd(editor) {
+    if (!editor) return;
+    const selection = window.getSelection?.();
+    if (!selection) return;
+    const range = document.createRange();
+    range.selectNodeContents(editor);
+    range.collapse(false);
+    selection.removeAllRanges();
+    selection.addRange(range);
+}
+
+function applyPromptHistoryEntry(node, entry) {
+    const history = node?.__h3PromptHistory;
+    const editor = node?.__h3Editor;
+    const widget = getWidget(node, "prompt");
+    if (!history || !editor || !entry?.doc || !widget) return false;
+    history.applying = true;
+    try {
+        const doc = clonePromptDoc(entry.doc);
+        node.properties ||= {};
+        node.properties[PROMPT_DOC_PROP] = doc;
+        widget.value = doc.text;
+        if (widget._state) widget._state.value = doc.text;
+        renderEditorFromNode(node, true);
+        syncPromptFromEditor(node, false);
+        history.lastKey = promptDocKey(doc);
+    } finally {
+        history.applying = false;
+    }
+    closeMentionMenu(node);
+    editor.focus();
+    setEditorCaretAtEnd(editor);
+    return true;
+}
+
+function handlePromptHistoryKeydown(node, event) {
+    if (!isPromptUndoRedoEvent(event)) return false;
+    event.preventDefault?.();
+    event.stopPropagation?.();
+    event.stopImmediatePropagation?.();
+    const history = ensurePromptHistory(node);
+    if (!history) return true;
+    const key = String(event.key || "").toLowerCase();
+    const isRedo = key === "y" || String(event.code || "") === "KeyY" || (key === "z" && event.shiftKey);
+    if (isRedo) {
+        const entry = history.redo.pop();
+        if (!entry) return true;
+        history.undo.push(entry);
+        applyPromptHistoryEntry(node, entry);
+        return true;
+    }
+    if (history.undo.length <= 1) return true;
+    const current = history.undo.pop();
+    if (current) history.redo.push(current);
+    applyPromptHistoryEntry(node, history.undo[history.undo.length - 1]);
+    return true;
+}
+
+function handlePromptUndoRedoCapture(event) {
+    if (!isPromptUndoRedoEvent(event)) return;
+    const node = editorPromptNode(editorFromEvent(event));
+    if (node && !node.__h3PromptComposing) {
+        pushPromptHistory(node);
+        handlePromptHistoryKeydown(node, event);
+    }
+}
+
+function handlePromptHistoryBeforeInputCapture(event) {
+    if (event?.inputType !== "historyUndo" && event?.inputType !== "historyRedo") return;
+    const node = editorPromptNode(editorFromEvent(event));
+    if (!node || node.__h3PromptComposing) return;
+    const isRedo = event.inputType === "historyRedo";
+    pushPromptHistory(node);
+    handlePromptHistoryKeydown(node, {
+        ctrlKey: true,
+        metaKey: false,
+        shiftKey: isRedo,
+        key: isRedo ? "y" : "z",
+        code: isRedo ? "KeyY" : "KeyZ",
+        preventDefault: () => event.preventDefault?.(),
+        stopPropagation: () => event.stopPropagation?.(),
+        stopImmediatePropagation: () => event.stopImmediatePropagation?.(),
+    });
+}
+
+function ensurePromptUndoRedoShield() {
+    if (globalThis.__H3_PROMPT_UNDO_SHIELD_INSTALLED || typeof window === "undefined") return;
+    globalThis.__H3_PROMPT_UNDO_SHIELD_INSTALLED = true;
+    globalThis.__H3_PROMPT_UNDO_VERSION = PROMPT_UNDO_VERSION;
+    window.addEventListener("keydown", handlePromptUndoRedoCapture, true);
+    window.addEventListener("pointerdown", (event) => {
+        const editor = event?.target?.closest?.(".h3-prompt-editor");
+        activePromptNode = editorPromptNode(editor);
+    }, true);
+    document.addEventListener("focusin", (event) => {
+        const editor = event?.target?.closest?.(".h3-prompt-editor");
+        activePromptNode = editorPromptNode(editor);
+    }, true);
+    document.addEventListener("beforeinput", handlePromptHistoryBeforeInputCapture, true);
+}
+
+function patchLiteGraphPromptProcessKey() {
+    if (globalThis.__H3_PROMPT_PROCESS_KEY_PATCHED || !globalThis.LGraphCanvas?.prototype) return;
+    const proto = globalThis.LGraphCanvas.prototype;
+    const originalProcessKey = proto.processKey;
+    if (typeof originalProcessKey !== "function") return;
+    globalThis.__H3_PROMPT_PROCESS_KEY_PATCHED = true;
+    proto.processKey = function processKeyH3PromptEditorShield(event) {
+        const node = editorPromptNode(editorFromEvent(event));
+        if (node && isPromptUndoRedoEvent(event)) {
+            pushPromptHistory(node);
+            handlePromptHistoryKeydown(node, event);
+            return;
+        }
+        return originalProcessKey.apply(this, arguments);
+    };
+}
+
+function preparePromptEditorForUndo(editor) {
+    if (!editor) return;
+    if (editor.__h3UndoPrepared && editor.dataset?.h3UndoVersion === PROMPT_UNDO_VERSION) return;
+    editor.setAttribute("data-h3-undo-version", PROMPT_UNDO_VERSION);
+    try {
+        Object.defineProperty(editor, "type", {
+            value: "textarea",
+            configurable: true,
+        });
+    } catch {
+        editor.type = "textarea";
+    }
+    editor.__h3UndoPrepared = true;
+}
+
+function getMentionRange(editor) {
+    const selection = window.getSelection?.();
+    if (!selection || !selection.rangeCount || !selection.isCollapsed) return null;
+    const caret = selection.getRangeAt(0);
+    if (!editor.contains(caret.startContainer)) return null;
+    if (caret.startContainer.parentElement?.closest?.(`.${DIALOGUE_CLASS}`)) return null;
+    // Mention chips are contentEditable=false elements whose visible text also
+    // contains an "@". Reading cloneContents().textContent therefore made a
+    // normal character typed after an existing chip look like an active @ query.
+    // Build a small editable-text stream instead, treating chips and line breaks
+    // as hard boundaries.
+    const units = [];
+    const visit = (node) => {
+        if (node.nodeType === Node.TEXT_NODE) {
+            if (!node.parentElement?.closest?.(".h3-mention-chip")) units.push({ kind: "text", node });
+            return;
+        }
+        if (node.nodeType !== Node.ELEMENT_NODE) return;
+        if (isDialogueBlock(node)) {
+            units.push({ kind: "dialogue", node });
+            return;
+        }
+        if (node.classList?.contains("h3-mention-chip")) {
+            units.push({ kind: "chip", node });
+            return;
+        }
+        if (node.tagName === "BR") {
+            units.push({ kind: "break", node });
+            return;
+        }
+        for (const child of node.childNodes || []) visit(child);
+    };
+    visit(editor);
+
+    if (caret.startContainer.nodeType !== Node.TEXT_NODE) return null;
+    const currentIndex = units.findIndex((unit) => unit.kind === "text" && unit.node === caret.startContainer);
+    if (currentIndex < 0) return null;
+
+    const selected = [];
+    for (let index = currentIndex; index >= 0; index -= 1) {
+        const unit = units[index];
+        if (unit.kind !== "text") break;
+        const end = index === currentIndex ? caret.startOffset : (unit.node.textContent || "").length;
+        selected.unshift({ unit, text: (unit.node.textContent || "").slice(0, end) });
+    }
+    const before = selected.map((entry) => entry.text).join("");
+    const match = before.match(/@[^@\n]*$/);
+    if (!match) return null;
+
+    const targetStart = before.length - match[0].length;
+    let offset = 0;
+    const range = document.createRange();
+    for (const entry of selected) {
+        const next = offset + entry.text.length;
+        if (targetStart <= next) {
+            range.setStart(entry.unit.node, Math.max(0, targetStart - offset));
+            break;
+        }
+        offset = next;
+    }
+    range.setEnd(caret.startContainer, caret.startOffset);
+    // Vue node rendering keeps a zero-width caret sentinel beside editable
+    // text. It must not become part of the search term after typing `@`, or an
+    // otherwise populated media menu is filtered down to zero matches.
+    return { range, query: match[0].slice(1).replaceAll(CARET_SENTINEL, "") };
+}
+
+function closeMentionMenu(node) {
+    const menu = node?.__h3MentionMenu;
+    menu?.element?.remove?.();
+    if (node) node.__h3MentionMenu = null;
+}
+
+function dialogueBlockAtSelection(editor) {
+    const selection = window.getSelection?.();
+    if (!selection || !selection.rangeCount) return null;
+    const container = selection.getRangeAt(0).startContainer;
+    const element = container.nodeType === Node.ELEMENT_NODE ? container : container.parentElement;
+    const block = element?.closest?.(`.${DIALOGUE_CLASS}`);
+    return block && editor.contains(block) ? block : null;
+}
+
+function dialogueBoundary(block, side) {
+    if (!block?.parentNode) return null;
+    const sibling = side === "before" ? block.previousSibling : block.nextSibling;
+    if (isCaretSentinelText(sibling)) return sibling;
+    const marker = makeCaretSentinel();
+    block.parentNode.insertBefore(marker, side === "before" ? block : block.nextSibling);
+    return marker;
+}
+
+function setCaretAtEndOfNode(node) {
+    if (!node) return;
+    const selection = window.getSelection?.();
+    if (!selection) return;
+    const range = document.createRange();
+    let target = node;
+    while (target?.lastChild) target = target.lastChild;
+    if (target?.nodeType === Node.TEXT_NODE) {
+        range.setStart(target, target.textContent.length);
+    } else if (target?.parentNode && target !== node) {
+        range.setStartAfter(target);
+    } else {
+        range.setStart(node, node.childNodes.length);
+    }
+    range.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(range);
+}
+
+function exitDialogueBlock(node, editor, block) {
+    const marker = dialogueBoundary(block, "after");
+    if (!marker) return false;
+    const text = String(marker.textContent || "");
+    const index = text.indexOf(CARET_SENTINEL);
+    editor.focus({ preventScroll: true });
+    setCaretAtNode(marker, index >= 0 ? index + CARET_SENTINEL.length : text.length);
+    closeMentionMenu(node);
+    return true;
+}
+
+function insertDialogueBlockAtSelection(node, editor) {
+    const selection = window.getSelection?.();
+    if (!selection || !selection.rangeCount || !editor) return false;
+    const range = selection.getRangeAt(0);
+    if (!editor.contains(range.commonAncestorContainer)) return false;
+    if (dialogueBlockAtSelection(editor)) return false;
+    range.deleteContents();
+    const before = makeCaretSentinel();
+    const block = makeDialogueBlock("");
+    const after = makeCaretSentinel();
+    const fragment = document.createDocumentFragment();
+    fragment.append(before, block, after);
+    range.insertNode(fragment);
+    editor.focus({ preventScroll: true });
+    setCaretAtEndOfNode(block);
+    closeMentionMenu(node);
+    return true;
+}
+
+function findDialogueAcrossWhitespace(start, root, direction) {
+    let current = start;
+    const skipped = [];
+    while (current) {
+        if (isDialogueBlock(current)) return { block: current, skipped };
+        if (isIgnorableTextNode(current)) {
+            skipped.push(current);
+            current = adjacentLeaf(current, root, direction);
+            continue;
+        }
+        return null;
+    }
+    return null;
+}
+
+function deleteLastDialogueContent(block) {
+    const leaves = [];
+    const visit = (node) => {
+        if (node.nodeType === Node.TEXT_NODE) {
+            leaves.push(node);
+            return;
+        }
+        if (node.nodeType === Node.ELEMENT_NODE && node.tagName === "BR") {
+            leaves.push(node);
+            return;
+        }
+        for (const child of node.childNodes || []) visit(child);
+    };
+    for (const child of block.childNodes || []) visit(child);
+    for (let index = leaves.length - 1; index >= 0; index -= 1) {
+        const leaf = leaves[index];
+        if (leaf.nodeType === Node.TEXT_NODE) {
+            if (deleteLastVisibleChar(leaf)) {
+                setCaretAtEndOfNode(block);
+                return true;
+            }
+            if (!leaf.textContent) leaf.remove();
+            continue;
+        }
+        if (leaf.nodeType === Node.ELEMENT_NODE && leaf.tagName === "BR") {
+            const next = leaf.nextSibling;
+            leaf.remove();
+            if (isOnlyCaretSentinelText(next)) next.remove();
+            setCaretAtEndOfNode(block);
+            return true;
+        }
+    }
+    ensureDialogueInnerCaret(block);
+    setCaretAtEndOfNode(block);
+    return false;
+}
+
+function removeDialogueBlock(block) {
+    if (!block?.parentNode) return false;
+    const parent = block.parentNode;
+    const before = block.previousSibling;
+    const after = block.nextSibling;
+    let marker = isCaretSentinelText(before) ? before : null;
+    if (!marker) {
+        marker = makeCaretSentinel();
+        parent.insertBefore(marker, block);
+    }
+    block.remove();
+    if (after !== marker && isOnlyCaretSentinelText(after)) after.remove();
+    setCaretAtNode(marker, marker.textContent.length);
+    return true;
+}
+
+function backspaceDialogueBoundary(editor, node) {
+    const selection = window.getSelection?.();
+    if (!selection || !selection.rangeCount || !selection.isCollapsed) return false;
+    const activeBlock = dialogueBlockAtSelection(editor);
+    if (activeBlock) {
+        if (!dialogueBlockText(activeBlock)) {
+            const removed = removeDialogueBlock(activeBlock);
+            if (removed) closeMentionMenu(node);
+            return removed;
+        }
+        return false;
+    }
+    const range = selection.getRangeAt(0);
+    if (!editor.contains(range.startContainer)) return false;
+    const scan = getDeletionScanStart(range, editor, "backward");
+    if (!scan) return false;
+    const found = findDialogueAcrossWhitespace(scan.start, editor, "backward");
+    if (!found?.block) return false;
+    for (const skipped of found.skipped) skipped.remove?.();
+    const block = found.block;
+    if (dialogueBlockText(block)) {
+        if (!deleteLastDialogueContent(block)) return false;
+        closeMentionMenu(node);
+        return true;
+    }
+    const removed = removeDialogueBlock(block);
+    if (removed) closeMentionMenu(node);
+    return removed;
+}
+
+function positionMentionMenu(element, editor) {
+    const selection = window.getSelection?.();
+    const caret = selection?.rangeCount ? selection.getRangeAt(0).getBoundingClientRect() : null;
+    const editorRect = editor.getBoundingClientRect();
+    const rect = caret && (caret.width || caret.height) ? caret : editorRect;
+    const width = Math.min(280, Math.max(198, element.offsetWidth || 198));
+    const height = Math.min(360, element.offsetHeight || 120);
+    let left = rect.left;
+    let top = rect.bottom + 6;
+    if (left + width > window.innerWidth - 8) left = window.innerWidth - width - 8;
+    if (top + height > window.innerHeight - 8) top = Math.max(8, rect.top - height - 6);
+    element.style.left = `${Math.max(8, Math.round(left))}px`;
+    element.style.top = `${Math.max(8, Math.round(top))}px`;
+}
+
+function chooseMention(node, option) {
+    const state = node?.__h3MentionMenu;
+    const range = state?.mention?.range;
+    const editor = node?.__h3Editor;
+    if (!range || !editor) return;
+    range.deleteContents();
+    const before = document.createTextNode("\u200B");
+    const chip = makeMentionChip(option);
+    const after = document.createTextNode("\u200B");
+    const fragment = document.createDocumentFragment();
+    fragment.append(before, chip, after);
+    range.insertNode(fragment);
+    const selection = window.getSelection?.();
+    if (selection) {
+        const caret = document.createRange();
+        caret.setStart(after, after.textContent.length);
+        caret.collapse(true);
+        selection.removeAllRanges();
+        selection.addRange(caret);
+    }
+    closeMentionMenu(node);
+    syncPromptFromEditor(node);
+    pushPromptHistory(node);
+    editor.focus();
+}
+
+function renderMentionMenu(node) {
+    const state = node?.__h3MentionMenu;
+    if (!state) return;
+    const { element, options, activeIndex } = state;
+    element.textContent = "";
+    const title = document.createElement("div");
+    title.className = "h3-mention-menu-title";
+    title.textContent = TEXT.mentionTitle;
+    element.append(title);
+    if (!options.length) {
+        const empty = document.createElement("div");
+        empty.className = "h3-mention-menu-empty";
+        empty.textContent = TEXT.mentionEmpty;
+        element.append(empty);
+        return;
+    }
+    options.forEach((option, index) => {
+        const item = document.createElement("div");
+        item.className = `h3-mention-menu-item${index === activeIndex ? " is-active" : ""}`;
+        const main = document.createElement("div");
+        main.className = "h3-mention-menu-main";
+        main.textContent = option.label;
+        main.title = option.fullLabel || option.label || "";
+        const detail = document.createElement("div");
+        detail.className = "h3-mention-menu-detail";
+        detail.textContent = option.source;
+        const text = document.createElement("div");
+        text.append(main, detail);
+        item.append(makeMentionThumb(option, true), text);
+        item.addEventListener("pointermove", () => {
+            if (!node.__h3MentionMenu || node.__h3MentionMenu.activeIndex === index) return;
+            node.__h3MentionMenu.activeIndex = index;
+            renderMentionMenu(node);
+        });
+        item.addEventListener("pointerdown", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            chooseMention(node, option);
+        });
+        element.append(item);
+    });
+}
+
+function openMentionMenu(node, editor) {
+    if (!isReferenceMode(node)) {
+        closeMentionMenu(node);
+        return false;
+    }
+    const mention = getMentionRange(editor);
+    if (!mention) {
+        closeMentionMenu(node);
+        return false;
+    }
+    const query = mention.query.toLowerCase();
+    const options = mentionOptions(node).filter((option) => !query || `${option.label} ${option.fullLabel || ""} ${option.source}`.toLowerCase().includes(query));
+    const existing = node.__h3MentionMenu;
+    if (existing) {
+        existing.mention = mention;
+        existing.options = options;
+        existing.activeIndex = Math.min(existing.activeIndex, Math.max(0, options.length - 1));
+        renderMentionMenu(node);
+        positionMentionMenu(existing.element, editor);
+        return true;
+    }
+    const element = document.createElement("div");
+    element.className = "h3-mention-menu";
+    element.dataset.feihouNodeId = String(node.id ?? "");
+    element.dataset.optionCount = String(options.length);
+    element.dataset.query = query;
+    applyNativeEditorTheme(element);
+    document.body.append(element);
+    node.__h3MentionMenu = { element, mention, options, activeIndex: 0 };
+    renderMentionMenu(node);
+    positionMentionMenu(element, editor);
+    return true;
+}
+
+function syncMentionMenuToCaret(node, editor) {
+    if (!isReferenceMode(node) || !getMentionRange(editor)) {
+        closeMentionMenu(node);
+        return false;
+    }
+    return openMentionMenu(node, editor);
+}
+
+function setWidgetOption(widget, key, value) {
+    if (!widget) return;
+    widget.options ||= {};
+    if (value === undefined) delete widget.options[key];
+    else widget.options[key] = value;
+    if (widget._state?.options) {
+        if (value === undefined) delete widget._state.options[key];
+        else widget._state.options[key] = value;
+    }
+}
+
+function isVueNodesMode() {
+    return Boolean(globalThis.LiteGraph?.vueNodesMode);
+}
+
+function applyNativeEditorTheme(element) {
+    if (!element?.style) return;
+    const LiteGraph = globalThis.LiteGraph || {};
+    const modern = isVueNodesMode();
+    const widgetBg = LiteGraph.WIDGET_BGCOLOR || "#222";
+    const widgetText = LiteGraph.WIDGET_TEXT_COLOR || "#ddd";
+    const outline = LiteGraph.WIDGET_OUTLINE_COLOR || "rgba(255, 255, 255, 0.18)";
+    const menuBg = LiteGraph.NODE_DEFAULT_BGCOLOR || "#1f1f1f";
+    const signature = `${modern ? 1 : 0}|${widgetBg}|${widgetText}|${outline}|${menuBg}`;
+    if (element.__h3NativeThemeSignature === signature) return;
+    element.__h3NativeThemeSignature = signature;
+    element.classList?.toggle("h3-native-vue-nodes", modern);
+    element.classList?.toggle("h3-native-legacy-nodes", !modern);
+    if (modern) {
+        element.style.setProperty("--h3-native-widget-bg", "var(--component-node-widget-background, var(--secondary-background, #222))");
+        element.style.setProperty("--h3-native-widget-text", "var(--component-node-foreground, var(--base-foreground, #ddd))");
+        element.style.setProperty("--h3-native-widget-outline", "var(--component-node-widget-background-highlighted, var(--border-default, rgba(255, 255, 255, 0.18)))");
+        element.style.setProperty("--h3-native-widget-focus", "var(--component-node-widget-background-highlighted, var(--border-default, rgba(255, 255, 255, 0.28)))");
+        element.style.setProperty("--h3-native-widget-muted", "var(--component-node-foreground-secondary, var(--muted-foreground, rgba(255, 255, 255, 0.42)))");
+        element.style.setProperty("--h3-native-menu-bg", "var(--component-node-widget-background, var(--comfy-menu-bg, #1f1f1f))");
+        element.style.setProperty("--h3-native-widget-radius", "var(--radius-lg, 8px)");
+        element.style.setProperty("--h3-native-widget-padding", "8px 12px");
+        element.style.setProperty("--h3-native-widget-line-height", "var(--text-xs--line-height, 1.3333333)");
+        element.style.setProperty("--h3-native-widget-text-size", "var(--text-xs, var(--comfy-textarea-font-size, 12px))");
+        return;
+    }
+    element.style.setProperty("--h3-native-widget-bg", `var(--comfy-input-bg, ${widgetBg})`);
+    element.style.setProperty("--h3-native-widget-text", `var(--input-text, ${widgetText})`);
+    element.style.setProperty("--h3-native-widget-outline", `var(--border-color, ${outline})`);
+    element.style.setProperty("--h3-native-widget-focus", `var(--border-color, ${outline})`);
+    element.style.setProperty("--h3-native-widget-muted", "rgba(255, 255, 255, 0.42)");
+    element.style.setProperty("--h3-native-menu-bg", `var(--comfy-menu-bg, ${menuBg})`);
+    element.style.setProperty("--h3-native-widget-radius", "0px");
+    element.style.setProperty("--h3-native-widget-padding", "2px");
+    element.style.setProperty("--h3-native-widget-line-height", "normal");
+    element.style.setProperty("--h3-native-widget-text-size", "var(--comfy-textarea-font-size, 12px)");
+}
+
+function syncEditorThemes(force = false) {
+    const modern = isVueNodesMode();
+    if (!force && lastVueNodesMode === modern) return;
+    lastVueNodesMode = modern;
+    for (const node of app.graph?._nodes || []) {
+        if (!isTarget(node)) continue;
+        applyNativeEditorTheme(node.__h3EditorWrap);
+        applyNativeEditorTheme(node.__h3MentionMenu?.element);
+    }
+    app.graph?.setDirtyCanvas?.(true, true);
+}
+
+function installNativeThemeWatcher() {
+    if (nativeThemeWatcherInstalled) return;
+    nativeThemeWatcherInstalled = true;
+    lastVueNodesMode = null;
+    setInterval(() => syncEditorThemes(), 1000);
+    for (const delay of [0, 60, 180]) setTimeout(() => syncEditorThemes(true), delay);
+}
+
+function patchEditorKeyHandling() {
+    const proto = globalThis.LGraphCanvas?.prototype;
+    if (!proto || proto.__h3PromptKeyHandlingPatched || typeof proto.processKey !== "function") return;
+    proto.__h3PromptKeyHandlingPatched = true;
+    const original = proto.processKey;
+    proto.processKey = function processKeyWithH3PromptEditor(event) {
+        const editor = event?.target?.closest?.(".h3-prompt-editor")
+            || document.activeElement?.closest?.(".h3-prompt-editor")
+            || activePromptNode?.__h3Editor;
+        if (editor) {
+            const node = editorPromptNode(editor);
+            if (node && isPromptUndoRedoEvent(event)) handlePromptHistoryKeydown(node, event);
+            return;
+        }
+        return original.apply(this, arguments);
+    };
+}
+
+function hideOriginalPromptWidget(widget) {
+    if (!widget) return;
+    if (!widget.__h3PromptHidden) {
+        widget.__h3PromptHidden = true;
+        widget.__h3OriginalType = widget.type;
+        widget.__h3OriginalComputeSize = widget.computeSize;
+        widget.__h3OriginalHidden = widget.hidden;
+        widget.__h3OriginalOptionsHidden = widget.options?.hidden;
+        widget.__h3OriginalOptionsCanvasOnly = widget.options?.canvasOnly;
+    }
+    widget.hidden = true;
+    setWidgetOption(widget, "hidden", true);
+    setWidgetOption(widget, "canvasOnly", true);
+    widget.type = "hidden";
+    widget.computeSize = () => [0, -4];
+}
+
+function restoreOriginalPromptWidget(widget) {
+    if (!widget?.__h3PromptHidden) return;
+    widget.type = widget.__h3OriginalType || "customtext";
+    widget.computeSize = widget.__h3OriginalComputeSize || (() => [220, 120]);
+    widget.hidden = widget.__h3OriginalHidden ?? false;
+    setWidgetOption(widget, "hidden", widget.__h3OriginalOptionsHidden);
+    setWidgetOption(widget, "canvasOnly", widget.__h3OriginalOptionsCanvasOnly);
+    widget.__h3PromptHidden = false;
+}
+
+function hideDomEditorWidget(widget) {
+    if (!widget) return;
+    if (!widget.__h3EditorHidden) {
+        widget.__h3EditorHidden = true;
+        widget.__h3EditorType = widget.type;
+        widget.__h3EditorComputeSize = widget.computeSize;
+    }
+    widget.hidden = true;
+    setWidgetOption(widget, "hidden", true);
+    widget.type = "hidden";
+    widget.computeSize = () => [0, -4];
+}
+
+function showDomEditorWidget(widget) {
+    if (!widget?.__h3EditorHidden) return;
+    widget.type = widget.__h3EditorType || "h3_prompt_mentions";
+    widget.computeSize = widget.__h3EditorComputeSize || (() => [220, 96]);
+    widget.hidden = false;
+    setWidgetOption(widget, "hidden", false);
+    widget.__h3EditorHidden = false;
+}
+
+function refreshVueNodeWidgets(node) {
+    if (!Array.isArray(node?.widgets)) return;
+    const widgets = [...node.widgets];
+    try {
+        if (isVueNodesMode()) node.widgets = [];
+        node.widgets = widgets;
+    } catch { /* Some frontends expose widgets as a read-only field. */ }
+}
+
+function getConditionalWidgetHeight(node, widget) {
+    if (!widget) return Number(globalThis.LiteGraph?.NODE_WIDGET_HEIGHT) || 20;
+    const storedHeight = Number(widget.__h3ConditionalRowHeight);
+    if (Number.isFinite(storedHeight) && storedHeight > 0) return storedHeight;
+    const measure = widget.__h3ConditionalOrigComputeSize || widget.computeSize;
+    try {
+        const measured = measure?.call(widget, Math.max(80, Number(node?.size?.[0]) || 220));
+        const height = Number(measured?.[1]);
+        if (Number.isFinite(height) && height > 0) {
+            widget.__h3ConditionalRowHeight = height;
+            return height;
+        }
+    } catch { /* Use the standard row height when a widget cannot be measured. */ }
+    const height = Number(widget.computedHeight) > 0
+        ? Number(widget.computedHeight)
+        : Number(globalThis.LiteGraph?.NODE_WIDGET_HEIGHT) || 20;
+    widget.__h3ConditionalRowHeight = height;
+    return height;
+}
+
+function adjustNodeHeight(node, delta) {
+    if (!node?.size || !Number.isFinite(delta) || !delta) return;
+    const width = Number(node.size[0]) || 0;
+    const beforeHeight = Number(node.size[1]) || 0;
+    const nextHeight = Math.max(0, beforeHeight + delta);
+    const nextSize = [width, nextHeight];
+    node.setSize?.(nextSize);
+    if (node.size) {
+        node.size[0] = width;
+        node.size[1] = nextHeight;
+    } else {
+        node.size = nextSize;
+    }
+    node._widgetSlotsDirty = true;
+    node.setDirtyCanvas?.(true, true);
+    node.graph?.setDirtyCanvas?.(true, true);
+    app.graph?.setDirtyCanvas?.(true, true);
+}
+
+function setNodeSizeExact(node, size) {
+    if (!node || !Array.isArray(size) || size.length < 2) return false;
+    const width = Number(size[0]);
+    const height = Number(size[1]);
+    if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return false;
+    const nextSize = [width, height];
+    node.setSize?.(nextSize);
+    if (Array.isArray(node.size)) {
+        node.size[0] = width;
+        node.size[1] = height;
+    } else {
+        node.size = nextSize;
+    }
+    node._widgetSlotsDirty = true;
+    node.setDirtyCanvas?.(true, true);
+    node.graph?.setDirtyCanvas?.(true, true);
+    app.graph?.setDirtyCanvas?.(true, true);
+    return true;
+}
+
+function restorePromptEditorStableSize(node) {
+    const stableSize = Array.isArray(node?.__h3EditorStableSize) ? [...node.__h3EditorStableSize] : null;
+    if (!stableSize || stableSize.length < 2) return false;
+    const restored = setNodeSizeExact(node, stableSize);
+    if (restored) node.__h3EditorStableSize = null;
+    return restored;
+}
+
+function hideConditionalWidget(widget) {
+    if (!widget) return false;
+    let compactSize = false;
+    try {
+        const measured = widget.computeSize?.();
+        compactSize = Number(measured?.[0]) === 0 && Number(measured?.[1]) === -4;
+    } catch { /* The widget may not expose a measurable size yet. */ }
+    const wasVisible = widget.hidden !== true
+        || widget.options?.hidden !== true
+        || widget.type !== "hidden"
+        || !compactSize;
+    const originalType = widget.type;
+    const originalComputeSize = widget.computeSize;
+    const originalHidden = widget.hidden;
+    if (widget.type !== "hidden" && widget.type !== "converted-widget") widget.__h3ConditionalOrigType = widget.type;
+    if (!Object.prototype.hasOwnProperty.call(widget, "__h3ConditionalOrigComputeSize")) {
+        widget.__h3ConditionalOrigComputeSize = originalComputeSize;
+        widget.__h3ConditionalHadComputeSize = Object.prototype.hasOwnProperty.call(widget, "computeSize");
+        widget.__h3ConditionalOrigHidden = originalHidden;
+        widget.__h3ConditionalOrigOptionsHidden = widget.options?.hidden;
+        widget.__h3ConditionalOrigOptionsCanvasOnly = widget.options?.canvasOnly;
+        widget.__h3ConditionalOrigComputedHeight = widget.computedHeight;
+        widget.__h3ConditionalHadComputedHeight = Object.prototype.hasOwnProperty.call(widget, "computedHeight");
+    }
+    widget.hidden = true;
+    if (widget.inputEl) widget.inputEl.style.display = "none";
+    if (widget.element) widget.element.style.display = "none";
+    widget.type = "hidden";
+    widget.computeSize = () => [0, -4];
+    widget.computedHeight = 0;
+    setWidgetOption(widget, "hidden", true);
+    setWidgetOption(widget, "canvasOnly", true);
+    if (widget._state) {
+        widget._state.hidden = true;
+        widget._state.type = "hidden";
+        widget._state.computedHeight = 0;
+    }
+    return wasVisible;
+}
+
+function showConditionalWidget(widget) {
+    if (!widget) return false;
+    const wasHidden = widget.type === "hidden"
+        || widget.hidden === true
+        || widget.options?.hidden === true
+        || widget._state?.type === "hidden"
+        || widget._state?.hidden === true
+        || widget._state?.options?.hidden === true;
+    if (!wasHidden) return false;
+    widget.hidden = widget.__h3ConditionalOrigHidden ?? false;
+    if (widget.inputEl) widget.inputEl.style.display = "";
+    if (widget.element) widget.element.style.display = "";
+    if (widget.type === "hidden") widget.type = widget.__h3ConditionalOrigType || "combo";
+    if (widget.__h3ConditionalHadComputeSize) widget.computeSize = widget.__h3ConditionalOrigComputeSize;
+    else delete widget.computeSize;
+    if (widget.__h3ConditionalHadComputedHeight) widget.computedHeight = widget.__h3ConditionalOrigComputedHeight;
+    else delete widget.computedHeight;
+    setWidgetOption(widget, "hidden", false);
+    setWidgetOption(widget, "canvasOnly", false);
+    if (widget._state) {
+        widget._state.hidden = widget.hidden;
+        widget._state.type = widget.type;
+        if (widget.__h3ConditionalHadComputedHeight) widget._state.computedHeight = widget.computedHeight;
+        else delete widget._state.computedHeight;
+        widget._state.options ||= {};
+        if (widget.options?.hidden === undefined) delete widget._state.options.hidden;
+        else widget._state.options.hidden = widget.options.hidden;
+        if (widget.options?.canvasOnly === undefined) delete widget._state.options.canvasOnly;
+        else widget._state.options.canvasOnly = widget.options.canvasOnly;
+    }
+    localizeComboWidget(widget);
+    return wasHidden;
+}
+
+function setConditionalWidgetVisible(node, widget, visible, { adjustHeight = true } = {}) {
+    if (!widget) return false;
+    node.__h3ConditionalVisibility ||= new Map();
+    const key = String(widget.name || widget.label || node.widgets?.indexOf(widget) || "widget");
+    const previousTarget = node.__h3ConditionalVisibility.get(key);
+    const rowHeight = getConditionalWidgetHeight(node, widget);
+    // A hidden ComfyUI widget still contributes -4 px through computeSize().
+    // Showing a row therefore needs rowHeight + 4 px, not just rowHeight;
+    // otherwise the flexible prompt editor is compressed a little for every
+    // expanded setting row instead of the node extending downward.
+    const layoutDelta = rowHeight + 4;
+    const changed = visible ? showConditionalWidget(widget) : hideConditionalWidget(widget);
+    node.__h3ConditionalVisibility.set(key, Boolean(visible));
+    if (!changed) return false;
+    // Change height only when the desired state actually changed. ComfyUI may
+    // reconstruct widget visibility while switching workflow tabs; that is a
+    // visual reset, not a user-requested row insertion/removal, and must not
+    // grow the node again.
+    if (adjustHeight && (previousTarget === undefined || previousTarget !== Boolean(visible))) {
+        adjustNodeHeight(node, visible ? layoutDelta : -layoutDelta);
+    }
+    refreshVueNodeWidgets(node);
+    node._widgetSlotsDirty = true;
+    return true;
+}
+
+function syncModeWidgets(node, { adjustHeight = true } = {}) {
+    const advanced = isAdvancedEnabled(node);
+    const changed = [
+        setConditionalWidgetVisible(node, getWidget(node, "fps"), advanced, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "keyframe_role"), advanced && !isReferenceMode(node), { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "ref_image_size"), advanced, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "reference_mention_mode"), advanced && isReferenceMode(node), { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "prompt_optimizer_provider"), advanced, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "prompt_optimizer_scene_guide"), advanced, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "aspect_ratio"), !isCustomResolution(node), { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "width"), isCustomResolution(node), { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "height"), isCustomResolution(node), { adjustHeight }),
+    ].some(Boolean);
+    if (changed) {
+        refreshVueNodeWidgets(node);
+        node._widgetSlotsDirty = true;
+        node.setDirtyCanvas?.(true, true);
+        app.graph?.setDirtyCanvas?.(true, true);
+    }
+    return changed;
+}
+
+function repairNodeLayout(node) {
+    if (!node) return;
+    const run = () => {
+        refreshVueNodeWidgets(node);
+        node._widgetSlotsDirty = true;
+        node.setDirtyCanvas?.(true, true);
+        app.graph?.setDirtyCanvas?.(true, true);
+    };
+    if (typeof requestAnimationFrame === "function") requestAnimationFrame(run);
+    else setTimeout(run, 0);
+}
+
+function syncPromptViewButton(node) {
+    const button = node?.__h3PromptViewButton;
+    if (!button) return;
+    const raw = isRawPromptMode(node);
+    const label = raw ? TEXT.showStructuredPrompt : TEXT.showRawPrompt;
+    button.textContent = raw ? "@" : "</>";
+    button.title = label;
+    button.setAttribute("aria-label", label);
+    button.setAttribute("aria-pressed", raw ? "true" : "false");
+    // The icon already communicates the current view. Keep the button's
+    // visual treatment identical in both modes instead of adding a colored
+    // active border in raw-prompt mode.
+    button.classList.remove("is-active");
+}
+
+function togglePromptView(node) {
+    const editor = node?.__h3Editor;
+    if (!editor) return;
+    const raw = isRawPromptMode(node);
+    if (!raw) syncPromptFromEditor(node, false);
+    else if (node.__h3RawPromptNeedsSync) syncPromptFromEditor(node, false);
+    setPromptViewMode(node, raw ? PROMPT_VIEW_STRUCTURED : PROMPT_VIEW_RAW);
+    node.__h3RawPromptNeedsSync = false;
+    renderEditorFromNode(node, true);
+    syncEditorMode(node);
+    editor.focus({ preventScroll: true });
+    setEditorCaretAtEnd(editor);
+    node.setDirtyCanvas?.(true, true);
+    app.graph?.setDirtyCanvas?.(true, true);
+}
+
+function normalizePromptOptimizerSettings(value) {
+    const source = value && typeof value === "object" ? value : {};
+    const providers = Array.isArray(source.providers) ? source.providers.map((item, index) => {
+        const provider = item && typeof item === "object" ? item : {};
+        const apiFormat = ["openai", "gemini", "ollama"].includes(String(provider.api_format || "").toLowerCase())
+            ? String(provider.api_format).toLowerCase()
+            : "openai";
+        return {
+            id: String(provider.id || `provider_${index + 1}`),
+            name: String(provider.name || provider.id || `Provider ${index + 1}`),
+            api_format: apiFormat,
+            api_url: String(provider.api_url || "").trim(),
+            api_key: String(provider.api_key || ""),
+            api_key_exists: asBoolean(provider.api_key_exists, Boolean(provider.api_key)),
+            api_key_masked: String(provider.api_key_masked || ""),
+            llm_models: Array.isArray(provider.llm_models) ? provider.llm_models.map(String).filter(Boolean) : [],
+            vlm_models: Array.isArray(provider.vlm_models) ? provider.vlm_models.map(String).filter(Boolean) : [],
+            llm_model: String(provider.llm_model || provider.model || "").trim(),
+            vlm_model: String(provider.vlm_model || "").trim(),
+            temperature: Number.isFinite(Number(provider.temperature)) ? Number(provider.temperature) : 0.7,
+            max_tokens: Number.isFinite(Number(provider.max_tokens)) ? Number(provider.max_tokens) : 4096,
+            top_p: Number.isFinite(Number(provider.top_p)) ? Number(provider.top_p) : 0.9,
+            builtin: asBoolean(provider.builtin, false),
+        };
+    }) : [];
+    const schemes = Array.isArray(source.schemes) ? source.schemes.map((item) => ({
+        id: String(item?.id || ""),
+        name: String(item?.name || item?.id || ""),
+        name_zh: String(item?.name_zh || item?.name || item?.id || ""),
+        prompt: String(item?.prompt || ""),
+        editable: asBoolean(item?.editable, false),
+    })).filter((item) => item.id) : [];
+    const activeProvider = String(source.active_provider || providers[0]?.id || "zhipu");
+    return {
+        active_provider: providers.some((item) => item.id === activeProvider) ? activeProvider : providers[0]?.id || "zhipu",
+        providers,
+        active_scheme: String(source.active_scheme || "none"),
+        custom_schemes: Array.isArray(source.custom_schemes)
+            ? source.custom_schemes.map((item) => ({
+                id: String(item?.id || ""),
+                name: String(item?.name || ""),
+                prompt: String(item?.prompt || ""),
+            })).filter((item) => item.id && item.name && item.prompt)
+            : [],
+        schemes,
+        read_media: asBoolean(source.read_media, false),
+    };
+}
+
+function updatePromptGuideCatalog(settings) {
+    const schemes = Array.isArray(settings?.schemes) ? settings.schemes : [];
+    if (!schemes.length) return;
+    const next = schemes.map((item) => ({
+        value: String(item.id),
+        zh: String(item.name_zh || item.name || item.id),
+        en: String(item.name || item.name_zh || item.id),
+    }));
+    PROMPT_GUIDES.splice(0, PROMPT_GUIDES.length, ...next);
+}
+
+function promptOptimizerNodes() {
+    // app.graph is a guarded getter and logs an initialization error when the
+    // settings request completes before the first workflow canvas exists.
+    // The canvas graph is equivalent once ready and can be checked quietly.
+    return (app.canvas?.graph?._nodes || []).filter((node) => isTarget(node));
+}
+
+function syncPromptOptimizerNodes() {
+    for (const node of promptOptimizerNodes()) {
+        localizeComboWidget(getWidget(node, "prompt_optimizer_provider"));
+        localizeComboWidget(getWidget(node, "prompt_optimizer_scene_guide"));
+        syncModeWidgets(node, { adjustHeight: false });
+        syncPromptOptimizerButton(node);
+        node.setDirtyCanvas?.(true, true);
+    }
+}
+
+async function loadPromptOptimizerSettings({ force = false } = {}) {
+    if (promptOptimizerSettingsPromise && !force) return promptOptimizerSettingsPromise;
+    if (promptOptimizerSettingsLoaded && !force) return promptOptimizerSettingsCache;
+    promptOptimizerSettingsPromise = (async () => {
+        const response = await api.fetchApi(PROMPT_OPTIMIZER_SETTINGS_ENDPOINT);
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !data?.ok) throw new Error(data?.error || `HTTP ${response.status}`);
+        promptOptimizerSettingsCache = normalizePromptOptimizerSettings(data.settings);
+        updatePromptGuideCatalog(promptOptimizerSettingsCache);
+        promptOptimizerSettingsLoaded = true;
+        syncPromptOptimizerNodes();
+        return promptOptimizerSettingsCache;
+    })().finally(() => {
+        promptOptimizerSettingsPromise = null;
+    });
+    return promptOptimizerSettingsPromise;
+}
+
+function promptOptimizerState(node) {
+    const requestedService = canonicalPromptProvider(getWidgetValue(node, "prompt_optimizer_provider", "disabled"));
+    const selected = promptOptimizerServiceEntries().find((item) => item.value === requestedService);
+    const requestedProvider = selected?.provider_id || "";
+    const requestedModel = selected?.model || "";
+    const provider = promptOptimizerSettingsCache.providers.find(
+        (item) => item.id === requestedProvider,
+    ) || {};
+    return {
+        ...promptOptimizerSettingsCache,
+        ...provider,
+        requested_service: requestedService,
+        requested_provider: requestedProvider,
+        requested_model: requestedModel,
+    };
+}
+
+function notifyPromptOptimizer(message, severity = "error") {
+    const detail = String(message || "");
+    const toast = app.extensionManager?.toast;
+    if (toast?.add) {
+        toast.add({ severity, summary: severity === "error" ? TEXT.optimizerFailed : TEXT.optimizerSettings, detail, life: 6000 });
+        return;
+    }
+    globalThis.alert?.(detail);
+}
+
+function syncPromptExternalConnectionState(node) {
+    const connected = promptInputIsConnected(node);
+    node.__h3PromptExternalConnected = connected;
+    const editor = node?.__h3Editor;
+    const wrap = node?.__h3EditorWrap;
+    if (editor) {
+        editor.contentEditable = connected ? "false" : "true";
+        editor.setAttribute("aria-readonly", connected ? "true" : "false");
+        editor.title = connected ? TEXT.promptExternalConnected : "";
+        editor.classList.toggle("is-external", connected);
+        editor.tabIndex = connected ? -1 : 0;
+        if (connected) {
+            closeMentionMenu(node);
+            if (document.activeElement === editor) editor.blur();
+        }
+    }
+    wrap?.classList?.toggle("is-external", connected);
+    syncPromptOptimizerButton(node);
+}
+
+function clearPromptOptimizerStatusTimers(node) {
+    if (!node) return;
+    if (node.__h3OptimizerStatusTimer) clearInterval(node.__h3OptimizerStatusTimer);
+    if (node.__h3OptimizerStatusHideTimer) clearTimeout(node.__h3OptimizerStatusHideTimer);
+    node.__h3OptimizerStatusTimer = null;
+    node.__h3OptimizerStatusHideTimer = null;
+}
+
+function setPromptOptimizerStatus(node, state = "idle") {
+    if (!node) return;
+    clearPromptOptimizerStatusTimers(node);
+    node.__h3OptimizerStatus = state;
+    const status = node.__h3PromptOptimizerStatus;
+    const label = node.__h3PromptOptimizerStatusText;
+    if (!status || !label) return;
+    const loading = state === "loading";
+    status.hidden = !loading;
+    status.className = `h3-prompt-editor-status${loading ? " is-loading" : ""}`;
+    if (!loading) {
+        label.textContent = "";
+        return;
+    }
+    const startedAt = Number(node.__h3OptimizerStartedAt) || (globalThis.performance?.now?.() || Date.now());
+    node.__h3OptimizerStartedAt = startedAt;
+    const update = () => {
+        const elapsed = Math.max(0, Math.floor(((globalThis.performance?.now?.() || Date.now()) - startedAt) / 1000));
+        label.textContent = elapsed > 1 ? `${TEXT.optimizerRunning} \u00b7 ${elapsed}s` : `${TEXT.optimizerRunning}...`;
+    };
+    update();
+    node.__h3OptimizerStatusTimer = setInterval(update, 1000);
+}
+
+function syncPromptOptimizerButton(node) {
+    const button = node?.__h3PromptOptimizeButton;
+    if (!button) return;
+    const state = promptOptimizerState(node);
+    const advanced = isAdvancedEnabled(node);
+    const enabled = advanced && state.requested_service !== "disabled" && Boolean(state.requested_provider && state.requested_model);
+    const model = state.requested_model;
+    const keyReady = state.api_format === "ollama" || state.api_key_exists || Boolean(String(state.api_key || "").trim());
+    const configured = enabled && Boolean(String(state.api_url || "").trim() && String(model || "").trim() && keyReady);
+    const external = promptInputIsConnected(node);
+    const pending = Boolean(node.__h3OptimizerPending);
+    const locked = external || pending;
+    button.title = external ? TEXT.promptExternalConnected : !enabled ? TEXT.optimizerDisabled : TEXT.optimizePrompt;
+    button.setAttribute("aria-label", button.title);
+    button.classList.toggle("is-configured", configured);
+    button.classList.toggle("is-loading", pending);
+    button.classList.toggle("is-external", external);
+    button.setAttribute("aria-disabled", pending || external || !enabled ? "true" : "false");
+    button.disabled = pending || external || !enabled;
+    const editor = node?.__h3Editor;
+    const wrap = node?.__h3EditorWrap;
+    if (editor) {
+        editor.contentEditable = locked ? "false" : "true";
+        editor.setAttribute("aria-readonly", locked ? "true" : "false");
+        editor.setAttribute("aria-busy", pending ? "true" : "false");
+        editor.tabIndex = locked ? -1 : 0;
+        editor.title = external ? TEXT.promptExternalConnected : pending ? TEXT.optimizerRunning : "";
+        editor.classList.toggle("is-loading", pending);
+    }
+    wrap?.classList?.toggle("is-loading", pending);
+    if (pending) closeMentionMenu(node);
+}
+
+function sourceAssetDescriptor(node, mediaType) {
+    if (!node) return null;
+    const preferred = {
+        image: ["image", "filename", "file"],
+        video: ["video", "file", "filename", "video_file", "videofile"],
+        audio: ["audio", "file", "filename", "audio_file", "audiofile"],
+    }[mediaType] || ["file", "filename"];
+    const preferredSet = new Set(preferred);
+    const widgets = Array.isArray(node.widgets) ? node.widgets : [];
+    const ordered = [...widgets.filter((widget) => preferredSet.has(String(widget?.name || "").toLowerCase())), ...widgets];
+    for (const widget of ordered) {
+        const value = widget?.value;
+        const filename = typeof value === "object" ? String(value?.filename || value?.name || "") : String(value || "");
+        if (!filename || /^data:|^blob:|^https?:/i.test(filename)) continue;
+        if (!preferredSet.has(String(widget?.name || "").toLowerCase()) && !/\.(png|jpe?g|webp|gif|bmp|mp4|webm|mov|mkv|avi|m4v|mp3|wav|flac|ogg|m4a|aac)$/i.test(filename)) continue;
+        return {
+            filename,
+            subfolder: typeof value === "object" ? String(value?.subfolder || "") : "",
+            storage: typeof value === "object" ? String(value?.type || "input") : "input",
+        };
+    }
+    return null;
+}
+
+function promptOptimizerResources(node) {
+    const counts = { image: 0, video: 0, audio: 0 };
+    return embeddedMediaRecords(node).map((link) => {
+        const type = String(link.media_type || "image").toLowerCase();
+        counts[type] = (counts[type] || 0) + 1;
+        const ordinal = counts[type];
+        return {
+            type,
+            tag: promptMentionTag(type, ordinal),
+            name: embeddedMediaFilename(link),
+            asset: {
+                filename: link.filename,
+                subfolder: link.subfolder || "",
+                storage: link.storage || "input",
+            },
+        };
+    });
+}
+
+function setPromptFromOptimizedText(node, value) {
+    const text = String(value || "").replace(/^```(?:text)?\s*/i, "").replace(/\s*```$/, "").trim();
+    const doc = { version: 1, text, parts: promptPartsFromText(node, text) };
+    const widget = getWidget(node, "prompt");
+    node.properties ||= {};
+    node.properties[PROMPT_DOC_PROP] = doc;
+    if (widget) {
+        widget.value = text;
+        if (widget._state) widget._state.value = text;
+    }
+    node.__h3RawPromptNeedsSync = false;
+    renderEditorFromNode(node, true);
+    syncPromptFromEditor(node, false);
+    pushPromptHistory(node);
+    node.setDirtyCanvas?.(true, true);
+    app.graph?.change?.();
+}
+
+async function optimizePromptFromEditor(node) {
+    if (!node || node.__h3OptimizerPending || promptInputIsConnected(node)) return;
+    syncPromptFromEditor(node, false);
+    pushPromptHistory(node);
+    try {
+        await loadPromptOptimizerSettings();
+    } catch (error) {
+        notifyPromptOptimizer(error?.message || TEXT.settingsLoadFailed);
+        return;
+    }
+    const state = promptOptimizerState(node);
+    if (!isAdvancedEnabled(node) || state.requested_service === "disabled" || !state.requested_provider || !state.requested_model) {
+        notifyPromptOptimizer(TEXT.optimizerDisabled, "warn");
+        return;
+    }
+    const resources = promptOptimizerResources(node);
+    const model = state.requested_model;
+    const keyReady = state.api_format === "ollama" || state.api_key_exists || Boolean(String(state.api_key || "").trim());
+    if (!String(state.api_url || "").trim() || !String(model || "").trim() || !keyReady) {
+        notifyPromptOptimizer(TEXT.optimizerMissing);
+        return;
+    }
+    const currentPrompt = String(getWidget(node, "prompt")?.value || "");
+    const sourcePrompt = node.__h3OptimizerLastResult === currentPrompt && node.__h3OptimizerSourcePrompt != null
+        ? node.__h3OptimizerSourcePrompt
+        : currentPrompt;
+    if (!sourcePrompt.trim()) return;
+    const mediaCounts = { image: 0, video: 0, audio: 0 };
+    resources.forEach((item) => { mediaCounts[item.type] = (mediaCounts[item.type] || 0) + 1; });
+    node.__h3OptimizerPending = true;
+    node.__h3OptimizerStartedAt = globalThis.performance?.now?.() || Date.now();
+    setPromptOptimizerStatus(node, "loading");
+    syncPromptOptimizerButton(node);
+    try {
+        const response = await api.fetchApi("/feihou_easy_h3/prompt_optimize", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                prompt: sourcePrompt,
+                mode: canonicalOption("mode", getWidgetValue(node, "mode", MODE_IMAGE)),
+                seconds: Math.min(MAX_SECONDS, Math.max(MIN_SECONDS, Number(getWidgetValue(node, "seconds", 10)) || 10)),
+                service_model: state.requested_service,
+                provider_id: state.requested_provider,
+                model: state.requested_model,
+                scene_guide: canonicalPromptGuide(getWidgetValue(node, "prompt_optimizer_scene_guide", "none")),
+                media_counts: mediaCounts,
+                resources,
+            }),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !data?.ok) throw new Error(data?.error || `HTTP ${response.status}`);
+        node.__h3OptimizerSourcePrompt = sourcePrompt;
+        node.__h3OptimizerLastResult = String(data.prompt || "");
+        setPromptFromOptimizedText(node, node.__h3OptimizerLastResult);
+        setPromptOptimizerStatus(node, "success");
+        notifyPromptOptimizer(`${TEXT.optimizerDone} · ${data.provider_id || state.requested_provider}/${data.model || state.requested_model}`, "success");
+    } catch (error) {
+        setPromptOptimizerStatus(node, "error");
+        notifyPromptOptimizer(error?.message || error);
+    } finally {
+        node.__h3OptimizerPending = false;
+        syncPromptOptimizerButton(node);
+    }
+}
+
+function syncEditorMode(node) {
+    syncModeWidgets(node, { adjustHeight: false });
+    const widget = getWidget(node, "prompt");
+    const editor = node.__h3Editor;
+    const wrap = node.__h3EditorWrap;
+    const domWidget = node.__h3DomWidget;
+    if (!widget || !editor || !wrap || !domWidget) return;
+    syncPromptExternalConnectionState(node);
+    const reference = isReferenceMode(node);
+    const raw = isRawPromptMode(node);
+    hideOriginalPromptWidget(widget);
+    setWidgetOption(domWidget, "canvasOnly", false);
+    showDomEditorWidget(domWidget);
+    editor.style.display = "block";
+    wrap.style.display = "block";
+    editor.dataset.placeholder = raw ? TEXT.rawPromptPlaceholder : reference ? TEXT.referencePromptPlaceholder : TEXT.promptPlaceholder;
+    editor.classList.toggle("is-raw", raw);
+    wrap.classList.toggle("is-raw", raw);
+    syncPromptViewButton(node);
+    applyNativeEditorTheme(wrap);
+    if (!reference || raw) closeMentionMenu(node);
+}
+
+function handleMentionMenuKeydown(node, event) {
+    const state = node?.__h3MentionMenu;
+    if (!state) return false;
+    if (event.key === "Escape") {
+        closeMentionMenu(node);
+        return true;
+    }
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        if (state.options.length) {
+            const delta = event.key === "ArrowDown" ? 1 : -1;
+            state.activeIndex = (state.activeIndex + delta + state.options.length) % state.options.length;
+            renderMentionMenu(node);
+            state.element.querySelector(".is-active")?.scrollIntoView?.({ block: "nearest" });
+        }
+        return true;
+    }
+    if (event.key === "Enter" || event.key === "Tab") {
+        const option = state.options[state.activeIndex];
+        if (option) chooseMention(node, option);
+        return Boolean(option);
+    }
+    return false;
+}
+
+function stripCaretSentinels(value) {
+    return String(value ?? "").replaceAll(CARET_SENTINEL, "");
+}
+
+function makeCaretSentinel() {
+    return document.createTextNode(CARET_SENTINEL);
+}
+
+function isCaretSentinelText(node) {
+    return node?.nodeType === Node.TEXT_NODE && String(node.textContent || "").includes(CARET_SENTINEL);
+}
+
+function isOnlyCaretSentinelText(node) {
+    return node?.nodeType === Node.TEXT_NODE && stripCaretSentinels(node.textContent) === "";
+}
+
+function isIgnorableTextNode(node) {
+    return node?.nodeType === Node.TEXT_NODE && stripCaretSentinels(node.textContent).trim() === "";
+}
+
+function isMentionChip(node) {
+    return node?.nodeType === Node.ELEMENT_NODE && node.classList?.contains("h3-mention-chip");
+}
+
+function deepestLeaf(node, direction) {
+    let current = node;
+    if (isMentionChip(current) || isDialogueBlock(current)) return current;
+    while (current?.childNodes?.length) {
+        if (isMentionChip(current) || isDialogueBlock(current) || current.contentEditable === "false") return current;
+        current = direction === "backward"
+            ? current.childNodes[current.childNodes.length - 1]
+            : current.childNodes[0];
+    }
+    return current;
+}
+
+function adjacentLeaf(node, root, direction) {
+    if (!node || node === root) return null;
+    let current = node;
+    while (current && current !== root) {
+        const sibling = direction === "backward" ? current.previousSibling : current.nextSibling;
+        if (sibling) return deepestLeaf(sibling, direction);
+        current = current.parentNode;
+    }
+    return null;
+}
+
+function getAdjacentLeafFromCaret(range, root, direction) {
+    const container = range.startContainer;
+    const offset = range.startOffset;
+    if (container.nodeType === Node.TEXT_NODE) {
+        if (direction === "backward" && offset > 0) return null;
+        if (direction === "forward" && offset < container.textContent.length) return null;
+        return adjacentLeaf(container, root, direction);
+    }
+    if (container.nodeType === Node.ELEMENT_NODE) {
+        if (direction === "backward") {
+            if (offset > 0) return deepestLeaf(container.childNodes[offset - 1], "backward");
+            return adjacentLeaf(container, root, "backward");
+        }
+        if (offset < container.childNodes.length) return deepestLeaf(container.childNodes[offset], "forward");
+        return adjacentLeaf(container, root, "forward");
+    }
+    return null;
+}
+
+function findChipAcrossWhitespace(start, root, direction) {
+    let current = start;
+    const skipped = [];
+    while (current) {
+        if (isMentionChip(current)) return { chip: current, skipped };
+        if (isIgnorableTextNode(current)) {
+            skipped.push(current);
+            current = adjacentLeaf(current, root, direction);
+            continue;
+        }
+        if (current.nodeType === Node.ELEMENT_NODE && current.tagName === "BR") return null;
+        return null;
+    }
+    return null;
+}
+
+function findLineBreakAcrossWhitespace(start, root, direction) {
+    let current = start;
+    const skipped = [];
+    while (current) {
+        if (current.nodeType === Node.ELEMENT_NODE && current.tagName === "BR") {
+            return { breakNode: current, skipped };
+        }
+        if (isIgnorableTextNode(current)) {
+            skipped.push(current);
+            current = adjacentLeaf(current, root, direction);
+            continue;
+        }
+        return null;
+    }
+    return null;
+}
+
+function setCaretAtNode(node, offset = 0) {
+    const selection = window.getSelection?.();
+    if (!selection || !node) return;
+    const range = document.createRange();
+    range.setStart(node, offset);
+    range.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(range);
+}
+
+function getDeletionScanStart(range, editor, direction) {
+    let spacer = null;
+    let start = null;
+    const container = range.startContainer;
+    const offset = range.startOffset;
+    if (container.nodeType === Node.TEXT_NODE) {
+        const text = container.textContent || "";
+        if (direction === "backward") {
+            const before = text.slice(0, offset);
+            if (before && stripCaretSentinels(before).trim() !== "") return null;
+            spacer = before ? container : null;
+            start = before ? adjacentLeaf(container, editor, "backward") : getAdjacentLeafFromCaret(range, editor, "backward");
+        } else {
+            const after = text.slice(offset);
+            if (after && stripCaretSentinels(after).trim() !== "") return null;
+            spacer = after ? container : null;
+            start = after ? adjacentLeaf(container, editor, "forward") : getAdjacentLeafFromCaret(range, editor, "forward");
+        }
+    } else {
+        start = getAdjacentLeafFromCaret(range, editor, direction);
+    }
+    return { start, spacer, container, offset };
+}
+
+function removeSpacerText(spacer, offset, direction) {
+    if (spacer?.nodeType !== Node.TEXT_NODE) return;
+    if (direction === "backward") spacer.deleteData(0, offset);
+    else spacer.deleteData(offset, spacer.textContent.length - offset);
+    if (!spacer.textContent) spacer.remove();
+}
+
+function deleteLastVisibleChar(textNode) {
+    const text = String(textNode?.textContent || "");
+    let cursor = 0;
+    let last = null;
+    for (const char of Array.from(text)) {
+        const length = char.length;
+        if (char !== CARET_SENTINEL) last = { index: cursor, length };
+        cursor += length;
+    }
+    if (!last) return false;
+    textNode.deleteData(last.index, last.length);
+    if (!textNode.textContent) textNode.remove();
+    return true;
+}
+
+function deletePreviousVisibleCharBeforeOffset(textNode, offset) {
+    if (textNode?.nodeType !== Node.TEXT_NODE) return false;
+    const text = String(textNode.textContent || "");
+    const limit = Math.max(0, Math.min(Number(offset) || 0, text.length));
+    let cursor = 0;
+    let target = null;
+    for (const char of Array.from(text)) {
+        const length = char.length;
+        const next = cursor + length;
+        if (next > limit) break;
+        if (char !== CARET_SENTINEL) target = { index: cursor, length };
+        cursor = next;
+    }
+    if (!target) return false;
+    textNode.deleteData(target.index, target.length);
+    setCaretAtNode(textNode, target.index);
+    return true;
+}
+
+function getOrInsertCaretSentinel(chip, side) {
+    if (!chip?.parentNode) return null;
+    const sibling = side === "before" ? chip.previousSibling : chip.nextSibling;
+    if (isCaretSentinelText(sibling)) return sibling;
+    const marker = makeCaretSentinel();
+    chip.parentNode.insertBefore(marker, side === "before" ? chip : chip.nextSibling);
+    return marker;
+}
+
+function removeMentionChip(chip, direction = "backward") {
+    if (!chip?.parentNode) return null;
+    const marker = makeCaretSentinel();
+    chip.parentNode.insertBefore(marker, direction === "backward" ? chip : chip.nextSibling);
+    chip.remove();
+    return marker;
+}
+
+function findPreviousContentFromSentinel(marker, editor) {
+    let current = adjacentLeaf(marker, editor, "backward");
+    const skipped = [];
+    while (current) {
+        if (isOnlyCaretSentinelText(current)) {
+            skipped.push(current);
+            current = adjacentLeaf(current, editor, "backward");
+            continue;
+        }
+        return { node: current, skipped };
+    }
+    return { node: null, skipped };
+}
+
+function removeEmptyCaretMarker(marker) {
+    if (isOnlyCaretSentinelText(marker)) marker.remove?.();
+}
+
+function placeCaretAfterPreviousContent(marker, editor) {
+    const previous = findPreviousContentFromSentinel(marker, editor);
+    if (previous.node?.nodeType === Node.TEXT_NODE) {
+        setCaretAtNode(previous.node, previous.node.textContent.length);
+        removeEmptyCaretMarker(marker);
+        return true;
+    }
+    if (isMentionChip(previous.node)) {
+        const afterMarker = getOrInsertCaretSentinel(previous.node, "after");
+        setCaretAtNode(afterMarker, afterMarker.textContent.length);
+        if (afterMarker !== marker) removeEmptyCaretMarker(marker);
+        return true;
+    }
+    setCaretAtNode(marker, marker.textContent.length);
+    return false;
+}
+
+function isSentinelBeforeChip(marker, editor) {
+    const next = adjacentLeaf(marker, editor, "forward");
+    return Boolean(findChipAcrossWhitespace(next, editor, "forward")?.chip);
+}
+
+function backspaceBeforeChip(editor, node) {
+    const selection = window.getSelection?.();
+    if (!selection || !selection.rangeCount || !selection.isCollapsed) return false;
+    const range = selection.getRangeAt(0);
+    const marker = range.startContainer;
+    if (!editor.contains(marker) || !isCaretSentinelText(marker) || !isSentinelBeforeChip(marker, editor)) return false;
+    if (deletePreviousVisibleCharBeforeOffset(marker, range.startOffset)) return true;
+    const previous = findPreviousContentFromSentinel(marker, editor);
+    if (!previous.node) {
+        if (isSentinelBeforeChip(marker, editor)) setCaretAtNode(marker, marker.textContent.length);
+        else if (marker.textContent === CARET_SENTINEL) marker.remove();
+        closeMentionMenu(node);
+        return true;
+    }
+    if (previous.node.nodeType === Node.TEXT_NODE) deleteLastVisibleChar(previous.node);
+    else if (isMentionChip(previous.node)) previous.node.remove();
+    else if (previous.node.nodeType === Node.ELEMENT_NODE && previous.node.tagName === "BR") previous.node.remove();
+    else return false;
+    for (const item of previous.skipped) item.remove?.();
+    setCaretAtNode(marker, marker.textContent.length);
+    closeMentionMenu(node);
+    return true;
+}
+
+function backspaceAtLooseSentinel(editor, node) {
+    const selection = window.getSelection?.();
+    if (!selection || !selection.rangeCount || !selection.isCollapsed) return false;
+    const range = selection.getRangeAt(0);
+    const marker = range.startContainer;
+    if (!editor.contains(marker) || !isCaretSentinelText(marker) || isSentinelBeforeChip(marker, editor)) return false;
+    if (deletePreviousVisibleCharBeforeOffset(marker, range.startOffset)) return true;
+    const previous = findPreviousContentFromSentinel(marker, editor);
+    if (!previous.node || (previous.node.nodeType === Node.ELEMENT_NODE && previous.node.tagName === "BR")) return false;
+    if (previous.node.nodeType === Node.TEXT_NODE) deleteLastVisibleChar(previous.node);
+    else if (isMentionChip(previous.node)) previous.node.remove();
+    else return false;
+    for (const item of previous.skipped) item.remove?.();
+    setCaretAtNode(marker, marker.textContent.length);
+    closeMentionMenu(node);
+    return true;
+}
+
+function deleteLineBreakNearCaret(editor, node, direction) {
+    const selection = window.getSelection?.();
+    if (!selection || !selection.rangeCount || !selection.isCollapsed) return false;
+    const range = selection.getRangeAt(0);
+    if (!editor.contains(range.startContainer)) return false;
+    const scan = getDeletionScanStart(range, editor, direction);
+    if (!scan) return false;
+    const found = findLineBreakAcrossWhitespace(scan.start, editor, direction);
+    if (!found?.breakNode) return false;
+    const marker = makeCaretSentinel();
+    found.breakNode.parentNode?.insertBefore(marker, found.breakNode);
+    found.breakNode.remove();
+    for (const item of found.skipped) item.remove?.();
+    removeSpacerText(scan.spacer, scan.offset, direction);
+    placeCaretAfterPreviousContent(marker, editor);
+    closeMentionMenu(node);
+    return true;
+}
+
+function blockNativeSentinelDeletion(editor) {
+    const selection = window.getSelection?.();
+    if (!selection || !selection.rangeCount || !selection.isCollapsed) return false;
+    const range = selection.getRangeAt(0);
+    const marker = range.startContainer;
+    if (!editor.contains(marker) || !isCaretSentinelText(marker)) return false;
+    if (stripCaretSentinels(marker.textContent || "") !== "") return false;
+    const previous = adjacentLeaf(marker, editor, "backward");
+    const next = adjacentLeaf(marker, editor, "forward");
+    return Boolean(
+        findChipAcrossWhitespace(previous, editor, "backward")?.chip
+        || findChipAcrossWhitespace(next, editor, "forward")?.chip
+    );
+}
+
+function deleteChipNearCaret(editor, node, direction) {
+    const selection = window.getSelection?.();
+    if (!selection || !selection.rangeCount || !selection.isCollapsed) return false;
+    const range = selection.getRangeAt(0);
+    const editorNode = range.startContainer;
+    if (!editor.contains(editorNode)) return false;
+    const directChip = editorNode.nodeType === Node.ELEMENT_NODE
+        ? editorNode.closest?.(".h3-mention-chip")
+        : editorNode.parentElement?.closest?.(".h3-mention-chip");
+    if (directChip && editor.contains(directChip)) {
+        const marker = removeMentionChip(directChip, direction);
+        setCaretAtNode(marker, marker.textContent.length);
+        closeMentionMenu(node);
+        return true;
+    }
+    const scan = getDeletionScanStart(range, editor, direction);
+    if (!scan) return false;
+    const found = findChipAcrossWhitespace(scan.start, editor, direction);
+    if (!found?.chip) return false;
+    const marker = removeMentionChip(found.chip, direction);
+    for (const item of found.skipped) item.remove?.();
+    removeSpacerText(scan.spacer, scan.offset, direction);
+    setCaretAtNode(marker, marker.textContent.length);
+    closeMentionMenu(node);
+    return true;
+}
+
+function insertEditorLineBreak(editor) {
+    const selection = window.getSelection?.();
+    if (!selection || !selection.rangeCount) return false;
+    const range = selection.getRangeAt(0);
+    if (!editor.contains(range.commonAncestorContainer)) return false;
+    range.deleteContents();
+    const br = document.createElement("br");
+    const marker = document.createTextNode("\u200B");
+    const fragment = document.createDocumentFragment();
+    fragment.append(br, marker);
+    range.insertNode(fragment);
+    const caret = document.createRange();
+    caret.setStart(marker, marker.textContent.length);
+    caret.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(caret);
+    return true;
+}
+
+function insertPlainText(editor, text) {
+    if (document.execCommand?.("insertText", false, text)) return;
+    const selection = window.getSelection?.();
+    if (!selection || !selection.rangeCount) return;
+    const range = selection.getRangeAt(0);
+    range.deleteContents();
+    const node = document.createTextNode(text);
+    range.insertNode(node);
+    range.setStartAfter(node);
+    range.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(range);
+}
+
+function pastedMentionCandidates(node) {
+    if (!isReferenceMode(node)) return [];
+    const labels = {
+        image: ["\u56fe\u7247", "Image", "image", "Picture", "picture"],
+        video: ["\u89c6\u9891", "Video", "video"],
+        audio: ["\u97f3\u9891", "Audio", "audio"],
+    };
+    const candidates = [];
+    const seen = new Set();
+    for (const option of mentionOptions(node)) {
+        const aliases = new Set();
+        if (option.fullLabel) aliases.add(`@${option.fullLabel}`);
+        if (option.token) aliases.add(option.token);
+        for (const prefix of labels[option.type] || []) {
+            aliases.add(`@${prefix}${option.ordinal}`);
+            aliases.add(`@${prefix} ${option.ordinal}`);
+        }
+        for (const raw of aliases) {
+            const value = String(raw || "");
+            const key = value.toLocaleLowerCase();
+            if (!value || seen.has(key)) continue;
+            seen.add(key);
+            candidates.push({ raw: value, option });
+        }
+    }
+    return candidates.sort((left, right) => right.raw.length - left.raw.length);
+}
+
+function pastedOfficialMediaTagMatch(node, value, cursor) {
+    if (!isReferenceMode(node)) return null;
+    const match = String(value || "").slice(cursor).match(/^<\s*(picture|video|audio)\s*(\d+)\s*>/i);
+    if (!match) return null;
+    const type = match[1].toLowerCase() === "picture" ? "image" : match[1].toLowerCase();
+    const ordinal = Number(match[2]);
+    if (!Number.isFinite(ordinal) || ordinal <= 0) return null;
+    const live = mentionOptions(node);
+    const resolved = live.find((option) => option.type === type && Number(option.ordinal) === ordinal);
+    const tag = type === "image" ? `<Picture ${ordinal}>` : type === "video" ? `<Video ${ordinal}>` : `<Audio ${ordinal}>`;
+    const fallbackLabel = `${LABELS[type] || type}${ordinal}`;
+    return {
+        raw: match[0],
+        option: resolved || {
+            type,
+            tag,
+            token: `@${fallbackLabel}`,
+            label: fallbackLabel,
+            fullLabel: fallbackLabel,
+            ordinal,
+            referenceMode: referenceMentionMode(node),
+            sourceId: null,
+            sourceSlot: 0,
+            previewUrl: "",
+            unresolved: true,
+            pending: true,
+        },
+    };
+}
+
+function appendPastedText(fragment, text) {
+    let last = null;
+    String(text || "").split("\n").forEach((part, index) => {
+        if (index) {
+            last = document.createElement("br");
+            fragment.append(last);
+        }
+        if (part) {
+            last = document.createTextNode(part);
+            fragment.append(last);
+        }
+    });
+    return last;
+}
+
+function insertTextWithMentionChips(node, editor, text) {
+    const selection = window.getSelection?.();
+    if (!selection || !selection.rangeCount || !editor.contains(selection.anchorNode)) return false;
+    const range = selection.getRangeAt(0);
+    const value = String(text || "");
+    if (!value) return false;
+    const candidates = pastedMentionCandidates(node);
+    range.deleteContents();
+    const fragment = document.createDocumentFragment();
+    let plainStart = 0;
+    let cursor = 0;
+    while (cursor < value.length) {
+        const match = pastedOfficialMediaTagMatch(node, value, cursor)
+            || candidates.find((candidate) => value.slice(cursor, cursor + candidate.raw.length).toLocaleLowerCase() === candidate.raw.toLocaleLowerCase());
+        if (!match) {
+            cursor += 1;
+            continue;
+        }
+        if (plainStart < cursor) appendPastedText(fragment, value.slice(plainStart, cursor));
+        fragment.append(document.createTextNode(CARET_SENTINEL));
+        fragment.append(makeMentionChip(match.option));
+        fragment.append(document.createTextNode(CARET_SENTINEL));
+        cursor += match.raw.length;
+        plainStart = cursor;
+    }
+    if (plainStart < value.length) appendPastedText(fragment, value.slice(plainStart));
+    const caretMarker = document.createTextNode(CARET_SENTINEL);
+    fragment.append(caretMarker);
+    range.insertNode(fragment);
+    const caret = document.createRange();
+    caret.setStart(caretMarker, caretMarker.textContent.length);
+    caret.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(caret);
+    return true;
+}
+
+function ensurePromptEditor(node) {
+    if (node.__h3Editor) {
+        preparePromptEditorForUndo(node.__h3Editor);
+        return;
+    }
+    if (typeof document === "undefined" || typeof node.addDOMWidget !== "function") return;
+    // A workflow tab can deactivate and reactivate the same node instance.
+    // `onRemoved` clears the DOM editor, but older builds left its DOM widget
+    // in `node.widgets`. Adding another one on every activation makes ComfyUI
+    // allocate the editor row repeatedly and the node grows on each tab switch.
+    removePromptEditorWidgets(node);
+    ensurePromptUndoRedoShield();
+    patchLiteGraphPromptProcessKey();
+    const widget = getWidget(node, "prompt");
+    if (!widget) return;
+    hideOriginalPromptWidget(widget);
+    const wrap = document.createElement("div");
+    wrap.className = "h3-prompt-editor-wrap";
+    wrap.style.minHeight = "0px";
+    applyNativeEditorTheme(wrap);
+    const editor = document.createElement("div");
+    editor.className = "comfy-multiline-input h3-prompt-editor";
+    editor.dataset.feihouNodeId = String(node.id ?? "");
+    editor.contentEditable = "true";
+    preparePromptEditorForUndo(editor);
+    editor.__h3PromptNode = node;
+    editor.tabIndex = 0;
+    editor.setAttribute("role", "textbox");
+    editor.setAttribute("aria-label", "prompt");
+    editor.dataset.placeholder = isReferenceMode(node) ? TEXT.referencePromptPlaceholder : TEXT.promptPlaceholder;
+    editor.spellcheck = false;
+    const editorTools = document.createElement("div");
+    editorTools.className = "h3-prompt-editor-tools";
+    const optimizerStatus = document.createElement("div");
+    optimizerStatus.className = "h3-prompt-editor-status";
+    optimizerStatus.hidden = true;
+    optimizerStatus.setAttribute("role", "status");
+    optimizerStatus.setAttribute("aria-live", "polite");
+    const optimizerStatusSpinner = document.createElement("span");
+    optimizerStatusSpinner.className = "h3-prompt-editor-status-spinner";
+    const optimizerStatusText = document.createElement("span");
+    optimizerStatus.append(optimizerStatusSpinner, optimizerStatusText);
+    const viewButton = document.createElement("button");
+    viewButton.type = "button";
+    viewButton.className = "h3-prompt-editor-tool h3-prompt-editor-view-toggle";
+    viewButton.addEventListener("pointerdown", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+    });
+    viewButton.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        togglePromptView(node);
+    });
+    const optimizeButton = document.createElement("button");
+    optimizeButton.type = "button";
+    optimizeButton.className = "h3-prompt-editor-tool h3-prompt-editor-optimize";
+    optimizeButton.textContent = "\u2726";
+    optimizeButton.addEventListener("pointerdown", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+    });
+    optimizeButton.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        optimizePromptFromEditor(node);
+    });
+    editorTools.append(optimizeButton, viewButton);
+    editor.addEventListener("beforeinput", (event) => {
+        if (isRawPromptMode(node)) {
+            node.__h3DialogueHashHandled = false;
+            return;
+        }
+        if (node.__h3DialogueHashHandled) {
+            node.__h3DialogueHashHandled = false;
+            event.preventDefault();
+            event.stopPropagation();
+            event.stopImmediatePropagation?.();
+            return;
+        }
+        if (event.inputType === "insertText" && event.data === "#" && insertDialogueBlockAtSelection(node, editor)) {
+            event.preventDefault();
+            event.stopPropagation();
+            event.stopImmediatePropagation?.();
+            syncPromptFromEditor(node);
+            pushPromptHistory(node);
+            return;
+        }
+        if (isReferenceMode(node) && event.data === "@") setTimeout(() => syncMentionMenuToCaret(node, editor), 0);
+    });
+    editor.addEventListener("input", (event) => {
+        const raw = isRawPromptMode(node);
+        if (raw) node.__h3RawPromptNeedsSync = true;
+        syncPromptFromEditor(node);
+        if (event?.isComposing || event?.inputType === "insertCompositionText" || node.__h3PromptComposing) {
+            if (!raw) syncMentionMenuToCaret(node, editor);
+            return;
+        }
+        pushPromptHistory(node);
+        if (raw) {
+            closeMentionMenu(node);
+            return;
+        }
+        syncMentionMenuToCaret(node, editor);
+    });
+    editor.addEventListener("compositionstart", () => {
+        node.__h3PromptComposing = true;
+    });
+    editor.addEventListener("compositionend", () => {
+        node.__h3PromptComposing = false;
+        if (isRawPromptMode(node)) node.__h3RawPromptNeedsSync = true;
+        syncPromptFromEditor(node);
+        pushPromptHistory(node);
+    });
+    editor.addEventListener("focus", () => {
+        activePromptNode = node;
+        applyNativeEditorTheme(wrap);
+        // Focusing the editor must not open the picker by itself. It should only
+        // appear when the caret is actually inside a freshly typed @ query.
+        if (isRawPromptMode(node)) closeMentionMenu(node);
+        else syncMentionMenuToCaret(node, editor);
+    });
+    editor.addEventListener("pointerdown", () => {
+        activePromptNode = node;
+    }, true);
+    editor.addEventListener("keyup", (event) => {
+        if (isRawPromptMode(node) || !isReferenceMode(node) || ["ArrowUp", "ArrowDown", "Enter", "Escape", "Tab"].includes(event.key)) return;
+        syncMentionMenuToCaret(node, editor);
+        event.stopPropagation();
+    });
+    editor.addEventListener("keydown", (event) => {
+        if (isPromptUndoRedoEvent(event)) {
+            handlePromptHistoryKeydown(node, event);
+        }
+    }, true);
+    editor.addEventListener("keydown", (event) => {
+        const key = String(event.key || "").toLowerCase();
+        if ((event.ctrlKey || event.metaKey) && key === "s") {
+            syncPromptFromEditor(node);
+            event.preventDefault();
+            return;
+        }
+        const raw = isRawPromptMode(node);
+        if (raw) closeMentionMenu(node);
+        if (!raw && handleMentionMenuKeydown(node, event)) {
+            event.preventDefault();
+            event.stopPropagation();
+            return;
+        }
+        if (!raw && event.key === "#" && !event.ctrlKey && !event.metaKey && !event.altKey && insertDialogueBlockAtSelection(node, editor)) {
+            event.preventDefault();
+            event.stopPropagation();
+            node.__h3DialogueHashHandled = true;
+            setTimeout(() => { node.__h3DialogueHashHandled = false; }, 0);
+            syncPromptFromEditor(node);
+            pushPromptHistory(node);
+            return;
+        }
+        const dialogue = dialogueBlockAtSelection(editor);
+        if (event.key === "Enter" && dialogue && !event.shiftKey) {
+            event.preventDefault();
+            event.stopPropagation();
+            exitDialogueBlock(node, editor, dialogue);
+            syncPromptFromEditor(node);
+            pushPromptHistory(node);
+            return;
+        }
+        if (event.key === "Enter" && dialogue && event.shiftKey && insertEditorLineBreak(editor)) {
+            event.preventDefault();
+            event.stopPropagation();
+            syncPromptFromEditor(node);
+            pushPromptHistory(node);
+            return;
+        }
+        if (event.key === "Backspace" && (
+            backspaceDialogueBoundary(editor, node)
+            || deleteLineBreakNearCaret(editor, node, "backward")
+            || deleteChipNearCaret(editor, node, "backward")
+            || backspaceBeforeChip(editor, node)
+            || backspaceAtLooseSentinel(editor, node)
+            || blockNativeSentinelDeletion(editor)
+        )) {
+            event.preventDefault();
+            syncPromptFromEditor(node);
+            pushPromptHistory(node);
+        } else if (event.key === "Delete" && deleteChipNearCaret(editor, node, "forward")) {
+            event.preventDefault();
+            syncPromptFromEditor(node);
+            pushPromptHistory(node);
+        } else if (event.key === "Enter" && insertEditorLineBreak(editor)) {
+            event.preventDefault();
+            closeMentionMenu(node);
+            syncPromptFromEditor(node);
+            pushPromptHistory(node);
+        } else if (event.key === "Escape") {
+            closeMentionMenu(node);
+        }
+        event.stopPropagation();
+    });
+    editor.addEventListener("paste", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation?.();
+        const text = event.clipboardData?.getData("text/plain") || "";
+        if (isRawPromptMode(node)) {
+            insertPlainText(editor, text);
+            node.__h3RawPromptNeedsSync = true;
+            syncPromptFromEditor(node);
+            pushPromptHistory(node);
+            return;
+        }
+        insertTextWithMentionChips(node, editor, text);
+        syncPromptFromEditor(node);
+        pushPromptHistory(node);
+        syncMentionMenuToCaret(node, editor);
+    });
+    editor.addEventListener("blur", () => {
+        syncPromptFromEditor(node);
+        setTimeout(() => {
+            if (!node.__h3MentionMenu?.element?.matches?.(":hover")) closeMentionMenu(node);
+        }, 160);
+    });
+    wrap.addEventListener("pointerdown", (event) => {
+        event.stopPropagation();
+        if (!event.target?.closest?.(".h3-mention-chip")) closeMentionMenu(node);
+    });
+    const wheelHandler = (event) => {
+        const editorFocused = document.activeElement === editor;
+        const horizontal = Math.abs(event.deltaX || 0) > Math.abs(event.deltaY || 0);
+        const maxScrollTop = Math.max(0, editor.scrollHeight - editor.clientHeight);
+        const lineHeight = parseFloat(getComputedStyle(editor).lineHeight) || 16;
+        const deltaY = event.deltaMode === 1
+            ? event.deltaY * lineHeight
+            : event.deltaMode === 2
+                ? event.deltaY * editor.clientHeight
+                : event.deltaY;
+        if (!editorFocused) {
+            event.preventDefault();
+            event.stopPropagation();
+            event.stopImmediatePropagation?.();
+            app.canvas?.processMouseWheel?.(event);
+            return;
+        }
+        if (!event.ctrlKey && !horizontal && maxScrollTop > 0 && deltaY) {
+            const next = Math.max(0, Math.min(maxScrollTop, editor.scrollTop + deltaY));
+            if (next !== editor.scrollTop) {
+                editor.scrollTop = next;
+                event.preventDefault();
+                event.stopPropagation();
+                event.stopImmediatePropagation?.();
+                return;
+            }
+        }
+        if (!event.ctrlKey && !horizontal && maxScrollTop > 0) {
+            event.stopPropagation();
+            event.stopImmediatePropagation?.();
+            return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation?.();
+        app.canvas?.processMouseWheel?.(event);
+    };
+    editor.addEventListener("wheel", wheelHandler, { passive: false, capture: true });
+    wrap.addEventListener("wheel", wheelHandler, { passive: false });
+    wrap.append(editor, optimizerStatus, editorTools);
+    node.__h3Editor = editor;
+    node.__h3EditorWrap = wrap;
+    node.__h3PromptEditorTools = editorTools;
+    node.__h3PromptViewButton = viewButton;
+    node.__h3PromptOptimizeButton = optimizeButton;
+    node.__h3PromptOptimizerStatus = optimizerStatus;
+    node.__h3PromptOptimizerStatusText = optimizerStatusText;
+    syncPromptExternalConnectionState(node);
+    renderEditorFromNode(node);
+    syncPromptOptimizerButton(node);
+    resetPromptHistory(node);
+    const domWidget = node.addDOMWidget("h3_prompt_mentions", "h3_prompt_mentions", wrap, {
+        getValue: () => String(getWidget(node, "prompt")?.value || ""),
+        setValue: (value) => {
+            const promptWidget = getWidget(node, "prompt");
+            if (promptWidget) promptWidget.value = String(value || "");
+            renderEditorFromNode(node);
+        },
+        margin: 10,
+        serialize: false,
+        getMinHeight: () => 50,
+        afterResize: () => {
+            applyNativeEditorTheme(wrap);
+            node._widgetSlotsDirty = true;
+            node.setDirtyCanvas?.(true, true);
+        },
+        onDraw: () => applyNativeEditorTheme(wrap),
+    });
+    if (!domWidget) {
+        restoreOriginalPromptWidget(widget);
+        wrap.remove();
+        node.__h3Editor = null;
+        node.__h3EditorWrap = null;
+        node.__h3PromptEditorTools = null;
+        node.__h3PromptViewButton = null;
+        node.__h3PromptOptimizeButton = null;
+        return;
+    }
+    node.__h3DomWidget = domWidget;
+    domWidget.serialize = false;
+    setWidgetOption(domWidget, "serialize", false);
+    setWidgetOption(domWidget, "canvasOnly", false);
+    domWidget.__h3EditorType = domWidget.type;
+    domWidget.__h3EditorComputeSize = domWidget.computeSize;
+    const domIndex = node.widgets?.indexOf(domWidget) ?? -1;
+    const promptIndex = node.widgets?.indexOf(widget) ?? -1;
+    if (domIndex >= 0 && promptIndex >= 0 && domIndex !== promptIndex + 1) {
+        node.widgets.splice(domIndex, 1);
+        const nextPromptIndex = node.widgets.indexOf(widget);
+        node.widgets.splice(nextPromptIndex + 1, 0, domWidget);
+    }
+    syncEditorMode(node);
+    repairNodeLayout(node);
+}
+
+function installPromptEditorSoon(node) {
+    if (!node || node.__h3PromptInstallPending || node.__h3PromptInstallRetry || node.__h3Editor) return;
+    const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+    if (now < (Number(node.__h3PromptInstallNextAt) || 0)) return;
+    node.__h3PromptInstallPending = true;
+    const run = () => {
+        node.__h3PromptInstallPending = false;
+        ensurePromptEditor(node);
+        if (node.__h3Editor) {
+            if (restorePromptEditorStableSize(node)) repairNodeLayout(node);
+            node.__h3PromptInstallAttempts = 0;
+            node.__h3PromptInstallNextAt = 0;
+            return;
+        }
+        const attempts = Math.min(8, (Number(node.__h3PromptInstallAttempts) || 0) + 1);
+        const delay = Math.min(2000, 120 * (2 ** Math.min(attempts - 1, 4)));
+        node.__h3PromptInstallAttempts = attempts;
+        node.__h3PromptInstallNextAt = (typeof performance !== "undefined" ? performance.now() : Date.now()) + delay;
+        node.__h3PromptInstallRetry = setTimeout(() => {
+            node.__h3PromptInstallRetry = null;
+            installPromptEditorSoon(node);
+        }, delay);
+    };
+    if (typeof requestAnimationFrame === "function") requestAnimationFrame(run);
+    else setTimeout(run, 0);
+}
+
+function removePromptEditorWidgets(node) {
+    if (!Array.isArray(node?.widgets)) return false;
+    const stale = node.widgets.filter((widget) =>
+        widget === node.__h3DomWidget || String(widget?.name || "") === "h3_prompt_mentions"
+    );
+    if (!stale.length) return false;
+    for (const widget of stale) {
+        try { widget.element?.remove?.(); } catch { /* Already detached. */ }
+    }
+    const next = node.widgets.filter((widget) => !stale.includes(widget));
+    node.widgets = next;
+    if (Array.isArray(node._widgets)) node._widgets = next;
+    node.__h3DomWidget = null;
+    node._widgetSlotsDirty = true;
+    refreshVueNodeWidgets(node);
+    return true;
+}
+
+function updatePromptEditor(node) {
+    if (!node.__h3Editor) {
+        installPromptEditorSoon(node);
+        return;
+    }
+    const editor = node.__h3Editor;
+    if (!editor) return;
+    preparePromptEditorForUndo(editor);
+    syncEditorMode(node);
+}
+
+function isTransportInputName(name) {
+    return /^media$/i.test(String(name || ""))
+        || /^media_[0-9]+$/i.test(String(name || ""))
+        || /^media_type_[0-9]+$/i.test(String(name || ""))
+        || /^prompt_optimizer_applied$/i.test(String(name || ""));
+}
+
+function removeInputSlot(node, index) {
+    const input = node?.inputs?.[index];
+    if (!input) return false;
+    if (input.link != null) {
+        try {
+            node.disconnectInput?.(index);
+        } catch {
+            // Ignore and fall through to hard removal.
+        }
+        if (input.link != null) {
+            try {
+                node.graph?.removeLink?.(input.link);
+            } catch {
+                // Ignore - the slot is going away either way.
+            }
+            input.link = null;
+        }
+    }
+    if (typeof node.removeInput === "function") node.removeInput(index);
+    else node.inputs.splice(index, 1);
+    return true;
+}
+
+function pruneTransportInputs(nodeData) {
+    const sections = [nodeData?.input?.required, nodeData?.input?.optional];
+    let changed = false;
+    for (const section of sections) {
+        if (!section || typeof section !== "object") continue;
+        for (const name of Object.keys(section)) {
+            if (!isTransportInputName(name)) continue;
+            delete section[name];
+            changed = true;
+        }
+    }
+    if (Array.isArray(nodeData?.inputs)) {
+        nodeData.inputs = nodeData.inputs.filter((input) => !isTransportInputName(input?.name));
+        changed = true;
+    }
+    return changed;
+}
+
+function pruneTransportInputsFromNode(node, { requestLayout = true, force = false } = {}) {
+    if (!node || (!force && !isTarget(node))) return false;
+    let changed = false;
+    if (Array.isArray(node.inputs)) {
+        for (let index = node.inputs.length - 1; index >= 0; index -= 1) {
+            const input = node.inputs[index];
+            const name = String(input?.name || "");
+            if (!isTransportInputName(name)) continue;
+            if (/^media_\d+$/i.test(name) && input.link != null) {
+                convertNativeMediaConnection(node, index);
+            }
+            removeInputSlot(node, index);
+            changed = true;
+        }
+    }
+    if (Array.isArray(node.widgets)) {
+        const stale = node.widgets.filter((widget) => isTransportInputName(widget?.name));
+        if (stale.length) {
+            for (const widget of stale) {
+                try { widget.element?.remove?.(); } catch { /* Already detached. */ }
+            }
+            node.widgets = node.widgets.filter((widget) => !stale.includes(widget));
+            if (Array.isArray(node._widgets)) {
+                node._widgets = node._widgets.filter((widget) => !stale.includes(widget));
+            }
+            refreshVueNodeWidgets(node);
+            changed = true;
+        }
+    }
+    if (changed) {
+        node._widgetSlotsDirty = true;
+        app.graph?.change?.();
+        node.setDirtyCanvas?.(true, true);
+        app.graph?.setDirtyCanvas?.(true, true);
+        if (requestLayout) repairNodeLayout(node);
+    }
+    return changed;
+}
+
+function setConfiguredWidgetValue(node, name, value) {
+    const widget = getWidget(node, name);
+    if (!widget || value === undefined) return;
+    widget.value = value;
+    if (widget._state) widget._state.value = value;
+}
+
+function bindPromptOptimizerWidgetCallbacks(node) {
+    const names = ["prompt_optimizer_provider", "prompt_optimizer_scene_guide"];
+    for (const name of names) {
+        const widget = getWidget(node, name);
+        if (!widget || widget.__h3PromptOptimizerCallbackBound) continue;
+        widget.__h3PromptOptimizerCallbackBound = true;
+        const original = widget.callback;
+        widget.callback = (value) => {
+            original?.call(widget, value);
+            if (name === "prompt_optimizer_scene_guide") widget.value = ZH_BROWSER
+                ? (PROMPT_GUIDES.find((item) => item.value === canonicalPromptGuide(value))?.zh || value)
+                : (PROMPT_GUIDES.find((item) => item.value === canonicalPromptGuide(value))?.en || value);
+            if (name === "prompt_optimizer_provider") {
+                const serviceValue = canonicalPromptProvider(value);
+                widget.value = serviceValue === "disabled"
+                    ? TEXT.promptOptimizerDisabled
+                    : (promptOptimizerServiceEntries().find((item) => item.value === serviceValue)?.label || value);
+            }
+            syncModeWidgets(node);
+            syncPromptOptimizerButton(node);
+            node.setDirtyCanvas?.(true, true);
+            app.graph?.change?.();
+        };
+    }
+}
+
+function repairConfiguredWidgetValues(node, info) {
+    const raw = Array.isArray(info?.widgets_values) ? [...info.widgets_values] : [];
+    if (!raw.length) return;
+
+    const defaults = {
+        mode: MODE_IMAGE,
+        prompt: "",
+        resolution: "480P",
+        aspect_ratio: "16:9",
+        width: 1344,
+        height: 768,
+        seconds: 10,
+        advanced: false,
+        fps: 24,
+        keyframe_role: KEYFRAME_FIRST,
+        ref_image_size: REF_IMAGE_DEFAULT,
+        reference_mention_mode: "index",
+        prompt_optimizer_provider: "disabled",
+        prompt_optimizer_scene_guide: "none",
+    };
+    const names = Object.keys(defaults);
+    const values = raw;
+    // Embedded gallery and rich prompt editor DOM widgets serialize null
+    // placeholders. Remove the gallery placeholder before applying the older
+    // prompt-placeholder migration below.
+    const resolutionAfterDomWidgets = canonicalOption("resolution", values[4]);
+    if (values[1] == null && values[3] == null
+        && Object.prototype.hasOwnProperty.call(OPTION_DEFS.resolution, resolutionAfterDomWidgets)) {
+        values.splice(1, 1);
+    }
+    // Some ComfyUI workflow versions serialize an extra null placeholder
+    // after the prompt widget. Remove it before restoring the named rows so
+    // resolution, dimensions, duration, and the advanced values stay aligned.
+    const resolutionAt = canonicalOption("resolution", values[2]);
+    const nextResolution = canonicalOption("resolution", values[3]);
+    const hasResolution = Object.prototype.hasOwnProperty.call(OPTION_DEFS.resolution, resolutionAt);
+    const hasShiftedResolution = Object.prototype.hasOwnProperty.call(OPTION_DEFS.resolution, nextResolution);
+    if (!hasResolution && hasShiftedResolution) values.splice(2, 1);
+
+    // Versions that exposed the API-settings toggle serialized two extra rows
+    // before FPS: [settings boolean, prompt scheme]. Remove only the obsolete
+    // API row and move the prompt scheme to its new, final widget position.
+    if (typeof values[8] === "boolean" && values.length >= 14) {
+        const legacyPromptGuide = values[9];
+        values.splice(8, 2);
+        values[12] = legacyPromptGuide;
+    }
+    // v0.3 stored only the prompt scheme at index 12. v0.4 inserts the API
+    // provider before it, with prompt optimization disabled by default.
+    if (values.length <= 13) values.splice(12, 0, "disabled");
+
+    const normalized = {
+        mode: Object.prototype.hasOwnProperty.call(OPTION_DEFS.mode, canonicalOption("mode", values[0]))
+            ? canonicalOption("mode", values[0]) : defaults.mode,
+        prompt: typeof values[1] === "string" ? values[1] : defaults.prompt,
+        resolution: Object.prototype.hasOwnProperty.call(OPTION_DEFS.resolution, canonicalOption("resolution", values[2]))
+            ? canonicalOption("resolution", values[2]) : defaults.resolution,
+        aspect_ratio: Object.prototype.hasOwnProperty.call(OPTION_DEFS.aspect_ratio, canonicalOption("aspect_ratio", values[3]))
+            ? canonicalOption("aspect_ratio", values[3]) : defaults.aspect_ratio,
+        width: Number.isFinite(Number(values[4])) ? Number(values[4]) : defaults.width,
+        height: Number.isFinite(Number(values[5])) ? Number(values[5]) : defaults.height,
+        seconds: Number.isFinite(Number(values[6]))
+            ? Math.min(MAX_SECONDS, Math.max(MIN_SECONDS, Number(values[6])))
+            : defaults.seconds,
+        advanced: asBoolean(values[7], defaults.advanced),
+        fps: Number.isFinite(Number(values[8])) ? Number(values[8]) : defaults.fps,
+        keyframe_role: Object.prototype.hasOwnProperty.call(OPTION_DEFS.keyframe_role, canonicalOption("keyframe_role", values[9]))
+            ? canonicalOption("keyframe_role", values[9]) : defaults.keyframe_role,
+        ref_image_size: Object.prototype.hasOwnProperty.call(OPTION_DEFS.ref_image_size, canonicalOption("ref_image_size", values[10]))
+            ? canonicalOption("ref_image_size", values[10]) : defaults.ref_image_size,
+        reference_mention_mode: Object.prototype.hasOwnProperty.call(OPTION_DEFS.reference_mention_mode, canonicalOption("reference_mention_mode", values[11]))
+            ? canonicalOption("reference_mention_mode", values[11]) : defaults.reference_mention_mode,
+        prompt_optimizer_provider: canonicalPromptProvider(values[12] ?? defaults.prompt_optimizer_provider),
+        prompt_optimizer_scene_guide: canonicalPromptGuide(values[13] ?? defaults.prompt_optimizer_scene_guide),
+    };
+    for (const name of names) setConfiguredWidgetValue(node, name, normalized[name]);
+    info.widgets_values = names.map((name) => normalized[name]);
+}
+
+function embeddedMediaCell(node, mediaType, ordinal) {
+    return node.__feihouMediaGallery?.querySelector?.(
+        `[data-media-type="${mediaType}"][data-ordinal="${ordinal}"]`,
+    ) || null;
+}
+
+async function uploadEmbeddedMediaFile(node, mediaType, ordinal, file) {
+    if (!file) return;
+    const cell = embeddedMediaCell(node, mediaType, ordinal);
+    cell?.classList?.add("is-uploading");
+    const status = cell?.querySelector?.(".fh-h3-media-slot-status");
+    if (status) status.textContent = TEXT.embeddedUploading;
+    try {
+        const body = new FormData();
+        body.append("image", file, file.name || `${mediaType}_${ordinal}`);
+        body.append("type", "input");
+        const response = await api.fetchApi("/upload/image", { method: "POST", body });
+        if (!response.ok) throw new Error(`Upload failed (${response.status})`);
+        const uploaded = await response.json();
+        if (!uploaded?.name) throw new Error("ComfyUI did not return an uploaded filename");
+        setEmbeddedMedia(node, mediaType, ordinal, {
+            filename: uploaded.name,
+            subfolder: uploaded.subfolder || "",
+            storage: uploaded.type || "input",
+        });
+    } catch (error) {
+        notifyPromptOptimizer(error?.message || String(error));
+        renderEmbeddedMediaGallery(node);
+    } finally {
+        embeddedMediaCell(node, mediaType, ordinal)?.classList?.remove("is-uploading");
+    }
+}
+
+function chooseEmbeddedMediaFile(node, mediaType, ordinal) {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = EMBEDDED_MEDIA_ACCEPT[mediaType] || "";
+    input.style.display = "none";
+    input.addEventListener("change", () => {
+        const file = input.files?.[0];
+        input.remove();
+        if (file) uploadEmbeddedMediaFile(node, mediaType, ordinal, file);
+    }, { once: true });
+    document.body.append(input);
+    input.click();
+}
+
+function createEmbeddedMediaSlot(node, mediaType, ordinal) {
+    const cell = document.createElement("div");
+    cell.className = `fh-h3-media-slot is-${mediaType}`;
+    cell.dataset.mediaType = mediaType;
+    cell.dataset.ordinal = String(ordinal);
+    cell.tabIndex = 0;
+    cell.setAttribute("role", "button");
+    cell.addEventListener("pointerdown", (event) => event.stopPropagation());
+    cell.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (cell.classList.contains("is-disabled") || cell.classList.contains("is-uploading")) return;
+        chooseEmbeddedMediaFile(node, mediaType, ordinal);
+    });
+    cell.addEventListener("keydown", (event) => {
+        if (!["Enter", " "].includes(event.key) || cell.classList.contains("is-disabled")) return;
+        event.preventDefault();
+        event.stopPropagation();
+        chooseEmbeddedMediaFile(node, mediaType, ordinal);
+    });
+    cell.addEventListener("dragover", (event) => {
+        if (cell.classList.contains("is-disabled")) return;
+        event.preventDefault();
+        event.stopPropagation();
+        cell.classList.add("is-dragover");
+    });
+    cell.addEventListener("dragleave", () => cell.classList.remove("is-dragover"));
+    cell.addEventListener("drop", (event) => {
+        cell.classList.remove("is-dragover");
+        if (cell.classList.contains("is-disabled")) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const file = event.dataTransfer?.files?.[0];
+        if (file) uploadEmbeddedMediaFile(node, mediaType, ordinal, file);
+    });
+    return cell;
+}
+
+function createEmbeddedMediaSection(node, mediaType, count, title) {
+    const section = document.createElement("section");
+    section.className = `fh-h3-media-section is-${mediaType}`;
+    const heading = document.createElement("div");
+    heading.className = "fh-h3-media-heading";
+    heading.textContent = title;
+    const grid = document.createElement("div");
+    grid.className = `fh-h3-media-grid is-${mediaType}`;
+    for (let ordinal = 1; ordinal <= count; ordinal += 1) {
+        grid.append(createEmbeddedMediaSlot(node, mediaType, ordinal));
+    }
+    section.append(heading, grid);
+    return section;
+}
+
+function renderEmbeddedMediaGallery(node) {
+    const gallery = node?.__feihouMediaGallery;
+    if (!gallery) return;
+    const records = ensureEmbeddedMedia(node);
+    const reference = isReferenceMode(node);
+    gallery.dataset.feihouNodeId = String(node.id ?? "");
+    gallery.dataset.mediaCount = String(records.length);
+    gallery.dataset.referenceMode = reference ? "true" : "false";
+    gallery.classList.toggle("is-reference-mode", reference);
+    gallery.classList.toggle("is-image-mode", !reference);
+    for (const mediaType of Object.keys(EMBEDDED_MEDIA_LIMITS)) {
+        for (let ordinal = 1; ordinal <= EMBEDDED_MEDIA_LIMITS[mediaType]; ordinal += 1) {
+            const cell = embeddedMediaCell(node, mediaType, ordinal);
+            if (!cell) continue;
+            const disabled = !reference && (mediaType !== "image" || ordinal > 2);
+            const record = records.find((item) => item.media_type === mediaType && item.ordinal === ordinal);
+            cell.classList.toggle("is-disabled", disabled);
+            cell.classList.toggle("has-media", Boolean(record));
+            cell.tabIndex = disabled ? -1 : 0;
+            cell.setAttribute("aria-disabled", disabled ? "true" : "false");
+            cell.replaceChildren();
+
+            if (record) {
+                const viewUrl = embeddedMediaViewUrl(record);
+                if (mediaType === "image") {
+                    const preview = document.createElement("img");
+                    preview.className = "fh-h3-media-preview";
+                    preview.alt = "";
+                    preview.draggable = false;
+                    preview.src = viewUrl;
+                    cell.append(preview);
+                } else if (mediaType === "video") {
+                    const preview = document.createElement("video");
+                    preview.className = "fh-h3-media-preview";
+                    preview.muted = true;
+                    preview.playsInline = true;
+                    preview.preload = "metadata";
+                    preview.src = viewUrl;
+                    cell.append(preview);
+                } else {
+                    const icon = makeAudioIcon("fh-h3-media-audio-icon");
+                    cell.append(icon);
+                }
+            }
+
+            const badge = document.createElement("span");
+            badge.className = "fh-h3-media-slot-badge";
+            badge.textContent = String(ordinal);
+            const status = document.createElement("span");
+            status.className = "fh-h3-media-slot-status";
+            status.textContent = record ? embeddedMediaFilename(record) : disabled ? TEXT.embeddedDisabled : TEXT.embeddedPick;
+            cell.append(badge, status);
+            if (record) {
+                const clear = document.createElement("button");
+                clear.type = "button";
+                clear.className = "fh-h3-media-slot-clear";
+                clear.textContent = "\u00d7";
+                clear.title = ZH_BROWSER ? "\u79fb\u9664\u7d20\u6750" : "Remove media";
+                clear.addEventListener("pointerdown", (event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                });
+                clear.addEventListener("click", (event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setEmbeddedMedia(node, mediaType, ordinal, null);
+                });
+                cell.append(clear);
+            }
+        }
+    }
+    const galleryWidget = node.__feihouMediaGalleryWidget;
+    if (galleryWidget) {
+        const height = reference ? 460 : 275;
+        galleryWidget.computedHeight = height;
+        if (galleryWidget._state) galleryWidget._state.computedHeight = height;
+    }
+    node._widgetSlotsDirty = true;
+    repairNodeLayout(node);
+}
+
+function removeEmbeddedMediaGalleryWidgets(node) {
+    if (!Array.isArray(node?.widgets)) return;
+    const stale = node.widgets.filter((widget) => String(widget?.name || "") === "feihou_h3_embedded_media");
+    for (const widget of stale) widget.element?.remove?.();
+    if (stale.length) {
+        node.widgets = node.widgets.filter((widget) => !stale.includes(widget));
+        if (Array.isArray(node._widgets)) node._widgets = node._widgets.filter((widget) => !stale.includes(widget));
+    }
+}
+
+function ensureEmbeddedMediaGallery(node) {
+    if (node.__feihouMediaGallery || typeof document === "undefined" || typeof node.addDOMWidget !== "function") return;
+    removeEmbeddedMediaGalleryWidgets(node);
+    ensureEmbeddedMedia(node);
+    const gallery = document.createElement("div");
+    gallery.className = "fh-h3-media-gallery";
+    gallery.addEventListener("pointerdown", (event) => event.stopPropagation());
+    gallery.addEventListener("wheel", (event) => event.stopPropagation(), { passive: true });
+    gallery.append(
+        createEmbeddedMediaSection(node, "image", 9, TEXT.embeddedImages),
+        createEmbeddedMediaSection(node, "video", 3, TEXT.embeddedVideos),
+        createEmbeddedMediaSection(node, "audio", 3, TEXT.embeddedAudios),
+    );
+    const domWidget = node.addDOMWidget("feihou_h3_embedded_media", "feihou_h3_embedded_media", gallery, {
+        serialize: false,
+        margin: 10,
+        getMinHeight: () => isReferenceMode(node) ? 460 : 275,
+        afterResize: () => renderEmbeddedMediaGallery(node),
+    });
+    if (!domWidget) {
+        gallery.remove();
+        return;
+    }
+    domWidget.serialize = false;
+    setWidgetOption(domWidget, "serialize", false);
+    setWidgetOption(domWidget, "canvasOnly", false);
+    node.__feihouMediaGallery = gallery;
+    node.__feihouMediaGalleryWidget = domWidget;
+    const domIndex = node.widgets?.indexOf(domWidget) ?? -1;
+    const modeIndex = node.widgets?.indexOf(getWidget(node, "mode")) ?? -1;
+    if (domIndex >= 0 && modeIndex >= 0 && domIndex !== modeIndex + 1) {
+        node.widgets.splice(domIndex, 1);
+        node.widgets.splice(node.widgets.indexOf(getWidget(node, "mode")) + 1, 0, domWidget);
+    }
+    if (Array.isArray(node.size) && node.size[0] < 420) node.setSize?.([420, node.size[1]]);
+    renderEmbeddedMediaGallery(node);
+}
+
+function setupMainNodeFrontend(node) {
+    if (!node || !isTarget(node)) return;
+    node.properties ||= {};
+    delete node.properties[LINKS_PROP];
+    ensureEmbeddedMedia(node);
+    pruneTransportInputsFromNode(node, { force: true });
+    localizeNodeInstance(node);
+    bindPromptOptimizerWidgetCallbacks(node);
+    syncModeWidgets(node);
+    ensureEmbeddedMediaGallery(node);
+    installPromptEditorSoon(node);
+
+    const modeWidget = getWidget(node, "mode");
+    if (modeWidget && !modeWidget.__feihouModeCallbackBound) {
+        modeWidget.__feihouModeCallbackBound = true;
+        const originalCallback = modeWidget.callback;
+        modeWidget.callback = (value) => {
+            originalCallback?.call(modeWidget, value);
+            syncModeWidgets(node);
+            renderEmbeddedMediaGallery(node);
+            syncEditorMode(node);
+            renderEditorFromNode(node);
+            requestMentionPreviewRefresh();
+            repairNodeLayout(node);
+            node.setDirtyCanvas?.(true, true);
+        };
+    }
+    const resolutionWidget = getWidget(node, "resolution");
+    if (resolutionWidget && !resolutionWidget.__h3ConditionalCallbackBound) {
+        resolutionWidget.__h3ConditionalCallbackBound = true;
+        const originalCallback = resolutionWidget.callback;
+        resolutionWidget.callback = (value) => {
+            originalCallback?.call(resolutionWidget, value);
+            syncModeWidgets(node);
+            repairNodeLayout(node);
+            node.setDirtyCanvas?.(true, true);
+        };
+    }
+    const advancedWidget = getWidget(node, "advanced");
+    if (advancedWidget && !advancedWidget.__h3ConditionalCallbackBound) {
+        advancedWidget.__h3ConditionalCallbackBound = true;
+        const originalCallback = advancedWidget.callback;
+        advancedWidget.callback = (value) => {
+            originalCallback?.call(advancedWidget, value);
+            syncModeWidgets(node);
+            syncPromptOptimizerButton(node);
+            repairNodeLayout(node);
+            node.setDirtyCanvas?.(true, true);
+        };
+    }
+    const referenceMentionWidget = getWidget(node, "reference_mention_mode");
+    if (referenceMentionWidget && !referenceMentionWidget.__h3ConditionalCallbackBound) {
+        referenceMentionWidget.__h3ConditionalCallbackBound = true;
+        const originalCallback = referenceMentionWidget.callback;
+        referenceMentionWidget.callback = (value) => {
+            originalCallback?.call(referenceMentionWidget, value);
+            syncModeWidgets(node);
+            renderEditorFromNode(node);
+            requestMentionPreviewRefresh();
+            repairNodeLayout(node);
+            node.setDirtyCanvas?.(true, true);
+        };
+    }
+}
+
+function applyFreshNodeDefaults(node) {
+    if (!node || node.__h3FreshDefaultsApplied) return;
+    node.__h3FreshDefaultsApplied = true;
+    setConfiguredWidgetValue(node, "seconds", 10);
+    setConfiguredWidgetValue(node, "fps", 24);
+    setConfiguredWidgetValue(node, "ref_image_size", REF_IMAGE_DEFAULT);
+    setConfiguredWidgetValue(node, "prompt_optimizer_provider", "disabled");
+}
+
+function installNode(nodeType, nodeData) {
+    if (nodeData?.name !== NODE_CLASS) return;
+    // Strip the virtual-wire transport fields from every frontend definition
+    // before a node instance can be constructed. Execution still receives
+    // them through the prompt patch and the Python INPUT_TYPES declaration.
+    pruneTransportInputs(nodeData);
+    if (nodeType?.nodeData && nodeType.nodeData !== nodeData) pruneTransportInputs(nodeType.nodeData);
+    if (nodeType?.prototype?.constructor?.nodeData && nodeType.prototype.constructor.nodeData !== nodeData) {
+        pruneTransportInputs(nodeType.prototype.constructor.nodeData);
+    }
+    if (nodeType.prototype.__h3EasyNodeInstalled) return;
+    nodeType.prototype.__h3EasyNodeInstalled = true;
+    const originalCreated = nodeType.prototype.onNodeCreated;
+    nodeType.prototype.onNodeCreated = function onNodeCreatedH3Easy() {
+        const result = originalCreated?.apply(this, arguments);
+        applyFreshNodeDefaults(this);
+        setupMainNodeFrontend(this);
+        return result;
+    };
+
+    const originalAdded = nodeType.prototype.onAdded;
+    nodeType.prototype.onAdded = function onAddedH3Easy(graph) {
+        const result = originalAdded?.apply(this, arguments);
+        this.properties ||= {};
+        delete this.properties[LINKS_PROP];
+        ensureEmbeddedMedia(this);
+        pruneTransportInputsFromNode(this, { force: true });
+        localizeNodeInstance(this);
+        bindPromptOptimizerWidgetCallbacks(this);
+        ensureEmbeddedMediaGallery(this);
+        // A workflow-tab activation is a restore operation. Its serialized or
+        // previously stable size is already authoritative, so reapplying the
+        // same widget visibility must not add/subtract rows again.
+        syncModeWidgets(this, { adjustHeight: false });
+        repairNodeLayout(this);
+        return result;
+    };
+
+    const originalConfigure = nodeType.prototype.onConfigure;
+    nodeType.prototype.onConfigure = function onConfigureH3Easy(info) {
+        const configuredSize = Array.isArray(info?.size) && info.size.length >= 2
+            ? [Number(info.size[0]), Number(info.size[1])]
+            : null;
+        const result = originalConfigure?.apply(this, arguments);
+        if (configuredSize && configuredSize.every(Number.isFinite)) {
+            // Adding/replacing the DOM prompt editor may make ComfyUI expand
+            // the node to its calculated minimum. Restore the exact workflow
+            // size after the editor is mounted instead of accumulating that
+            // minimum every time the workflow tab is activated.
+            this.__h3EditorStableSize = configuredSize;
+        }
+        if (info?.properties?.[PROMPT_DOC_PROP]) {
+            this.properties ||= {};
+            this.properties[PROMPT_DOC_PROP] = info.properties[PROMPT_DOC_PROP];
+        }
+        if (info?.properties?.[PROMPT_VIEW_PROP]) {
+            this.properties ||= {};
+            this.properties[PROMPT_VIEW_PROP] = info.properties[PROMPT_VIEW_PROP];
+        }
+        repairConfiguredWidgetValues(this, info);
+        this.properties ||= {};
+        delete this.properties[LINKS_PROP];
+        ensureEmbeddedMedia(this);
+        pruneTransportInputsFromNode(this, { force: true });
+        localizeNodeInstance(this);
+        bindPromptOptimizerWidgetCallbacks(this);
+        ensureEmbeddedMediaGallery(this);
+        syncModeWidgets(this, { adjustHeight: false });
+        renderEmbeddedMediaGallery(this);
+        renderEditorFromNode(this);
+        resetPromptHistory(this);
+        syncEditorMode(this);
+        requestMentionPreviewRefresh();
+        installPromptEditorSoon(this);
+        if (this.__h3Editor && restorePromptEditorStableSize(this)) repairNodeLayout(this);
+        repairNodeLayout(this);
+        const mediaInputIndex = getMediaInputIndex(this);
+        if (mediaInputIndex >= 0 && this.inputs?.[mediaInputIndex]?.link != null) {
+            scheduleNativeMediaConnectionConversion(this, mediaInputIndex);
+        }
+        return result;
+    };
+
+    const originalConnectionsChange = nodeType.prototype.onConnectionsChange;
+    nodeType.prototype.onConnectionsChange = function onConnectionsChangeH3Easy(type, index, connected, linkInfo) {
+        const result = originalConnectionsChange?.apply(this, arguments);
+        const inputIndex = Number(index);
+        const input = this.inputs?.[Number.isFinite(inputIndex) ? inputIndex : -1];
+        if (String(input?.name || "") === "prompt") {
+            syncPromptExternalConnectionState(this);
+            globalThis.requestAnimationFrame?.(() => syncPromptExternalConnectionState(this));
+        }
+        if (connected && !this.__h3VirtualWireClearing && /^media(?:_\d+)?$/i.test(String(input?.name || ""))) {
+            scheduleNativeMediaConnectionConversion(this, inputIndex, linkInfo);
+        }
+        return result;
+    };
+
+    const originalSerialize = nodeType.prototype.onSerialize;
+    nodeType.prototype.onSerialize = function onSerializeH3Easy(info) {
+        if (this.__h3Editor) syncPromptFromEditor(this, false);
+        const result = originalSerialize?.apply(this, arguments);
+        if (info && this.properties?.[PROMPT_DOC_PROP]) {
+            info.properties ||= {};
+            info.properties[PROMPT_DOC_PROP] = this.properties[PROMPT_DOC_PROP];
+        }
+        if (info && this.properties?.[PROMPT_VIEW_PROP]) {
+            info.properties ||= {};
+            info.properties[PROMPT_VIEW_PROP] = this.properties[PROMPT_VIEW_PROP];
+        }
+        if (info) {
+            info.properties ||= {};
+            info.properties[EMBEDDED_MEDIA_PROP] = ensureEmbeddedMedia(this);
+        }
+        return result;
+    };
+
+    const originalDraw = nodeType.prototype.onDrawForeground;
+    nodeType.prototype.onDrawForeground = function onDrawForegroundH3Easy(ctx) {
+        const result = originalDraw?.apply(this, arguments);
+        if (!this.__h3Editor && !this.__h3PromptInstallPending && !this.__h3PromptInstallRetry) installPromptEditorSoon(this);
+        return result;
+    };
+
+    const originalRemoved = nodeType.prototype.onRemoved;
+    nodeType.prototype.onRemoved = function onRemovedH3Easy() {
+        if (Array.isArray(this.size) && this.size.length >= 2) this.__h3EditorStableSize = [...this.size];
+        clearPromptOptimizerStatusTimers(this);
+        closeMentionMenu(this);
+        if (this.__h3PromptInstallRetry) clearTimeout(this.__h3PromptInstallRetry);
+        this.__h3PromptInstallRetry = null;
+        this.__h3PromptInstallPending = false;
+        this.__h3PromptInstallAttempts = 0;
+        this.__h3PromptInstallNextAt = 0;
+        this.__h3EditorWrap?.remove?.();
+        this.__h3Editor = null;
+        this.__h3EditorWrap = null;
+        this.__h3PromptEditorTools = null;
+        this.__h3PromptViewButton = null;
+        this.__h3RawPromptNeedsSync = false;
+        this.__h3PromptOptimizerStatus = null;
+        this.__h3PromptOptimizerStatusText = null;
+        this.__feihouMediaGallery?.remove?.();
+        this.__feihouMediaGallery = null;
+        this.__feihouMediaGalleryWidget = null;
+        removeEmbeddedMediaGalleryWidgets(this);
+        removePromptEditorWidgets(this);
+        this.__h3DomWidget = null;
+        return originalRemoved?.apply(this, arguments);
+    };
+}
+
+function installLoaderNode(nodeType, nodeData) {
+    if (nodeData?.name !== LOADER_CLASS) return;
+    if (nodeType.prototype.__h3EasyLoaderInstalled) return;
+    nodeType.prototype.__h3EasyLoaderInstalled = true;
+    const originalCreated = nodeType.prototype.onNodeCreated;
+    nodeType.prototype.onNodeCreated = function onNodeCreatedH3Loader() {
+        const result = originalCreated?.apply(this, arguments);
+        localizeNodeInstance(this);
+        return result;
+    };
+    const originalConfigure = nodeType.prototype.onConfigure;
+    nodeType.prototype.onConfigure = function onConfigureH3Loader(info) {
+        const result = originalConfigure?.apply(this, arguments);
+        localizeNodeInstance(this);
+        return result;
+    };
+}
+
+function installAdapterNode(nodeType, nodeData) {
+    if (nodeData?.name !== ADAPTER_CLASS) return;
+    if (nodeType.prototype.__h3EasyAdapterInstalled) return;
+    nodeType.prototype.__h3EasyAdapterInstalled = true;
+    const originalCreated = nodeType.prototype.onNodeCreated;
+    nodeType.prototype.onNodeCreated = function onNodeCreatedH3Adapter() {
+        const result = originalCreated?.apply(this, arguments);
+        localizeNodeInstance(this);
+        return result;
+    };
+    const originalConfigure = nodeType.prototype.onConfigure;
+    nodeType.prototype.onConfigure = function onConfigureH3Adapter(info) {
+        const result = originalConfigure?.apply(this, arguments);
+        localizeNodeInstance(this);
+        return result;
+    };
+}
+
+function installOutputNode(nodeType, nodeData) {
+    if (nodeData?.name !== OUTPUT_CLASS) return;
+    if (nodeType.prototype.__h3EasyOutputInstalled) return;
+    nodeType.prototype.__h3EasyOutputInstalled = true;
+    const originalCreated = nodeType.prototype.onNodeCreated;
+    nodeType.prototype.onNodeCreated = function onNodeCreatedH3Output() {
+        const result = originalCreated?.apply(this, arguments);
+        localizeNodeInstance(this);
+        return result;
+    };
+    const originalConfigure = nodeType.prototype.onConfigure;
+    nodeType.prototype.onConfigure = function onConfigureH3Output(info) {
+        const result = originalConfigure?.apply(this, arguments);
+        localizeNodeInstance(this);
+        return result;
+    };
+}
+
+function install() {
+    if (installed) return;
+    installed = true;
+    patchGraphToPrompt();
+    patchEditorKeyHandling();
+    installNativeThemeWatcher();
+    document.addEventListener("pointerdown", (event) => {
+        for (const node of app.graph?._nodes || []) {
+            const state = node?.__h3MentionMenu;
+            if (!state) continue;
+            if (state.element?.contains?.(event.target) || node.__h3EditorWrap?.contains?.(event.target)) continue;
+            closeMentionMenu(node);
+        }
+    }, true);
+    window.addEventListener("feihou-h3-settings-updated", () => {
+        promptOptimizerSettingsLoaded = false;
+        loadPromptOptimizerSettings({ force: true }).catch(() => {});
+    });
+    setTimeout(() => loadPromptOptimizerSettings().catch(() => {}), 0);
+    const style = document.createElement("style");
+    style.textContent = `
+      .fh-h3-media-gallery {
+        display: grid; gap: 8px; width: 100%; height: 100%; min-width: 0; box-sizing: border-box; padding: 2px 0;
+        color: var(--h3-native-widget-text, rgba(255,255,255,.88)); font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      .fh-h3-media-gallery.is-image-mode .fh-h3-media-section.is-video,
+      .fh-h3-media-gallery.is-image-mode .fh-h3-media-section.is-audio { display: none; }
+      .fh-h3-media-section { display: grid; gap: 4px; min-width: 0; }
+      .fh-h3-media-heading {
+        overflow: hidden; color: var(--h3-native-widget-muted, rgba(255,255,255,.54)); font-size: 10px; font-weight: 650;
+        line-height: 16px; letter-spacing: .035em; text-transform: uppercase; text-overflow: ellipsis; white-space: nowrap;
+      }
+      .fh-h3-media-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; min-width: 0; }
+      .fh-h3-media-slot {
+        appearance: none; position: relative; display: flex; align-items: center; justify-content: center; min-width: 0; height: 72px; overflow: hidden;
+        box-sizing: border-box; padding: 0; border: 1px dashed var(--h3-native-widget-outline, rgba(255,255,255,.18)); border-radius: 7px;
+        background: rgba(255,255,255,.035); color: var(--h3-native-widget-muted, rgba(255,255,255,.48)); cursor: pointer;
+        transition: border-color .12s ease, background-color .12s ease, opacity .12s ease, transform .12s ease;
+      }
+      .fh-h3-media-grid.is-video .fh-h3-media-slot { height: 68px; }
+      .fh-h3-media-grid.is-audio .fh-h3-media-slot { height: 54px; }
+      .fh-h3-media-slot:hover, .fh-h3-media-slot:focus-visible, .fh-h3-media-slot.is-dragover {
+        border-color: rgba(0,226,187,.64); background: rgba(0,226,187,.075); outline: none;
+      }
+      .fh-h3-media-slot:active:not(.is-disabled) { transform: scale(.985); }
+      .fh-h3-media-slot.has-media { border-style: solid; border-color: rgba(255,255,255,.18); background: rgba(0,0,0,.28); }
+      .fh-h3-media-slot.is-disabled { opacity: .24; cursor: not-allowed; filter: grayscale(.8); }
+      .fh-h3-media-slot.is-uploading { cursor: wait; opacity: .68; }
+      .fh-h3-media-preview { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: #111; pointer-events: none; }
+      .fh-h3-media-audio-icon { width: 40px; height: 40px; object-fit: contain; opacity: .86; pointer-events: none; }
+      .fh-h3-media-slot-badge {
+        position: absolute; left: 4px; top: 4px; z-index: 2; display: inline-flex; align-items: center; justify-content: center; width: 17px; height: 17px;
+        border-radius: 5px; background: rgba(0,0,0,.68); color: rgba(255,255,255,.9); font: 700 9px/1 Consolas, monospace; pointer-events: none;
+      }
+      .fh-h3-media-slot-status {
+        position: absolute; left: 4px; right: 4px; bottom: 4px; z-index: 2; overflow: hidden; padding: 2px 4px; border-radius: 4px;
+        background: rgba(0,0,0,.62); color: rgba(255,255,255,.8); font: 500 8px/12px system-ui, sans-serif; text-overflow: ellipsis; white-space: nowrap; pointer-events: none;
+      }
+      .fh-h3-media-slot:not(.has-media) .fh-h3-media-slot-status { background: transparent; color: inherit; white-space: normal; text-align: center; }
+      .fh-h3-media-slot-clear {
+        appearance: none; position: absolute; right: 4px; top: 4px; z-index: 3; display: inline-flex; align-items: center; justify-content: center;
+        width: 18px; height: 18px; padding: 0; border: 0; border-radius: 5px; background: rgba(0,0,0,.7); color: #fff; cursor: pointer; font: 700 14px/1 system-ui;
+      }
+      .fh-h3-media-slot-clear:hover, .fh-h3-media-slot-clear:focus-visible { background: rgba(212,70,70,.9); outline: none; }
+      .h3-prompt-editor-wrap {
+        position: relative; display: block; width: 100%; height: 100%; min-width: 0; min-height: 0; max-height: 100%;
+        box-sizing: border-box; padding: 0; border-radius: var(--h3-native-widget-radius, 0); overflow: hidden; contain: size layout paint;
+      }
+      .h3-prompt-editor {
+        --h3-prompt-text-size: var(--h3-native-widget-text-size, var(--comfy-textarea-font-size, 12px));
+        display: block; width: 100%; height: 100%; min-width: 0; min-height: 0; max-height: 100%; box-sizing: border-box;
+        padding: var(--h3-native-widget-padding, 2px);
+        padding-bottom: calc(var(--h3-native-widget-padding, 2px) + 24px); overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain;
+        white-space: pre-wrap; overflow-wrap: anywhere; border: 0; border-radius: var(--h3-native-widget-radius, 0); outline: none;
+        resize: none; background-color: var(--h3-native-widget-bg, var(--comfy-input-bg, #222));
+        color: var(--h3-native-widget-text, var(--input-text, #ddd)); caret-color: var(--h3-native-widget-text, var(--input-text, #ddd));
+        font-family: Consolas, "Courier New", monospace; font-size: var(--h3-prompt-text-size); font-weight: 400;
+        font-style: normal; line-height: var(--h3-native-widget-line-height, normal); letter-spacing: 0;
+      }
+      .h3-prompt-editor :not(.h3-mention-chip):not(.h3-mention-chip *):not(.h3-dialogue-block):not(.h3-dialogue-block *) {
+        font-family: Consolas, "Courier New", monospace !important; font-size: var(--h3-prompt-text-size) !important;
+        font-weight: 400 !important; font-style: normal !important; line-height: var(--h3-native-widget-line-height, normal) !important; letter-spacing: 0 !important;
+      }
+      .h3-prompt-editor-wrap.h3-native-vue-nodes .h3-prompt-editor:focus {
+        box-shadow: 0 0 0 1px var(--h3-native-widget-focus, var(--h3-native-widget-outline, rgba(255,255,255,.18)));
+      }
+      .h3-prompt-editor-wrap.is-external .h3-prompt-editor {
+        color: var(--h3-native-widget-muted, rgba(255,255,255,.42)); caret-color: transparent; cursor: not-allowed; opacity: .72;
+      }
+      .h3-prompt-editor-wrap.is-external .h3-prompt-editor:focus { box-shadow: none; }
+      .h3-prompt-editor-wrap.is-loading .h3-prompt-editor { cursor: wait; opacity: .72; }
+      .h3-prompt-editor:empty::before { content: attr(data-placeholder); color: var(--h3-native-widget-muted, rgba(255,255,255,.38)); pointer-events: none; }
+      .h3-prompt-editor-status {
+        position: absolute; left: 12px; bottom: 4px; z-index: 3; display: inline-flex; align-items: center; gap: 5px; max-width: calc(100% - 92px);
+        overflow: hidden; color: var(--h3-native-widget-text, rgba(255,255,255,.78)); opacity: .56; pointer-events: none; user-select: none;
+        font: 600 9px/18px Consolas, "Courier New", monospace; letter-spacing: 0; white-space: nowrap; text-overflow: ellipsis;
+      }
+      .h3-prompt-editor-status[hidden] { display: none !important; }
+      .h3-prompt-editor-status-spinner {
+        display: inline-block; width: 8px; height: 8px; flex: 0 0 8px; box-sizing: border-box; border: 1px solid currentColor; border-radius: 50%;
+      }
+      .h3-prompt-editor-status.is-loading .h3-prompt-editor-status-spinner { border-right-color: transparent; animation: h3-prompt-status-spin .72s linear infinite; }
+      @keyframes h3-prompt-status-spin { to { transform: rotate(360deg); } }
+      .h3-prompt-editor-tools {
+        position: absolute; right: 14px; bottom: 4px; z-index: 3; display: flex; align-items: center; gap: 3px; pointer-events: auto;
+      }
+      .h3-prompt-editor-tool {
+        appearance: none; display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 18px; padding: 0;
+        border: 1px solid transparent; border-radius: 4px; outline: none; background: transparent; box-shadow: none;
+        color: var(--h3-native-widget-text, rgba(255,255,255,.78)); opacity: .34; cursor: pointer; user-select: none;
+        font: 600 9px/1 Consolas, "Courier New", monospace; letter-spacing: -.4px; transition: opacity .12s ease, background-color .12s ease, border-color .12s ease, color .12s ease;
+      }
+      .h3-prompt-editor-tool:hover, .h3-prompt-editor-tool:focus-visible {
+        opacity: .62; background: rgba(255,255,255,.045); border-color: rgba(255,255,255,.1);
+      }
+      .h3-prompt-editor-tool.is-active {
+        opacity: .5; color: rgba(190,255,244,.88); background: rgba(0,226,187,.04); border-color: rgba(0,226,187,.12);
+      }
+      .h3-prompt-editor-tool.is-configured { opacity: .46; }
+      .h3-prompt-editor-tool.is-loading { opacity: .64; animation: h3-prompt-tool-pulse .8s ease-in-out infinite alternate; }
+      .h3-prompt-editor-tool:disabled, .h3-prompt-editor-tool.is-external { opacity: .16; cursor: not-allowed; pointer-events: none; }
+      @keyframes h3-prompt-tool-pulse { from { transform: scale(.88); } to { transform: scale(1.06); } }
+      .h3-mention-chip {
+        display: inline; max-width: 150px; margin: 0 1px; padding: 0; vertical-align: baseline; border: 0; border-radius: 0;
+        background: transparent; color: rgba(0,226,187,.98); font-family: inherit; font-size: var(--h3-prompt-text-size, 12px);
+        font-weight: 400; line-height: inherit; letter-spacing: 0; user-select: text; cursor: text;
+      }
+      .h3-mention-chip.is-unresolved { color: #ff9b9b; text-decoration: underline wavy rgba(255,110,110,.86); text-decoration-thickness: 1px; }
+      .h3-mention-chip-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: baseline; }
+      .h3-dialogue-block {
+        display: inline; margin: 0 1px; padding: 2px 4px; vertical-align: 1px; border: 0; border-radius: 4px;
+        background: rgba(0,226,187,.14); color: rgba(190,255,244,.98); font-family: Consolas, "Courier New", monospace; font-size: var(--h3-prompt-text-size, 12px);
+        box-shadow: inset 0 0 0 1px rgba(0,226,187,.16); font-weight: 400; line-height: calc(1em + 6px); letter-spacing: 0; white-space: pre-wrap;
+        -webkit-box-decoration-break: clone; box-decoration-break: clone; user-select: text; cursor: text; outline: none;
+      }
+      .h3-dialogue-block:focus { background: rgba(0,226,187,.19); box-shadow: inset 0 0 0 1px rgba(0,226,187,.26); }
+      .h3-mention-chip-thumb { display: inline-block; width: 16px; height: 16px; margin-right: 2px; object-fit: cover; border-radius: 3px; vertical-align: -2px; background: rgba(255,255,255,.12); user-select: none; }
+      .h3-mention-chip-thumb.is-image, .h3-mention-menu-thumb.is-image { background: #5aa9f0; }
+      .h3-mention-chip-thumb.is-video, .h3-mention-menu-thumb.is-video { position: relative; background: linear-gradient(135deg, #1557b8, #49b6ff); }
+      .h3-mention-chip-thumb.is-video::after {
+        content: ""; position: absolute; left: 6px; top: 4px; border-left: 6px solid rgba(255,255,255,.9); border-top: 4px solid transparent; border-bottom: 4px solid transparent;
+      }
+      .h3-mention-menu-thumb.is-video::after {
+        content: ""; position: absolute; left: 13px; top: 10px; border-left: 10px solid rgba(255,255,255,.9); border-top: 7px solid transparent; border-bottom: 7px solid transparent;
+      }
+      .h3-mention-menu {
+        position: fixed; z-index: 10080; width: 198px; min-width: 198px; max-width: 198px; max-height: 360px; overflow: auto; padding: 5px;
+        border: 1px solid var(--h3-native-widget-outline, rgba(255,255,255,.16)); border-radius: 8px;
+        background: var(--h3-native-menu-bg, rgba(28,28,28,.98)); box-shadow: 0 16px 38px rgba(0,0,0,.42);
+        color: var(--h3-native-widget-text, rgba(255,255,255,.94)); font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      .h3-mention-menu-title { padding: 6px 8px 7px; color: var(--h3-native-widget-muted, rgba(255,255,255,.62)); font-size: 12px; }
+      .h3-mention-menu-empty { padding: 9px 10px; color: var(--h3-native-widget-muted, rgba(255,255,255,.62)); font-size: 12px; }
+      .h3-mention-menu-item { display: grid; grid-template-columns: 38px minmax(0,1fr); gap: 8px; align-items: center; min-height: 42px; padding: 4px 7px; border-radius: 6px; cursor: pointer; }
+      .h3-mention-menu-item.is-active, .h3-mention-menu-item:hover { background: rgba(160,255,178,.15); }
+      .h3-mention-menu-thumb { display: block; width: 36px; height: 36px; object-fit: cover; border-radius: 5px; background: rgba(255,255,255,.1); }
+      .h3-mention-menu-main { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 700; }
+      .h3-mention-menu-detail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px; color: var(--h3-native-widget-muted, rgba(255,255,255,.55)); font-size: 11px; }
+      .h3-optimizer-settings-overlay {
+        --h3-settings-bg-base: #1c1e23; --h3-settings-bg-surface: #26282e; --h3-settings-bg-hover: #31343c; --h3-settings-text: #e3e3e3;
+        --h3-settings-muted: #a8adb8; --h3-settings-border: rgba(255,255,255,.12); --h3-settings-border-light: rgba(255,255,255,.18);
+        --h3-settings-accent: #a8c7fa; --h3-settings-accent-dark: #041e49;
+        position: fixed; inset: 0; z-index: 10090; display: flex; align-items: center; justify-content: center; padding: 16px;
+        box-sizing: border-box; background: rgba(0,0,0,.58); color: var(--h3-settings-text);
+        font-family: "Google Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
+      }
+      .h3-optimizer-settings-dialog {
+        width: min(440px, calc(100vw - 32px)); max-height: calc(100vh - 32px); box-sizing: border-box; overflow: auto; border: 1px solid rgba(255,255,255,.15); border-radius: 16px;
+        background: var(--h3-settings-bg-base); color: var(--h3-settings-text); box-shadow: 0 24px 64px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.05);
+      }
+      .h3-optimizer-settings-header { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 14px 20px 12px; border-bottom: 1px solid var(--h3-settings-border); }
+      .h3-optimizer-settings-title { min-width: 0; color: var(--h3-settings-text); font-size: 17px; font-weight: 600; letter-spacing: 0; }
+      .h3-optimizer-settings-header-actions { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; }
+      .h3-optimizer-settings-close {
+        appearance: none; width: 28px; height: 28px; flex: 0 0 28px; padding: 0; border: 1px solid transparent; border-radius: 8px; background: transparent;
+        color: rgba(227,227,227,.56); cursor: pointer; font: inherit; font-size: 17px; font-weight: 500; line-height: 1; transition: background .2s, border-color .2s, color .2s;
+      }
+      .h3-optimizer-settings-close:hover, .h3-optimizer-settings-close:focus-visible { border-color: rgba(168,199,250,.32); background: rgba(168,199,250,.1); color: #dce7fa; outline: none; }
+      .h3-optimizer-settings-form { display: grid; gap: 10px; padding: 14px 20px 12px; }
+      .h3-optimizer-settings-row { display: flex; flex-direction: column; align-items: stretch; gap: 5px; min-height: 0; }
+      .h3-optimizer-settings-label { color: var(--h3-settings-muted); font-size: 13px; font-weight: 500; }
+      .h3-optimizer-settings-control {
+        width: 100%; min-width: 0; box-sizing: border-box; height: 34px; padding: 7px 12px; border: 1px solid var(--h3-settings-border); border-radius: 8px;
+        background: var(--h3-settings-bg-base); color: var(--h3-settings-text); outline: none; font: inherit; font-size: 14px; transition: border-color .2s, background .2s, box-shadow .2s;
+      }
+      .h3-optimizer-settings-control:hover { border-color: var(--h3-settings-border-light); }
+      .h3-optimizer-settings-control:focus, .h3-optimizer-settings-control.is-open { border-color: var(--h3-settings-accent); background: #1a1b1e; box-shadow: none; }
+      .h3-optimizer-settings-select-wrap { position: relative; min-width: 0; width: 100%; user-select: none; }
+      .h3-optimizer-settings-select { display: flex; align-items: center; justify-content: space-between; gap: 10px; text-align: left; cursor: pointer; }
+      .h3-optimizer-settings-select-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .h3-optimizer-settings-select-chevron { width: 8px; height: 8px; flex: 0 0 8px; margin: -4px 3px 0 0; border-right: 1.5px solid var(--h3-settings-muted); border-bottom: 1.5px solid var(--h3-settings-muted); transform: rotate(45deg); transition: transform .15s ease-out, border-color .15s ease-out; }
+      .h3-optimizer-settings-select:hover .h3-optimizer-settings-select-chevron, .h3-optimizer-settings-select.is-open .h3-optimizer-settings-select-chevron { border-color: var(--h3-settings-text); }
+      .h3-optimizer-settings-select.is-open .h3-optimizer-settings-select-chevron { transform: rotate(225deg) translate(-1px, -1px); }
+      .h3-optimizer-settings-select-menu {
+        position: absolute; top: calc(100% + 6px); left: 0; right: 0; z-index: 100; overflow: hidden; padding: 6px; border: 1px solid rgba(255,255,255,.08); border-radius: 12px;
+        background: rgba(38,40,46,.96); backdrop-filter: blur(12px); box-shadow: 0 12px 32px rgba(0,0,0,.6); opacity: 1; transform: translateY(0);
+      }
+      .h3-optimizer-settings-select-option {
+        display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 38px; padding: 10px 12px; border: 0; border-radius: 8px; background: transparent;
+        color: var(--h3-settings-text); cursor: pointer; font: inherit; font-size: 14px; text-align: left; transition: background .12s, color .12s;
+      }
+      .h3-optimizer-settings-select-option:hover { background: rgba(255,255,255,.06); }
+      .h3-optimizer-settings-select-option.is-selected { background: rgba(168,199,250,.1); color: var(--h3-settings-accent); font-weight: 500; }
+      .h3-optimizer-settings-select-option.is-selected::after { content: "\\2713"; margin-left: auto; color: currentColor; font-size: 14px; }
+      .h3-optimizer-settings-check { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 26px; color: var(--h3-settings-text); font-size: 13px; cursor: pointer; }
+      .h3-optimizer-settings-switch { position: relative; display: inline-block; width: 40px; height: 22px; flex: 0 0 40px; padding: 0; border: 0; background: transparent; cursor: pointer; }
+      .h3-optimizer-settings-switch-track { position: absolute; inset: 0; display: block; border: 1px solid rgba(255,255,255,.1); border-radius: 22px; background: #22252a; transition: background-color .2s, border-color .2s; }
+      .h3-optimizer-settings-switch-thumb { position: absolute; left: 3px; bottom: 3px; width: 16px; height: 16px; border-radius: 50%; background: #747a83; box-shadow: 0 1px 3px rgba(0,0,0,.32); transition: transform .2s, background-color .2s; }
+      .h3-optimizer-settings-switch.is-on .h3-optimizer-settings-switch-track { border-color: rgba(255,255,255,.17); background: #30343a; }
+      .h3-optimizer-settings-switch.is-on .h3-optimizer-settings-switch-thumb { background: #969ca5; }
+      .h3-optimizer-settings-switch.is-on .h3-optimizer-settings-switch-thumb { transform: translateX(18px); }
+      .h3-optimizer-settings-switch:focus-visible { outline: 2px solid var(--h3-settings-accent); outline-offset: 3px; border-radius: 12px; }
+      .h3-optimizer-settings-error { margin: -3px 20px 2px; color: #f28b82; font-size: 12px; line-height: 1.5; }
+      .h3-optimizer-settings-footer { display: flex; justify-content: flex-end; gap: 8px; padding: 0 20px 14px; }
+      .h3-optimizer-settings-button {
+        appearance: none; min-width: 76px; height: 34px; padding: 0 14px; border: 1px solid rgba(255,255,255,.1); border-radius: 9px; cursor: pointer; font: inherit; font-size: 13px; font-weight: 500; transition: all .2s cubic-bezier(.2,0,0,1);
+      }
+      .h3-optimizer-settings-button.is-secondary { background: rgba(255,255,255,.05); color: var(--h3-settings-text); }
+      .h3-optimizer-settings-button.is-secondary:hover, .h3-optimizer-settings-button.is-secondary:focus-visible { background: rgba(255,255,255,.1); border-color: rgba(255,255,255,.2); color: var(--h3-settings-text); outline: none; transform: translateY(-1px); }
+      .h3-optimizer-settings-button.is-primary { border-color: rgba(255,255,255,.16); background: rgba(255,255,255,.07); color: var(--h3-settings-text); font-weight: 600; box-shadow: inset 0 1px 0 rgba(255,255,255,.06); }
+      .h3-optimizer-settings-button.is-primary:hover, .h3-optimizer-settings-button.is-primary:focus-visible { border-color: rgba(168,199,250,.5); background: rgba(168,199,250,.16); color: #dce7fa; outline: none; transform: translateY(-1px); box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 4px 12px rgba(168,199,250,.08); }
+      .h3-optimizer-settings-button.is-header { min-width: 0; width: auto; height: 28px; padding: 0 9px; border-color: transparent; border-radius: 8px; background: transparent; color: rgba(227,227,227,.56); font-size: 12px; font-weight: 500; box-shadow: none; }
+      .h3-optimizer-settings-button.is-header:hover, .h3-optimizer-settings-button.is-header:focus-visible { border-color: rgba(168,199,250,.32); background: rgba(168,199,250,.1); color: #dce7fa; outline: none; transform: none; box-shadow: none; }
+      .h3-optimizer-settings-button:disabled { cursor: wait; opacity: .52; filter: none; }
+    `;
+    document.head.append(style);
+}
+
+app.registerExtension({
+    name: "FeiHouEasyH3",
+    setup() {
+        install();
+    },
+    beforeRegisterNodeDef(nodeType, nodeData) {
+        localizeNodeDefinition(nodeData);
+        installLoaderNode(nodeType, nodeData);
+        installAdapterNode(nodeType, nodeData);
+        installOutputNode(nodeType, nodeData);
+        installNode(nodeType, nodeData);
+    },
+});

@@ -1,0 +1,1085 @@
+{
+  "id": "594552d6-9e64-44e3-b347-f225aa52dab3",
+  "revision": 0,
+  "last_node_id": 27,
+  "last_link_id": 43,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "FeiHouEasyH3Loader",
+      "pos": [
+        31.39832910458804,
+        -536.6626379482939
+      ],
+      "size": [
+        477.00870429521854,
+        156.73204548389367
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "LoRA 堆栈",
+          "name": "lora_stack",
+          "shape": 7,
+          "type": "FEIHOU_MERGE_LORA_STACK",
+          "link": 26
+        },
+        {
+          "label": "FL2VA 模型",
+          "name": "fl2va_model",
+          "type": "COMBO",
+          "widget": {
+            "name": "fl2va_model"
+          },
+          "link": null
+        },
+        {
+          "label": "REF2VA 模型",
+          "name": "ref2va_model",
+          "type": "COMBO",
+          "widget": {
+            "name": "ref2va_model"
+          },
+          "link": null
+        },
+        {
+          "label": "文本编码器",
+          "name": "text_encoder",
+          "type": "COMBO",
+          "widget": {
+            "name": "text_encoder"
+          },
+          "link": null
+        },
+        {
+          "label": "视频 VAE",
+          "name": "video_vae",
+          "type": "COMBO",
+          "widget": {
+            "name": "video_vae"
+          },
+          "link": null
+        },
+        {
+          "label": "音频 VAE",
+          "name": "audio_vae",
+          "type": "COMBO",
+          "widget": {
+            "name": "audio_vae"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "h3_bundle",
+          "type": "MINIMAX_H3_BUNDLE",
+          "links": [
+            1
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "FeiHouEasyH3Loader",
+        "cnr_id": "comfyui-feihou-easy-h3",
+        "ver": "1658798be6a8ac004aa3a3973b29a41d3e036abc",
+        "ue_properties": {
+          "widget_ue_connectable": {
+            "fl2va_model": true,
+            "ref2va_model": true,
+            "text_encoder": true,
+            "video_vae": true,
+            "audio_vae": true
+          },
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "MiniMax-H3/minimax_h3_fl2va_bf16.safetensors",
+        "MiniMax-H3/minimax_h3_ref2va_bf16.safetensors",
+        "qwen3vl_32b_minimax_h3_int8_convrot.safetensors",
+        "minimax_h3_video_vae_fp16.safetensors",
+        "minimax_h3_audio_vae_fp32.safetensors"
+      ]
+    },
+    {
+      "id": 10,
+      "type": "VAEDecodeAudio",
+      "pos": [
+        2009.5977659843861,
+        -411.1529810818388
+      ],
+      "size": [
+        200.3709887817381,
+        60.83364061889654
+      ],
+      "flags": {},
+      "order": 10,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "samples",
+          "type": "LATENT",
+          "link": null
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": 14
+        }
+      ],
+      "outputs": [
+        {
+          "name": "AUDIO",
+          "type": "AUDIO",
+          "links": [
+            28
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.30.0",
+        "Node name for S&R": "VAEDecodeAudio",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 19,
+      "type": "FeiHouEasyH3LoraStack",
+      "pos": [
+        -486.0,
+        -536.6626379482939
+      ],
+      "size": [
+        477.26800000000003,
+        122
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "可选 LoRA 队列",
+          "name": "optional_lora_stack",
+          "type": "FEIHOU_MERGE_LORA_STACK",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "lora_stack",
+          "type": "FEIHOU_MERGE_LORA_STACK",
+          "links": [
+            26
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-feihou-easy-h3",
+        "ver": "0.3.0",
+        "Node name for S&R": "FeiHouEasyH3LoraStack",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        {},
+        {
+          "type": "FeiHouEasyH3LoraHeaderWidget"
+        },
+        {
+          "on": true,
+          "lora": "H3\\minimax_h3_turbo_4step_diffusion_model.safetensors",
+          "strength": 1
+        },
+        {},
+        ""
+      ]
+    },
+    {
+      "id": 2,
+      "type": "FeiHouEasyH3",
+      "pos": [
+        548.4070333998066,
+        -536.6626379482939
+      ],
+      "size": [
+        463.4355384927826,
+        823
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "H3 模型组合",
+          "name": "h3_bundle",
+          "type": "MINIMAX_H3_BUNDLE",
+          "link": 1
+        }
+      ],
+      "outputs": [
+        {
+          "label": "Model",
+          "name": "model",
+          "type": "MODEL",
+          "links": [
+            23
+          ]
+        },
+        {
+          "label": "H3 Context",
+          "name": "h3_context",
+          "type": "MINIMAX_H3_CONTEXT",
+          "links": [
+            19
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "FeiHouEasyH3",
+        "feihou_h3_embedded_media": [],
+        "cnr_id": "comfyui-feihou-easy-h3",
+        "ver": "1658798be6a8ac004aa3a3973b29a41d3e036abc",
+        "minimax_h3_prompt_reference_doc": {
+          "version": 1,
+          "text": "一只纸飞机从明亮的窗边飞向蓝天，镜头缓慢跟随，轻柔的环境声。",
+          "parts": [
+            {
+              "type": "text",
+              "text": "一只纸飞机从明亮的窗边飞向蓝天，镜头缓慢跟随，轻柔的环境声。"
+            }
+          ]
+        },
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        },
+        "minimax_h3_prompt_view_mode": "structured",
+        "minimax_h3_virtual_media_links": []
+      },
+      "widgets_values": [
+        "图生或首尾帧",
+        null,
+        "一只纸飞机从明亮的窗边飞向蓝天，镜头缓慢跟随，轻柔的环境声。",
+        null,
+        "480P",
+        "16:9",
+        1344,
+        768,
+        10,
+        false,
+        24,
+        "首帧优先",
+        "480",
+        "按序号",
+        "不启用",
+        "仅通用方案"
+      ]
+    },
+    {
+      "id": 18,
+      "type": "MiniMaxH3MemoryEfficientSageAttentionPatch",
+      "pos": [
+        1051.8425718925891,
+        -536.6626379482939
+      ],
+      "size": [
+        320.33331909179685,
+        26
+      ],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 23
+        }
+      ],
+      "outputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "links": [
+            24,
+            25
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-kjnodes",
+        "ver": "60cd6bc1870db94c6eeb05fbe455147a8e91c4e9",
+        "Node name for S&R": "MiniMaxH3MemoryEfficientSageAttentionPatch",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 13,
+      "type": "FeiHouEasyH3Output",
+      "pos": [
+        1051.8425718925891,
+        -440.6626379482939
+      ],
+      "size": [
+        320.33331909179685,
+        126
+      ],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "H3 Context",
+          "name": "h3_context",
+          "type": "MINIMAX_H3_CONTEXT",
+          "link": 19
+        }
+      ],
+      "outputs": [
+        {
+          "label": "Conditioning",
+          "name": "positive",
+          "type": "CONDITIONING",
+          "links": [
+            5
+          ]
+        },
+        {
+          "label": "Latent",
+          "name": "latent",
+          "type": "LATENT",
+          "links": [
+            6,
+            42
+          ]
+        },
+        {
+          "label": "Video VAE",
+          "name": "video_vae",
+          "type": "VAE",
+          "links": [
+            13
+          ]
+        },
+        {
+          "label": "Audio VAE",
+          "name": "audio_vae",
+          "type": "VAE",
+          "links": [
+            14
+          ]
+        },
+        {
+          "label": "FPS",
+          "name": "fps",
+          "type": "FLOAT",
+          "links": []
+        },
+        {
+          "label": "提示词反推输出",
+          "name": "prompt_preview",
+          "type": "STRING",
+          "links": [
+            43
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "FeiHouEasyH3Output",
+        "cnr_id": "comfyui-feihou-easy-h3",
+        "ver": "1658798be6a8ac004aa3a3973b29a41d3e036abc",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 27,
+      "type": "FeiHouEasyH3PromptPreview",
+      "pos": [
+        1051.8425718925891,
+        -278.6626379482939
+      ],
+      "size": [
+        420,
+        240
+      ],
+      "flags": {},
+      "order": 13,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "text",
+          "type": "STRING",
+          "link": 43
+        }
+      ],
+      "outputs": [
+        {
+          "name": "text",
+          "type": "STRING",
+          "links": []
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "FeiHouEasyH3PromptPreview",
+        "cnr_id": "comfyui-feihou-easy-h3",
+        "ver": "0.4.0",
+        "feihou_h3_prompt_preview_text": ""
+      },
+      "widgets_values": [
+        null
+      ]
+    },
+    {
+      "id": 5,
+      "type": "BasicScheduler",
+      "pos": [
+        1412.1758909843861,
+        -124.76416483428022
+      ],
+      "size": [
+        260,
+        106
+      ],
+      "flags": {},
+      "order": 7,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 25
+        }
+      ],
+      "outputs": [
+        {
+          "name": "SIGMAS",
+          "type": "SIGMAS",
+          "links": [
+            10
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.30.0",
+        "Node name for S&R": "BasicScheduler",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "simple",
+        8,
+        1
+      ]
+    },
+    {
+      "id": 7,
+      "type": "KSamplerSelect",
+      "pos": [
+        1412.1758909843861,
+        -252.76416483428022
+      ],
+      "size": [
+        260,
+        58
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "SAMPLER",
+          "type": "SAMPLER",
+          "links": [
+            9
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.30.0",
+        "Node name for S&R": "KSamplerSelect",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "res_multistep"
+      ]
+    },
+    {
+      "id": 4,
+      "type": "BasicGuider",
+      "pos": [
+        1412.1758909843861,
+        -384.6626379482939
+      ],
+      "size": [
+        260,
+        61.898473114013655
+      ],
+      "flags": {},
+      "order": 8,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 24
+        },
+        {
+          "name": "conditioning",
+          "type": "CONDITIONING",
+          "link": 5
+        }
+      ],
+      "outputs": [
+        {
+          "name": "GUIDER",
+          "type": "GUIDER",
+          "links": [
+            8
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.30.0",
+        "Node name for S&R": "BasicGuider",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 6,
+      "type": "RandomNoise",
+      "pos": [
+        1412.1758909843861,
+        -536.6626379482939
+      ],
+      "size": [
+        260,
+        82
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "NOISE",
+          "type": "NOISE",
+          "links": [
+            7
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.30.0",
+        "Node name for S&R": "RandomNoise",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        20000,
+        "fixed"
+      ]
+    },
+    {
+      "id": 8,
+      "type": "SamplerCustomAdvanced",
+      "pos": [
+        1712.1758909843861,
+        -536.6626379482939
+      ],
+      "size": [
+        257.421875,
+        555.359375
+      ],
+      "flags": {},
+      "order": 11,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "noise",
+          "type": "NOISE",
+          "link": 7
+        },
+        {
+          "name": "guider",
+          "type": "GUIDER",
+          "link": 8
+        },
+        {
+          "name": "sampler",
+          "type": "SAMPLER",
+          "link": 9
+        },
+        {
+          "name": "sigmas",
+          "type": "SIGMAS",
+          "link": 10
+        },
+        {
+          "name": "latent_image",
+          "type": "LATENT",
+          "link": 6
+        }
+      ],
+      "outputs": [
+        {
+          "name": "output",
+          "type": "LATENT",
+          "links": []
+        },
+        {
+          "name": "denoised_output",
+          "type": "LATENT",
+          "links": []
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.30.0",
+        "Node name for S&R": "SamplerCustomAdvanced",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 9,
+      "type": "VAEDecode",
+      "pos": [
+        2009.5977659843861,
+        -536.6626379482939
+      ],
+      "size": [
+        198.47278375244127,
+        55.50965686645509
+      ],
+      "flags": {},
+      "order": 9,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "samples",
+          "type": "LATENT",
+          "link": 42
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": 13
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            27
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.30.0",
+        "Node name for S&R": "VAEDecode",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 20,
+      "type": "VHS_VideoCombine",
+      "pos": [
+        2248.070549736827,
+        -536.6626379482939
+      ],
+      "size": [
+        585.9404523532703,
+        334
+      ],
+      "flags": {},
+      "order": 12,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "图像",
+          "name": "images",
+          "type": "IMAGE",
+          "link": 27
+        },
+        {
+          "label": "音频",
+          "name": "audio",
+          "shape": 7,
+          "type": "AUDIO",
+          "link": 28
+        },
+        {
+          "label": "批次管理",
+          "name": "meta_batch",
+          "shape": 7,
+          "type": "VHS_BatchManager",
+          "link": null
+        },
+        {
+          "label": "vae",
+          "name": "vae",
+          "shape": 7,
+          "type": "VAE",
+          "link": null
+        },
+        {
+          "label": "帧率",
+          "name": "frame_rate",
+          "type": "FLOAT",
+          "widget": {
+            "name": "frame_rate"
+          },
+          "link": null
+        },
+        {
+          "label": "循环次数",
+          "name": "loop_count",
+          "type": "INT",
+          "widget": {
+            "name": "loop_count"
+          },
+          "link": null
+        },
+        {
+          "label": "文件名前缀",
+          "name": "filename_prefix",
+          "type": "STRING",
+          "widget": {
+            "name": "filename_prefix"
+          },
+          "link": null
+        },
+        {
+          "label": "格式",
+          "name": "format",
+          "type": "COMBO",
+          "widget": {
+            "name": "format"
+          },
+          "link": null
+        },
+        {
+          "label": "Ping-Pong",
+          "name": "pingpong",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "pingpong"
+          },
+          "link": null
+        },
+        {
+          "label": "保存到输出文件夹",
+          "name": "save_output",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "save_output"
+          },
+          "link": null
+        },
+        {
+          "label": "保存元数据",
+          "name": "save_metadata",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "save_metadata"
+          },
+          "link": null
+        },
+        {
+          "label": "修剪音频",
+          "name": "trim_to_audio",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "trim_to_audio"
+          },
+          "link": null
+        },
+        {
+          "label": "pix_fmt",
+          "name": "pix_fmt",
+          "type": [
+            "yuv420p",
+            "yuv420p10le"
+          ],
+          "widget": {
+            "name": "pix_fmt"
+          },
+          "link": null
+        },
+        {
+          "label": "crf",
+          "name": "crf",
+          "type": "INT",
+          "widget": {
+            "name": "crf"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "label": "文件名",
+          "name": "Filenames",
+          "type": "VHS_FILENAMES"
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-videohelpersuite",
+        "ver": "0edce8ef7ce173ac97a3ed3d6f4636029d1a4530",
+        "Node name for S&R": "VHS_VideoCombine",
+        "ue_properties": {
+          "widget_ue_connectable": {
+            "save_output": true,
+            "filename_prefix": true,
+            "loop_count": true,
+            "pix_fmt": true,
+            "save_metadata": true,
+            "crf": true,
+            "trim_to_audio": true,
+            "format": true,
+            "frame_rate": true,
+            "pingpong": true
+          },
+          "input_ue_unconnectable": {},
+          "version": "7.1"
+        },
+        "widget_ue_connectable": {
+          "frame_rate": true
+        }
+      },
+      "widgets_values": {
+        "frame_rate": 24,
+        "loop_count": 0,
+        "filename_prefix": "%date:yyyy-MM-dd%/%date:yyyyMMdd_hhmmss%_Minimax_H3",
+        "format": "video/h264-mp4",
+        "pix_fmt": "yuv420p",
+        "crf": 10,
+        "save_metadata": true,
+        "trim_to_audio": false,
+        "pingpong": false,
+        "save_output": true,
+        "videopreview": null
+      }
+    }
+  ],
+  "links": [
+    [
+      1,
+      1,
+      0,
+      2,
+      0,
+      "MINIMAX_H3_BUNDLE"
+    ],
+    [
+      5,
+      13,
+      0,
+      4,
+      1,
+      "CONDITIONING"
+    ],
+    [
+      6,
+      13,
+      1,
+      8,
+      4,
+      "LATENT"
+    ],
+    [
+      7,
+      6,
+      0,
+      8,
+      0,
+      "NOISE"
+    ],
+    [
+      8,
+      4,
+      0,
+      8,
+      1,
+      "GUIDER"
+    ],
+    [
+      9,
+      7,
+      0,
+      8,
+      2,
+      "SAMPLER"
+    ],
+    [
+      10,
+      5,
+      0,
+      8,
+      3,
+      "SIGMAS"
+    ],
+    [
+      13,
+      13,
+      2,
+      9,
+      1,
+      "VAE"
+    ],
+    [
+      14,
+      13,
+      3,
+      10,
+      1,
+      "VAE"
+    ],
+    [
+      19,
+      2,
+      1,
+      13,
+      0,
+      "MINIMAX_H3_CONTEXT"
+    ],
+    [
+      23,
+      2,
+      0,
+      18,
+      0,
+      "MODEL"
+    ],
+    [
+      24,
+      18,
+      0,
+      4,
+      0,
+      "MODEL"
+    ],
+    [
+      25,
+      18,
+      0,
+      5,
+      0,
+      "MODEL"
+    ],
+    [
+      26,
+      19,
+      0,
+      1,
+      0,
+      "FEIHOU_MERGE_LORA_STACK"
+    ],
+    [
+      27,
+      9,
+      0,
+      20,
+      0,
+      "IMAGE"
+    ],
+    [
+      28,
+      10,
+      0,
+      20,
+      1,
+      "AUDIO"
+    ],
+    [
+      42,
+      13,
+      1,
+      9,
+      0,
+      "LATENT"
+    ],
+    [
+      43,
+      13,
+      5,
+      27,
+      0,
+      "STRING"
+    ]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {
+    "frontendVersion": "1.48.7",
+    "VHS_latentpreview": true,
+    "ds": {
+      "scale": 0.6830134553650705,
+      "offset": [
+        241.74971836856892,
+        1145.5626969385112
+      ]
+    },
+    "VHS_latentpreviewrate": 0,
+    "VHS_MetadataImage": false,
+    "VHS_KeepIntermediate": true,
+    "ue_links": [],
+    "links_added_by_ue": []
+  },
+  "version": 0.4
+}

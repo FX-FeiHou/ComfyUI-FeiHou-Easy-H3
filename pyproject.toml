@@ -1,0 +1,11 @@
+[project]
+name = "comfyui-feihou-easy-h3"
+description = "MiniMax H3 generation for ComfyUI with an embedded 9-image, 3-video, and 3-audio reference gallery."
+version = "0.5.0"
+license = { file = "LICENSE" }
+dependencies = []
+
+[tool.comfy]
+PublisherId = "feihou"
+DisplayName = "ComfyUI-FeiHou-Easy-H3"
+Icon = ""

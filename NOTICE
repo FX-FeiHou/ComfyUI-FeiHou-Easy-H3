@@ -1,0 +1,24 @@
+ComfyUI-FeiHou-Easy-H3
+Copyright (c) 2026 FeiHou
+
+MODIFIED WORK / 来源声明
+
+This project is a modified work derived from:
+  ComfyUI-MiniMaxH3-Easy
+  https://github.com/nkxx188/ComfyUI-MiniMaxH3-Easy
+  Original author: nkxx188
+
+The upstream project is published under the MIT License. This repository
+retains the upstream MIT License and its original copyright notice. The
+modifications in this repository are also released under the MIT License.
+
+This repository does not claim authorship of the upstream project's original
+implementation, including its MiniMax H3 workflow design, media/reference
+editor concepts, or other upstream code retained here. Changes made by FeiHou
+include the embedded fixed media gallery, FeiHou-specific LoRA stack and
+loader integration, the settings-based prompt optimizer, service/model
+selection, runtime prompt optimization, prompt preview wiring, and associated
+documentation/workflow changes.
+
+When redistributing this project or substantial portions of it, retain the
+LICENSE and this NOTICE file.
