@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.5.0
+## v1.0.0
 
 - Adds the visible `modified` / `改编自 ComfyUI-MiniMaxH3-Easy` declaration to the main node header.
 - Embeds up to 9 images, 3 videos, and 3 standalone audio files directly in the Easy H3 node.
