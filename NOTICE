@@ -9,8 +9,18 @@ This project is a modified work derived from:
   Original author: nkxx188
 
 The upstream project is published under the MIT License. This repository
-retains the upstream MIT License and its original copyright notice. The
-modifications in this repository are also released under the MIT License.
+retains the upstream MIT License and its original copyright notice in:
+  LICENSES/MIT-ComfyUI-MiniMaxH3-Easy.txt
+
+API-service configuration, model discovery, and prompt-optimization portions
+also borrow from:
+  ComfyUI-Prompt-Assistant
+  https://github.com/yawiii/ComfyUI-Prompt-Assistant
+  Original author: yawiii
+
+That project is published under the GNU General Public License, version 3.
+Because this repository contains adapted portions of that project, this
+repository as a whole is distributed under GNU GPL v3; see LICENSE.
 
 This repository does not claim authorship of the upstream project's original
 implementation, including its MiniMax H3 workflow design, media/reference

@@ -20,7 +20,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "FeiHouEasyH3LoraStack": "加载LoRA（旁路，仅模型）（用于调试）",
     "FeiHouEasyH3Loader": "FeiHou Easy H3 Loader",
     "FeiHouEasyH3ModelAdapter": "FeiHou Easy H3 Model Adapter",
-    "FeiHouEasyH3": "ComfyUI-FeiHou-Easy-H3 · modified · 改编自 github.com/nkxx188/ComfyUI-MiniMaxH3-Easy",
+    "FeiHouEasyH3": "ComfyUI-FeiHou-Easy-H3 · modified · H3: nkxx188/ComfyUI-MiniMaxH3-Easy · API: yawiii/ComfyUI-Prompt-Assistant",
     "FeiHouEasyH3Output": "FeiHou Easy H3 Output",
     "FeiHouEasyH3PromptPreview": "FeiHou Easy H3 提示词预览",
 }

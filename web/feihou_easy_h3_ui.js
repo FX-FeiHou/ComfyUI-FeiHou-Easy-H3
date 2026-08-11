@@ -92,7 +92,7 @@ const TEXT = {
     referencePromptPlaceholder: ZH_BROWSER ? "Prompt... \u8f93\u5165 @ \u5f15\u7528\u5df2\u8fde\u63a5\u7d20\u6750" : "Prompt... Type @ to reference connected media",
     mentionTitle: ZH_BROWSER ? "\u5f15\u7528\u7d20\u6750" : "Reference media",
     mentionEmpty: ZH_BROWSER ? "\u5148\u5c06\u7d20\u6750\u8fde\u63a5\u5230\u4e3b\u8282\u70b9" : "Connect media to the main node first",
-    mainTitle: "ComfyUI-FeiHou-Easy-H3 · modified · 改编自 github.com/nkxx188/ComfyUI-MiniMaxH3-Easy",
+    mainTitle: "ComfyUI-FeiHou-Easy-H3 · modified · H3: nkxx188/ComfyUI-MiniMaxH3-Easy · API: yawiii/ComfyUI-Prompt-Assistant",
     loaderTitle: ZH_BROWSER ? "FeiHou Easy H3 \u52a0\u8f7d\u5668" : "FeiHou Easy H3 Loader",
     adapterTitle: ZH_BROWSER ? "FeiHou Easy H3 \u6a21\u578b\u4e2d\u8f6c" : "FeiHou Easy H3 Model Bridge",
     outputTitle: ZH_BROWSER ? "FeiHou Easy H3 \u8f93\u51fa" : "FeiHou Easy H3 Output",
