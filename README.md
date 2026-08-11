@@ -2,11 +2,6 @@
 
 [English](README_EN.md) | **中文**
 
-> **改编与来源声明**
-> 本项目为 [nkxx188/ComfyUI-MiniMaxH3-Easy](https://github.com/nkxx188/ComfyUI-MiniMaxH3-Easy) 的改编版本（modified work），原作者为 **nkxx188**。该上游项目采用 MIT License；其原始版权声明及 MIT 许可证保留于 [LICENSES/MIT-ComfyUI-MiniMaxH3-Easy.txt](LICENSES/MIT-ComfyUI-MiniMaxH3-Easy.txt)，完整来源信息见 [NOTICE](NOTICE)。
->
-> 节点中的 API 服务配置、模型发现与提示词优化相关实现借鉴自 [yawiii/ComfyUI-Prompt-Assistant](https://github.com/yawiii/ComfyUI-Prompt-Assistant)，原作者为 **yawiii**。该项目采用 GNU GPL v3；因包含该来源的改编内容，本仓库整体按 [GNU GPL v3](LICENSE) 发布。
-
 这是一个将参考媒体加载内嵌到主节点内的 MiniMax H3 ComfyUI 节点包。
 
 主节点把参考媒体加载全部收进节点内部，不再需要外接 `Load Image`、`Load Video`、`Load Audio` 节点：
