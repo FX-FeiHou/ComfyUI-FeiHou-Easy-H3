@@ -2,7 +2,7 @@
   "id": "594552d6-9e64-44e3-b347-f225aa52dab3",
   "revision": 0,
   "last_node_id": 27,
-  "last_link_id": 43,
+  "last_link_id": 45,
   "nodes": [
     {
       "id": 1,
@@ -117,13 +117,13 @@
         60.83364061889654
       ],
       "flags": {},
-      "order": 10,
+      "order": 12,
       "mode": 0,
       "inputs": [
         {
           "name": "samples",
           "type": "LATENT",
-          "link": null
+          "link": 44
         },
         {
           "name": "vae",
@@ -156,12 +156,12 @@
       "id": 19,
       "type": "FeiHouEasyH3LoraStack",
       "pos": [
-        -486.0,
+        -486,
         -536.6626379482939
       ],
       "size": [
-        477.26800000000003,
-        122
+        440,
+        136
       ],
       "flags": {},
       "order": 0,
@@ -205,88 +205,6 @@
         },
         {},
         ""
-      ]
-    },
-    {
-      "id": 2,
-      "type": "FeiHouEasyH3",
-      "pos": [
-        548.4070333998066,
-        -536.6626379482939
-      ],
-      "size": [
-        463.4355384927826,
-        823
-      ],
-      "flags": {},
-      "order": 4,
-      "mode": 0,
-      "inputs": [
-        {
-          "label": "H3 模型组合",
-          "name": "h3_bundle",
-          "type": "MINIMAX_H3_BUNDLE",
-          "link": 1
-        }
-      ],
-      "outputs": [
-        {
-          "label": "Model",
-          "name": "model",
-          "type": "MODEL",
-          "links": [
-            23
-          ]
-        },
-        {
-          "label": "H3 Context",
-          "name": "h3_context",
-          "type": "MINIMAX_H3_CONTEXT",
-          "links": [
-            19
-          ]
-        }
-      ],
-      "properties": {
-        "Node name for S&R": "FeiHouEasyH3",
-        "feihou_h3_embedded_media": [],
-        "cnr_id": "comfyui-feihou-easy-h3",
-        "ver": "1658798be6a8ac004aa3a3973b29a41d3e036abc",
-        "minimax_h3_prompt_reference_doc": {
-          "version": 1,
-          "text": "一只纸飞机从明亮的窗边飞向蓝天，镜头缓慢跟随，轻柔的环境声。",
-          "parts": [
-            {
-              "type": "text",
-              "text": "一只纸飞机从明亮的窗边飞向蓝天，镜头缓慢跟随，轻柔的环境声。"
-            }
-          ]
-        },
-        "ue_properties": {
-          "widget_ue_connectable": {},
-          "version": "7.8",
-          "input_ue_unconnectable": {}
-        },
-        "minimax_h3_prompt_view_mode": "structured",
-        "minimax_h3_virtual_media_links": []
-      },
-      "widgets_values": [
-        "图生或首尾帧",
-        null,
-        "一只纸飞机从明亮的窗边飞向蓝天，镜头缓慢跟随，轻柔的环境声。",
-        null,
-        "480P",
-        "16:9",
-        1344,
-        768,
-        10,
-        false,
-        24,
-        "首帧优先",
-        "480",
-        "按序号",
-        "不启用",
-        "仅通用方案"
       ]
     },
     {
@@ -368,8 +286,7 @@
           "name": "latent",
           "type": "LATENT",
           "links": [
-            6,
-            42
+            6
           ]
         },
         {
@@ -414,44 +331,6 @@
         }
       },
       "widgets_values": []
-    },
-    {
-      "id": 27,
-      "type": "FeiHouEasyH3PromptPreview",
-      "pos": [
-        1051.8425718925891,
-        -278.6626379482939
-      ],
-      "size": [
-        420,
-        240
-      ],
-      "flags": {},
-      "order": 13,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "text",
-          "type": "STRING",
-          "link": 43
-        }
-      ],
-      "outputs": [
-        {
-          "name": "text",
-          "type": "STRING",
-          "links": []
-        }
-      ],
-      "properties": {
-        "Node name for S&R": "FeiHouEasyH3PromptPreview",
-        "cnr_id": "comfyui-feihou-easy-h3",
-        "ver": "0.4.0",
-        "feihou_h3_prompt_preview_text": ""
-      },
-      "widgets_values": [
-        null
-      ]
     },
     {
       "id": 5,
@@ -624,71 +503,6 @@
       ]
     },
     {
-      "id": 8,
-      "type": "SamplerCustomAdvanced",
-      "pos": [
-        1712.1758909843861,
-        -536.6626379482939
-      ],
-      "size": [
-        257.421875,
-        555.359375
-      ],
-      "flags": {},
-      "order": 11,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "noise",
-          "type": "NOISE",
-          "link": 7
-        },
-        {
-          "name": "guider",
-          "type": "GUIDER",
-          "link": 8
-        },
-        {
-          "name": "sampler",
-          "type": "SAMPLER",
-          "link": 9
-        },
-        {
-          "name": "sigmas",
-          "type": "SIGMAS",
-          "link": 10
-        },
-        {
-          "name": "latent_image",
-          "type": "LATENT",
-          "link": 6
-        }
-      ],
-      "outputs": [
-        {
-          "name": "output",
-          "type": "LATENT",
-          "links": []
-        },
-        {
-          "name": "denoised_output",
-          "type": "LATENT",
-          "links": []
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfy-core",
-        "ver": "0.30.0",
-        "Node name for S&R": "SamplerCustomAdvanced",
-        "ue_properties": {
-          "widget_ue_connectable": {},
-          "version": "7.8",
-          "input_ue_unconnectable": {}
-        }
-      },
-      "widgets_values": []
-    },
-    {
       "id": 9,
       "type": "VAEDecode",
       "pos": [
@@ -700,13 +514,13 @@
         55.50965686645509
       ],
       "flags": {},
-      "order": 9,
+      "order": 11,
       "mode": 0,
       "inputs": [
         {
           "name": "samples",
           "type": "LATENT",
-          "link": 42
+          "link": 45
         },
         {
           "name": "vae",
@@ -744,10 +558,10 @@
       ],
       "size": [
         585.9404523532703,
-        334
+        662.4113624184836
       ],
       "flags": {},
-      "order": 12,
+      "order": 13,
       "mode": 0,
       "inputs": [
         {
@@ -915,6 +729,198 @@
         "save_output": true,
         "videopreview": null
       }
+    },
+    {
+      "id": 8,
+      "type": "SamplerCustomAdvanced",
+      "pos": [
+        1721.855890984383,
+        -537.8726379482937
+      ],
+      "size": [
+        257.421875,
+        259.90104166666663
+      ],
+      "flags": {},
+      "order": 10,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "noise",
+          "type": "NOISE",
+          "link": 7
+        },
+        {
+          "name": "guider",
+          "type": "GUIDER",
+          "link": 8
+        },
+        {
+          "name": "sampler",
+          "type": "SAMPLER",
+          "link": 9
+        },
+        {
+          "name": "sigmas",
+          "type": "SIGMAS",
+          "link": 10
+        },
+        {
+          "name": "latent_image",
+          "type": "LATENT",
+          "link": 6
+        }
+      ],
+      "outputs": [
+        {
+          "name": "output",
+          "type": "LATENT",
+          "links": [
+            45
+          ]
+        },
+        {
+          "name": "denoised_output",
+          "type": "LATENT",
+          "links": [
+            44
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.30.0",
+        "Node name for S&R": "SamplerCustomAdvanced",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 2,
+      "type": "FeiHouEasyH3",
+      "pos": [
+        551.1343061270793,
+        -535.753547039203
+      ],
+      "size": [
+        463.4355384927826,
+        823
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "H3 模型组合",
+          "name": "h3_bundle",
+          "type": "MINIMAX_H3_BUNDLE",
+          "link": 1
+        }
+      ],
+      "outputs": [
+        {
+          "label": "Model",
+          "name": "model",
+          "type": "MODEL",
+          "links": [
+            23
+          ]
+        },
+        {
+          "label": "H3 Context",
+          "name": "h3_context",
+          "type": "MINIMAX_H3_CONTEXT",
+          "links": [
+            19
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "FeiHouEasyH3",
+        "feihou_h3_embedded_media": [],
+        "cnr_id": "comfyui-feihou-easy-h3",
+        "ver": "1.0.0",
+        "minimax_h3_prompt_reference_doc": {
+          "version": 1,
+          "text": "加载参考图片或视频后，在这里描述要生成的画面。例如：<Picture 1> 中的角色站在晨光花园中，镜头缓慢推进，伴随轻柔的环境声。",
+          "parts": [
+            {
+              "type": "text",
+              "text": "加载参考图片或视频后，在这里描述要生成的画面。例如：<Picture 1> 中的角色站在晨光花园中，镜头缓慢推进，伴随轻柔的环境声。"
+            }
+          ]
+        },
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        },
+        "minimax_h3_prompt_view_mode": "structured",
+        "minimax_h3_virtual_media_links": []
+      },
+      "widgets_values": [
+        "参考生视频",
+        null,
+        "加载参考图片或视频后，在这里描述要生成的画面。例如：<Picture 1> 中的角色站在晨光花园中，镜头缓慢推进，伴随轻柔的环境声。",
+        null,
+        "480P",
+        "16:9",
+        1344,
+        768,
+        10,
+        false,
+        24,
+        "首帧优先",
+        "480",
+        "按序号",
+        "不启用",
+        "仅通用方案"
+      ]
+    },
+    {
+      "id": 27,
+      "type": "FeiHouEasyH3PromptPreview",
+      "pos": [
+        1046.4655272644886,
+        -252.77228422928567
+      ],
+      "size": [
+        323.346198347107,
+        661.3130578512398
+      ],
+      "flags": {},
+      "order": 9,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "text",
+          "type": "STRING",
+          "link": 43
+        }
+      ],
+      "outputs": [
+        {
+          "name": "text",
+          "type": "STRING",
+          "links": []
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "FeiHouEasyH3PromptPreview",
+        "cnr_id": "comfyui-feihou-easy-h3",
+        "ver": "1.0.0",
+        "feihou_h3_prompt_preview_text": "",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": []
     }
   ],
   "links": [
@@ -1047,20 +1053,28 @@
       "AUDIO"
     ],
     [
-      42,
-      13,
-      1,
-      9,
-      0,
-      "LATENT"
-    ],
-    [
       43,
       13,
       5,
       27,
       0,
       "STRING"
+    ],
+    [
+      44,
+      8,
+      1,
+      10,
+      0,
+      "LATENT"
+    ],
+    [
+      45,
+      8,
+      0,
+      9,
+      0,
+      "LATENT"
     ]
   ],
   "groups": [],
@@ -1069,10 +1083,10 @@
     "frontendVersion": "1.48.7",
     "VHS_latentpreview": true,
     "ds": {
-      "scale": 0.6830134553650705,
+      "scale": 0.7513148009015778,
       "offset": [
-        241.74971836856892,
-        1145.5626969385112
+        949.422197566472,
+        931.1891292518545
       ]
     },
     "VHS_latentpreviewrate": 0,

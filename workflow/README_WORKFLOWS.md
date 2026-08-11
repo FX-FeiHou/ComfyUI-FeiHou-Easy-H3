@@ -16,7 +16,7 @@
 
 工作流需要的插件、模型和相关资源：
 
-<https://pan.quark.cn/s/8be70c7581e6?pwd=6LmC>
+小肥猴的网盘：<https://pan.quark.cn/s/27fe4727197b>
 
 不同工作流需要的模型可能不同，请按照工作流中的加载器选择对应文件。如果列表中找不到模型，请检查模型是否放入了正确的 `ComfyUI/models` 子目录，然后刷新或重启 ComfyUI。
 
@@ -42,7 +42,7 @@ You can also install them by searching for their names in ComfyUI Manager. Resta
 
 The plugins, models, and related assets used by the workflows are available here:
 
-<https://pan.quark.cn/s/8be70c7581e6?pwd=6LmC>
+Xiao Fei Hou's cloud drive: <https://pan.quark.cn/s/27fe4727197b>
 
 Model requirements may differ between workflows. Select the matching files in each workflow's loader node. If a model is not listed, place it in the correct `ComfyUI/models` subdirectory, then refresh or restart ComfyUI.
 
