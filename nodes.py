@@ -734,7 +734,7 @@ def _prompt_optimizer_scheme_choices(settings: Mapping[str, Any] | None = None) 
 
 def _prompt_optimizer_provider_choices(settings: Mapping[str, Any] | None = None) -> list[str]:
     config = settings if isinstance(settings, Mapping) else _read_prompt_optimizer_config()
-    choices = ["disabled"]
+    choices = []
     for item in config.get("providers", []) if isinstance(config.get("providers"), list) else []:
         if not isinstance(item, Mapping) or not item.get("id"):
             continue
@@ -744,7 +744,10 @@ def _prompt_optimizer_provider_choices(settings: Mapping[str, Any] | None = None
             *(item.get("vlm_models") if isinstance(item.get("vlm_models"), list) else []),
         ])
         choices.extend(f"{provider_id}/{model}" for model in models)
-    return choices
+    # ComfyUI combo inputs require at least one value before a user has added
+    # an API model in Settings.  An empty value is a configuration placeholder,
+    # not an exposed “Disabled” option; the optimizer switch controls execution.
+    return choices or [""]
 
 
 def _read_prompt_optimizer_config() -> dict[str, Any]:
@@ -999,6 +1002,9 @@ def _optimizer_http_json(
     temperature: float = 0.7,
     max_tokens: int = 4096,
     top_p: float = 0.9,
+    _allow_media_fallback: bool = True,
+    _allow_parameter_fallback: bool = True,
+    _minimal_openai_payload: bool = False,
 ) -> str:
     url = _normalize_optimizer_url(api_url, api_format, model)
     media_parts = list(media_parts or [])
@@ -1043,11 +1049,72 @@ def _optimizer_http_json(
             content = [{"type": "text", "text": user_prompt}, *media_parts]
         else:
             content = user_prompt
-        payload = {"model": model, "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": content}], "stream": False, "temperature": temperature, "max_tokens": max_tokens, "top_p": top_p}
+        # xFlow/Grok and several other OpenAI-compatible aggregation gateways
+        # always return SSE, even when stream=false is requested.  Explicitly
+        # request a stream and consume it below, matching prompt-assistant.
+        payload = {
+            "model": model,
+            "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": content}],
+            "stream": True,
+        }
+        if not _minimal_openai_payload:
+            payload.update({"temperature": temperature, "max_tokens": max_tokens, "top_p": top_p})
     request = urllib.request.Request(url, data=json.dumps(payload, ensure_ascii=False).encode("utf-8"), headers=headers, method="POST")
     try:
         with urllib.request.urlopen(request, timeout=PROMPT_OPTIMIZER_TIMEOUT_SECONDS) as response:
-            data = json.loads(response.read().decode("utf-8"))
+            raw_response = response.read().decode("utf-8", errors="replace")
+            status = getattr(response, "status", 200)
+            content_type = str(response.headers.get("Content-Type") or "unknown")
+        try:
+            data = json.loads(raw_response)
+        except json.JSONDecodeError as exc:
+            # A few OpenAI-compatible aggregation services return Server-Sent
+            # Events. Rebuild a normal chat-completions-shaped response from
+            # their delta chunks.
+            streamed_parts: list[str] = []
+            stream_parse_failed = False
+            saw_stream_event = False
+            for line in raw_response.splitlines():
+                if not line.startswith("data:"):
+                    continue
+                saw_stream_event = True
+                event_data = line[5:].strip()
+                if not event_data or event_data == "[DONE]":
+                    continue
+                try:
+                    event = json.loads(event_data)
+                except json.JSONDecodeError:
+                    stream_parse_failed = True
+                    break
+                choices = event.get("choices") if isinstance(event, Mapping) else []
+                for choice in choices if isinstance(choices, list) else []:
+                    if not isinstance(choice, Mapping):
+                        continue
+                    delta = choice.get("delta") if isinstance(choice.get("delta"), Mapping) else {}
+                    message = choice.get("message") if isinstance(choice.get("message"), Mapping) else {}
+                    part = delta.get("content", message.get("content", ""))
+                    if isinstance(part, str):
+                        streamed_parts.append(part)
+                    elif isinstance(part, list):
+                        streamed_parts.extend(
+                            str(item.get("text", ""))
+                            for item in part
+                            if isinstance(item, Mapping) and item.get("text") is not None
+                        )
+            if saw_stream_event and not stream_parse_failed:
+                data = {"choices": [{"message": {"content": "".join(streamed_parts)}}]}
+            else:
+                if media_parts and _allow_media_fallback:
+                    return _optimizer_http_json(
+                        api_url, api_key, model, api_format, system_prompt, user_prompt,
+                        [], temperature, max_tokens, top_p, _allow_media_fallback=False,
+                    )
+                preview = raw_response.strip().replace("\n", " ")[:500]
+                if not preview:
+                    preview = "<empty response>"
+                raise RuntimeError(
+                    f"提示词优化接口返回非 JSON 内容（HTTP {status}，{content_type}）：{preview}"
+                ) from exc
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
         raise RuntimeError(f"Prompt optimization API error ({exc.code}): {detail[:1000]}") from exc
@@ -1075,6 +1142,16 @@ def _optimizer_http_json(
         text = content if isinstance(content, str) else "".join(str(item.get("text", "")) for item in content if isinstance(item, dict))
     text = str(text or "").strip()
     if not text:
+        # Some xFlow/Grok routes acknowledge an extended payload but emit only
+        # a usage SSE chunk. Retry once with the minimal compatible request.
+        if api_format == "openai" and _allow_parameter_fallback:
+            return _optimizer_http_json(
+                api_url, api_key, model, api_format, system_prompt, user_prompt,
+                [], temperature, max_tokens, top_p,
+                _allow_media_fallback=False,
+                _allow_parameter_fallback=False,
+                _minimal_openai_payload=True,
+            )
         raise RuntimeError("Prompt optimization API returned an empty response")
     return text
 
@@ -2081,7 +2158,8 @@ class FeiHouEasyH3:
                 "keyframe_role": ([KEYFRAME_FIRST, KEYFRAME_LAST], {"default": KEYFRAME_FIRST}),
                 "ref_image_size": (list(REFERENCE_SHORT_EDGES), {"default": REF_IMAGE_DEFAULT}),
                 "reference_mention_mode": ([REFERENCE_MENTION_FILENAME, REFERENCE_MENTION_INDEX], {"default": REFERENCE_MENTION_INDEX}),
-                "prompt_optimizer_provider": (prompt_providers, {"default": "disabled"}),
+                "prompt_optimizer_enabled": ("BOOLEAN", {"default": False}),
+                "prompt_optimizer_provider": (prompt_providers, {"default": prompt_providers[0]}),
                 "prompt_optimizer_scene_guide": (prompt_schemes, {"default": default_prompt_scheme}),
             },
             "optional": optional,
@@ -2123,7 +2201,7 @@ class FeiHouEasyH3:
         return images[0], images[1]
 
     @classmethod
-    def generate(cls, h3_bundle, mode, prompt, resolution, aspect_ratio, width, height, seconds, advanced, fps, keyframe_role, ref_image_size, reference_mention_mode, prompt_optimizer_provider="disabled", prompt_optimizer_scene_guide="none", prompt_optimizer_applied=False, **kwargs):
+    def generate(cls, h3_bundle, mode, prompt, resolution, aspect_ratio, width, height, seconds, advanced, fps, keyframe_role, ref_image_size, reference_mention_mode, prompt_optimizer_enabled=False, prompt_optimizer_provider="", prompt_optimizer_scene_guide="none", prompt_optimizer_applied=False, **kwargs):
         if not isinstance(h3_bundle, MiniMaxH3Bundle):
             raise ValueError("Connect a FeiHou Easy H3 Loader bundle")
         mode = str(mode)
@@ -2131,7 +2209,7 @@ class FeiHouEasyH3:
         width, height = _canvas_dimensions(resolution, aspect_ratio, width, height)
         seconds = min(MAX_SECONDS, max(MIN_SECONDS, float(seconds)))
         length = _frame_length(seconds, fps)
-        optimizer_enabled = bool(advanced) and str(prompt_optimizer_provider or "disabled") not in {"", "disabled", "none"}
+        optimizer_enabled = bool(advanced) and bool(prompt_optimizer_enabled)
         optimizer_already_applied = prompt_optimizer_applied is True or str(prompt_optimizer_applied).strip().lower() in {"1", "true", "yes", "on"}
         if optimizer_enabled and not optimizer_already_applied:
             try:

@@ -92,7 +92,7 @@ const TEXT = {
     referencePromptPlaceholder: ZH_BROWSER ? "Prompt... \u8f93\u5165 @ \u5f15\u7528\u5df2\u8fde\u63a5\u7d20\u6750" : "Prompt... Type @ to reference connected media",
     mentionTitle: ZH_BROWSER ? "\u5f15\u7528\u7d20\u6750" : "Reference media",
     mentionEmpty: ZH_BROWSER ? "\u5148\u5c06\u7d20\u6750\u8fde\u63a5\u5230\u4e3b\u8282\u70b9" : "Connect media to the main node first",
-    mainTitle: "ComfyUI-FeiHou-Easy-H3 · modified · H3: nkxx188/ComfyUI-MiniMaxH3-Easy · API: yawiii/ComfyUI-Prompt-Assistant",
+    mainTitle: "ComfyUI-FeiHou-Easy-H3",
     loaderTitle: ZH_BROWSER ? "FeiHou Easy H3 \u52a0\u8f7d\u5668" : "FeiHou Easy H3 Loader",
     adapterTitle: ZH_BROWSER ? "FeiHou Easy H3 \u6a21\u578b\u4e2d\u8f6c" : "FeiHou Easy H3 Model Bridge",
     outputTitle: ZH_BROWSER ? "FeiHou Easy H3 \u8f93\u51fa" : "FeiHou Easy H3 Output",
@@ -105,10 +105,10 @@ const TEXT = {
     height: ZH_BROWSER ? "\u9ad8\u5ea6" : "Height",
     seconds: ZH_BROWSER ? "\u79d2\u6570" : "Seconds",
     advanced: ZH_BROWSER ? "\u9ad8\u7ea7\u9009\u9879" : "Advanced options",
+    promptOptimizerEnabled: ZH_BROWSER ? "\u63d0\u793a\u8bcd\u4f18\u5316" : "Prompt optimization",
     promptOptimizerSettings: ZH_BROWSER ? "\u6253\u5f00\u63d0\u793a\u8bcd\u4f18\u5316 API \u8bbe\u7f6e" : "Optimizer settings",
     promptOptimizerSceneGuide: ZH_BROWSER ? "\u63d0\u793a\u8bcd\u65b9\u6848" : "Prompt Guide",
     promptOptimizerProvider: ZH_BROWSER ? "API \u670d\u52a1/\u6a21\u578b" : "API service/model",
-    promptOptimizerDisabled: ZH_BROWSER ? "\u4e0d\u542f\u7528" : "Disabled",
     fps: ZH_BROWSER ? "\u5e27\u7387 (FPS)" : "Frame rate (FPS)",
     keyframeRole: ZH_BROWSER ? "\u9996\u5c3e\u5e27\u8bbe\u7f6e" : "First/last frame setup",
     refImageSize: ZH_BROWSER ? "\u53c2\u8003\u56fe\u5c3a\u5bf8\uff08\u77ed\u8fb9\uff09" : "Reference image size (short edge)",
@@ -157,9 +157,6 @@ const OPTION_DEFS = {
     },
     prompt_optimizer_scene_guide: {
         none: ZH_BROWSER ? "\u4ec5\u901a\u7528\u65b9\u6848" : "General only",
-    },
-    prompt_optimizer_provider: {
-        disabled: ZH_BROWSER ? "\u4e0d\u542f\u7528" : "Disabled",
     },
     resolution: {
         "360P": "360P",
@@ -314,7 +311,7 @@ function canonicalPromptGuide(value) {
 }
 
 function promptOptimizerServiceEntries() {
-    const entries = [{ value: "disabled", label: TEXT.promptOptimizerDisabled, provider_id: "", model: "" }];
+    const entries = [];
     for (const provider of promptOptimizerSettingsCache.providers) {
         const models = [...new Set([...(provider.llm_models || []), ...(provider.vlm_models || [])].map(String).filter(Boolean))];
         for (const model of models) {
@@ -331,14 +328,15 @@ function promptOptimizerServiceEntries() {
 
 function canonicalPromptProvider(value) {
     const raw = String(value ?? "").trim();
-    if (!raw || raw === "disabled" || raw === TEXT.promptOptimizerDisabled) return "disabled";
-    const entry = promptOptimizerServiceEntries().find((item) => raw === item.value || raw === item.label);
+    const entries = promptOptimizerServiceEntries();
+    if (!raw || raw === "disabled" || raw === "none") return entries[0]?.value || "";
+    const entry = entries.find((item) => raw === item.value || raw === item.label);
     if (entry) return entry.value;
     // Migrate v0.4 workflows that stored only a provider id/name by selecting
     // that provider's configured default model, matching prompt-assistant.
     const provider = promptOptimizerSettingsCache.providers.find((item) => raw === item.id || raw === item.name);
     const model = provider?.llm_model || provider?.vlm_model || provider?.llm_models?.[0] || provider?.vlm_models?.[0];
-    return provider && model ? `${provider.id}/${model}` : raw;
+    return provider && model ? `${provider.id}/${model}` : (entries[0]?.value || raw);
 }
 
 function localizeComboWidget(widget) {
@@ -421,7 +419,7 @@ function localizeNodeInstance(node) {
     }
     if (!isTarget(node)) return;
     node.title = TEXT.mainTitle;
-    const labels = { mode: TEXT.mode, prompt: TEXT.prompt, resolution: TEXT.resolution, aspect_ratio: TEXT.aspectRatio, width: TEXT.width, height: TEXT.height, seconds: TEXT.seconds, advanced: TEXT.advanced, prompt_optimizer_provider: TEXT.promptOptimizerProvider, prompt_optimizer_scene_guide: TEXT.promptOptimizerSceneGuide, fps: TEXT.fps, keyframe_role: TEXT.keyframeRole, ref_image_size: TEXT.refImageSize, reference_mention_mode: TEXT.referenceMentionMode };
+    const labels = { mode: TEXT.mode, prompt: TEXT.prompt, resolution: TEXT.resolution, aspect_ratio: TEXT.aspectRatio, width: TEXT.width, height: TEXT.height, seconds: TEXT.seconds, advanced: TEXT.advanced, prompt_optimizer_enabled: TEXT.promptOptimizerEnabled, prompt_optimizer_provider: TEXT.promptOptimizerProvider, prompt_optimizer_scene_guide: TEXT.promptOptimizerSceneGuide, fps: TEXT.fps, keyframe_role: TEXT.keyframeRole, ref_image_size: TEXT.refImageSize, reference_mention_mode: TEXT.referenceMentionMode };
     for (const widget of node.widgets || []) {
         if (labels[widget.name]) widget.label = labels[widget.name];
         localizeComboWidget(widget);
@@ -1628,13 +1626,15 @@ function patchGraphToPrompt() {
             promptNode.inputs.height = Number(getWidgetValue(node, "height", 768));
             promptNode.inputs.seconds = Math.min(MAX_SECONDS, Math.max(MIN_SECONDS, Number(getWidgetValue(node, "seconds", 10)) || 10));
             const advanced = asBoolean(getWidgetValue(node, "advanced", false));
-            const providerId = advanced
-                ? canonicalPromptProvider(getWidgetValue(node, "prompt_optimizer_provider", "disabled"))
-                : "disabled";
+            const optimizerEnabled = advanced && asBoolean(getWidgetValue(node, "prompt_optimizer_enabled", false));
+            const providerId = optimizerEnabled
+                ? canonicalPromptProvider(getWidgetValue(node, "prompt_optimizer_provider", ""))
+                : "";
             promptNode.inputs.advanced = advanced;
             delete promptNode.inputs.prompt_optimizer_settings;
+            promptNode.inputs.prompt_optimizer_enabled = optimizerEnabled;
             promptNode.inputs.prompt_optimizer_provider = providerId;
-            promptNode.inputs.prompt_optimizer_scene_guide = providerId === "disabled"
+            promptNode.inputs.prompt_optimizer_scene_guide = !optimizerEnabled
                 ? "none"
                 : canonicalPromptGuide(getWidgetValue(node, "prompt_optimizer_scene_guide", "none"));
             const currentPromptText = String(getWidgetValue(node, "prompt", ""));
@@ -3356,13 +3356,15 @@ function setConditionalWidgetVisible(node, widget, visible, { adjustHeight = tru
 
 function syncModeWidgets(node, { adjustHeight = true } = {}) {
     const advanced = isAdvancedEnabled(node);
+    const optimizerEnabled = advanced && asBoolean(getWidgetValue(node, "prompt_optimizer_enabled", false));
     const changed = [
         setConditionalWidgetVisible(node, getWidget(node, "fps"), advanced, { adjustHeight }),
         setConditionalWidgetVisible(node, getWidget(node, "keyframe_role"), advanced && !isReferenceMode(node), { adjustHeight }),
         setConditionalWidgetVisible(node, getWidget(node, "ref_image_size"), advanced, { adjustHeight }),
         setConditionalWidgetVisible(node, getWidget(node, "reference_mention_mode"), advanced && isReferenceMode(node), { adjustHeight }),
-        setConditionalWidgetVisible(node, getWidget(node, "prompt_optimizer_provider"), advanced, { adjustHeight }),
-        setConditionalWidgetVisible(node, getWidget(node, "prompt_optimizer_scene_guide"), advanced, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "prompt_optimizer_enabled"), advanced, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "prompt_optimizer_provider"), optimizerEnabled, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "prompt_optimizer_scene_guide"), optimizerEnabled, { adjustHeight }),
         setConditionalWidgetVisible(node, getWidget(node, "aspect_ratio"), !isCustomResolution(node), { adjustHeight }),
         setConditionalWidgetVisible(node, getWidget(node, "width"), isCustomResolution(node), { adjustHeight }),
         setConditionalWidgetVisible(node, getWidget(node, "height"), isCustomResolution(node), { adjustHeight }),
@@ -3515,7 +3517,7 @@ async function loadPromptOptimizerSettings({ force = false } = {}) {
 }
 
 function promptOptimizerState(node) {
-    const requestedService = canonicalPromptProvider(getWidgetValue(node, "prompt_optimizer_provider", "disabled"));
+    const requestedService = canonicalPromptProvider(getWidgetValue(node, "prompt_optimizer_provider", ""));
     const selected = promptOptimizerServiceEntries().find((item) => item.value === requestedService);
     const requestedProvider = selected?.provider_id || "";
     const requestedModel = selected?.model || "";
@@ -3598,7 +3600,9 @@ function syncPromptOptimizerButton(node) {
     if (!button) return;
     const state = promptOptimizerState(node);
     const advanced = isAdvancedEnabled(node);
-    const enabled = advanced && state.requested_service !== "disabled" && Boolean(state.requested_provider && state.requested_model);
+    const enabled = advanced
+        && asBoolean(getWidgetValue(node, "prompt_optimizer_enabled", false))
+        && Boolean(state.requested_provider && state.requested_model);
     const model = state.requested_model;
     const keyReady = state.api_format === "ollama" || state.api_key_exists || Boolean(String(state.api_key || "").trim());
     const configured = enabled && Boolean(String(state.api_url || "").trim() && String(model || "").trim() && keyReady);
@@ -3698,7 +3702,7 @@ async function optimizePromptFromEditor(node) {
         return;
     }
     const state = promptOptimizerState(node);
-    if (!isAdvancedEnabled(node) || state.requested_service === "disabled" || !state.requested_provider || !state.requested_model) {
+    if (!isAdvancedEnabled(node) || !asBoolean(getWidgetValue(node, "prompt_optimizer_enabled", false)) || !state.requested_provider || !state.requested_model) {
         notifyPromptOptimizer(TEXT.optimizerDisabled, "warn");
         return;
     }
@@ -4748,7 +4752,7 @@ function setConfiguredWidgetValue(node, name, value) {
 }
 
 function bindPromptOptimizerWidgetCallbacks(node) {
-    const names = ["prompt_optimizer_provider", "prompt_optimizer_scene_guide"];
+    const names = ["prompt_optimizer_enabled", "prompt_optimizer_provider", "prompt_optimizer_scene_guide"];
     for (const name of names) {
         const widget = getWidget(node, name);
         if (!widget || widget.__h3PromptOptimizerCallbackBound) continue;
@@ -4761,9 +4765,7 @@ function bindPromptOptimizerWidgetCallbacks(node) {
                 : (PROMPT_GUIDES.find((item) => item.value === canonicalPromptGuide(value))?.en || value);
             if (name === "prompt_optimizer_provider") {
                 const serviceValue = canonicalPromptProvider(value);
-                widget.value = serviceValue === "disabled"
-                    ? TEXT.promptOptimizerDisabled
-                    : (promptOptimizerServiceEntries().find((item) => item.value === serviceValue)?.label || value);
+                widget.value = promptOptimizerServiceEntries().find((item) => item.value === serviceValue)?.label || value;
             }
             syncModeWidgets(node);
             syncPromptOptimizerButton(node);
@@ -4790,7 +4792,8 @@ function repairConfiguredWidgetValues(node, info) {
         keyframe_role: KEYFRAME_FIRST,
         ref_image_size: REF_IMAGE_DEFAULT,
         reference_mention_mode: "index",
-        prompt_optimizer_provider: "disabled",
+        prompt_optimizer_enabled: false,
+        prompt_optimizer_provider: "",
         prompt_optimizer_scene_guide: "none",
     };
     const names = Object.keys(defaults);
@@ -4820,9 +4823,9 @@ function repairConfiguredWidgetValues(node, info) {
         values.splice(8, 2);
         values[12] = legacyPromptGuide;
     }
-    // v0.3 stored only the prompt scheme at index 12. v0.4 inserts the API
-    // provider before it, with prompt optimization disabled by default.
-    if (values.length <= 13) values.splice(12, 0, "disabled");
+    // Earlier workflows did not have an explicit enable switch.  Add it ahead
+    // of the selected API/model and keep optimization safely disabled.
+    if (values.length <= 14) values.splice(12, 0, false);
 
     const normalized = {
         mode: Object.prototype.hasOwnProperty.call(OPTION_DEFS.mode, canonicalOption("mode", values[0]))
@@ -4845,8 +4848,9 @@ function repairConfiguredWidgetValues(node, info) {
             ? canonicalOption("ref_image_size", values[10]) : defaults.ref_image_size,
         reference_mention_mode: Object.prototype.hasOwnProperty.call(OPTION_DEFS.reference_mention_mode, canonicalOption("reference_mention_mode", values[11]))
             ? canonicalOption("reference_mention_mode", values[11]) : defaults.reference_mention_mode,
-        prompt_optimizer_provider: canonicalPromptProvider(values[12] ?? defaults.prompt_optimizer_provider),
-        prompt_optimizer_scene_guide: canonicalPromptGuide(values[13] ?? defaults.prompt_optimizer_scene_guide),
+        prompt_optimizer_enabled: asBoolean(values[12], defaults.prompt_optimizer_enabled),
+        prompt_optimizer_provider: canonicalPromptProvider(values[13] ?? defaults.prompt_optimizer_provider),
+        prompt_optimizer_scene_guide: canonicalPromptGuide(values[14] ?? defaults.prompt_optimizer_scene_guide),
     };
     for (const name of names) setConfiguredWidgetValue(node, name, normalized[name]);
     info.widgets_values = names.map((name) => normalized[name]);
@@ -5152,7 +5156,8 @@ function applyFreshNodeDefaults(node) {
     setConfiguredWidgetValue(node, "seconds", 10);
     setConfiguredWidgetValue(node, "fps", 24);
     setConfiguredWidgetValue(node, "ref_image_size", REF_IMAGE_DEFAULT);
-    setConfiguredWidgetValue(node, "prompt_optimizer_provider", "disabled");
+    setConfiguredWidgetValue(node, "prompt_optimizer_enabled", false);
+    setConfiguredWidgetValue(node, "prompt_optimizer_provider", "");
 }
 
 function installNode(nodeType, nodeData) {
