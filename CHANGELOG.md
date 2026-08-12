@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.1.0
+
+- Fixes workflow validation when prompt optimization is disabled: the serialized service value remains valid while the optimization switch controls whether an API request is made.
+- Fixes an issue where ComfyUI serializing a Boolean as the string `"false"` could still incorrectly run prompt optimization.
+- Improves compatibility with saved workflows and avoids unnecessary prompt-optimization API calls when the feature is off.
+
 ## v1.0.0
 
 - Adds a visible `modified` declaration to the main node header, including H3 source (`nkxx188/ComfyUI-MiniMaxH3-Easy`) and API source (`yawiii/ComfyUI-Prompt-Assistant`).

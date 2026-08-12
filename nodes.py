@@ -405,6 +405,13 @@ def _is_none_model(value: Any) -> bool:
     return str(value or "").strip().lower() in NONE_MODEL_ALIASES
 
 
+def _as_bool(value: Any) -> bool:
+    """Parse workflow booleans without treating the string 'false' as true."""
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)
+
+
 def _read_prompt_guide_text(relative_path: str) -> str:
     path = os.path.realpath(os.path.join(PROMPT_GUIDES_DIR, str(relative_path or "")))
     root = os.path.realpath(PROMPT_GUIDES_DIR)
@@ -2135,6 +2142,11 @@ class FeiHouEasyH3:
     def INPUT_TYPES(cls):
         prompt_schemes, default_prompt_scheme = _prompt_optimizer_scheme_choices()
         prompt_providers = _prompt_optimizer_provider_choices()
+        # Old workflows may have saved an empty service while prompt optimization
+        # was disabled.  Keep that transport value valid without exposing an
+        # extra user-facing “disabled” provider; the Boolean switch controls
+        # whether the backend is ever called.
+        prompt_provider_values = prompt_providers if "" in prompt_providers else ["", *prompt_providers]
         optional = {}
         for index in range(1, MAX_MEDIA + 1):
             # Transport-only strings populated by the embedded-media frontend.
@@ -2159,7 +2171,7 @@ class FeiHouEasyH3:
                 "ref_image_size": (list(REFERENCE_SHORT_EDGES), {"default": REF_IMAGE_DEFAULT}),
                 "reference_mention_mode": ([REFERENCE_MENTION_FILENAME, REFERENCE_MENTION_INDEX], {"default": REFERENCE_MENTION_INDEX}),
                 "prompt_optimizer_enabled": ("BOOLEAN", {"default": False}),
-                "prompt_optimizer_provider": (prompt_providers, {"default": prompt_providers[0]}),
+                "prompt_optimizer_provider": (prompt_provider_values, {"default": prompt_providers[0]}),
                 "prompt_optimizer_scene_guide": (prompt_schemes, {"default": default_prompt_scheme}),
             },
             "optional": optional,
@@ -2209,7 +2221,7 @@ class FeiHouEasyH3:
         width, height = _canvas_dimensions(resolution, aspect_ratio, width, height)
         seconds = min(MAX_SECONDS, max(MIN_SECONDS, float(seconds)))
         length = _frame_length(seconds, fps)
-        optimizer_enabled = bool(advanced) and bool(prompt_optimizer_enabled)
+        optimizer_enabled = _as_bool(advanced) and _as_bool(prompt_optimizer_enabled)
         optimizer_already_applied = prompt_optimizer_applied is True or str(prompt_optimizer_applied).strip().lower() in {"1", "true", "yes", "on"}
         if optimizer_enabled and not optimizer_already_applied:
             try:

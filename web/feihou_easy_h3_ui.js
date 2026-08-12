@@ -1627,9 +1627,11 @@ function patchGraphToPrompt() {
             promptNode.inputs.seconds = Math.min(MAX_SECONDS, Math.max(MIN_SECONDS, Number(getWidgetValue(node, "seconds", 10)) || 10));
             const advanced = asBoolean(getWidgetValue(node, "advanced", false));
             const optimizerEnabled = advanced && asBoolean(getWidgetValue(node, "prompt_optimizer_enabled", false));
-            const providerId = optimizerEnabled
-                ? canonicalPromptProvider(getWidgetValue(node, "prompt_optimizer_provider", ""))
-                : "";
+            // Keep a valid service-model value in the serialized prompt even
+            // when optimization is off.  ComfyUI validates combo values before
+            // execution; the enable switch below remains the sole execution
+            // gate, so this never calls an API while disabled.
+            const providerId = canonicalPromptProvider(getWidgetValue(node, "prompt_optimizer_provider", ""));
             promptNode.inputs.advanced = advanced;
             delete promptNode.inputs.prompt_optimizer_settings;
             promptNode.inputs.prompt_optimizer_enabled = optimizerEnabled;
@@ -5157,7 +5159,6 @@ function applyFreshNodeDefaults(node) {
     setConfiguredWidgetValue(node, "fps", 24);
     setConfiguredWidgetValue(node, "ref_image_size", REF_IMAGE_DEFAULT);
     setConfiguredWidgetValue(node, "prompt_optimizer_enabled", false);
-    setConfiguredWidgetValue(node, "prompt_optimizer_provider", "");
 }
 
 function installNode(nodeType, nodeData) {
