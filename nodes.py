@@ -1529,6 +1529,20 @@ def _optional_role_choices(role: str, categories: tuple[str, ...]) -> list[str]:
     return [*selected, *NONE_MODEL_DISPLAY_VALUES]
 
 
+def _all_weight_choices(categories: tuple[str, ...], fallback: str, optional: bool = False) -> list[str]:
+    """List model files by their ComfyUI folder, never by a filename pattern.
+
+    Community H3 packages are frequently renamed.  The loader exposes the
+    relevant ComfyUI model folders verbatim, so users can assign renamed files
+    to their actual H3 role themselves.  File compatibility is still checked by
+    ComfyUI when that selected file is loaded.
+    """
+    selected = _sort_model_names(_collect_weight_names(categories))
+    if optional:
+        return [*selected, *NONE_MODEL_DISPLAY_VALUES]
+    return selected or [fallback]
+
+
 def _filtered_choices(category: str, needles: tuple[str, ...], fallback: str) -> list[str]:
     names = _collect_weight_names((category,))
     selected = [name for name in names if any(needle.lower() in _normalise_model_name(name).replace(" ", "") for needle in needles)]
@@ -1536,20 +1550,19 @@ def _filtered_choices(category: str, needles: tuple[str, ...], fallback: str) ->
 
 
 def _model_choices() -> list[str]:
-    return _optional_role_choices("fl2va", ("diffusion_models", "unet", "unet_gguf"))
+    return _all_weight_choices(("diffusion_models", "unet", "unet_gguf"), "", optional=True)
 
 
 def _ref_model_choices() -> list[str]:
-    return _optional_role_choices("ref2va", ("diffusion_models", "unet", "unet_gguf"))
+    return _all_weight_choices(("diffusion_models", "unet", "unet_gguf"), "", optional=True)
 
 
 def _clip_choices() -> list[str]:
-    return _role_choices("text_encoder", ("text_encoders", "clip", "clip_gguf"), "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors")
+    return _all_weight_choices(("text_encoders", "clip", "clip_gguf"), "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors")
 
 
 def _vae_choices(needles: tuple[str, ...], fallback: str) -> list[str]:
-    role = "video_vae" if any("video" in needle.lower() for needle in needles) else "audio_vae"
-    return _role_choices(role, ("vae",), fallback)
+    return _all_weight_choices(("vae",), fallback)
 
 
 @lru_cache(maxsize=16)

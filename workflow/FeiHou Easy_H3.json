@@ -843,7 +843,7 @@
         "Node name for S&R": "FeiHouEasyH3",
         "feihou_h3_embedded_media": [],
         "cnr_id": "comfyui-feihou-easy-h3",
-        "ver": "1.1.0",
+        "ver": "1.2.0",
         "minimax_h3_prompt_reference_doc": {
           "version": 1,
           "text": "加载参考图片或视频后，在这里描述要生成的画面。例如：<Picture 1> 中的角色站在晨光花园中，镜头缓慢推进，伴随轻柔的环境声。",
@@ -913,7 +913,7 @@
       "properties": {
         "Node name for S&R": "FeiHouEasyH3PromptPreview",
         "cnr_id": "comfyui-feihou-easy-h3",
-        "ver": "1.1.0",
+        "ver": "1.2.0",
         "feihou_h3_prompt_preview_text": "",
         "ue_properties": {
           "widget_ue_connectable": {},

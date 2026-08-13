@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.2.0
+
+- Removes filename-based filtering from the H3 Loader. Renamed community model files are now listed from their respective ComfyUI model folders.
+- Lets users manually assign the selected diffusion model, text encoder, video VAE, and audio VAE to each H3 Loader role.
+- Keeps `.safetensors` and `.gguf` discovery across the relevant ComfyUI model directories.
+
 ## v1.1.0
 
 - Fixes workflow validation when prompt optimization is disabled: the serialized service value remains valid while the optimization switch controls whether an API request is made.
