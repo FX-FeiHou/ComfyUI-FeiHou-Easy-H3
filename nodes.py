@@ -8,11 +8,14 @@ node; the browser extension sends their input-folder paths to this backend.
 
 from __future__ import annotations
 
+import io
+import logging
 import math
 import os
 import re
 import sys
 import threading
+import uuid
 import base64
 import asyncio
 import json
@@ -108,6 +111,8 @@ PROMPT_GUIDE_MANIFEST = os.path.join(PROMPT_GUIDES_DIR, "manifest.json")
 PROMPT_OPTIMIZER_TIMEOUT_SECONDS = 600
 PROMPT_OPTIMIZER_MAX_OUTPUT_TOKENS = 50000
 PROMPT_OPTIMIZER_MODEL_LIST_TIMEOUT_SECONDS = 20
+PROMPT_OPTIMIZER_JPEG_QUALITY = 85
+PROMPT_OPTIMIZER_VIDEO_SAMPLE_COUNT = 3
 PROMPT_OPTIMIZER_CONFIG_VERSION = 4
 PROMPT_OPTIMIZER_ZHIPU_MODELS = (
     "glm-5.1", "glm-5", "glm-5-turbo", "glm-5v-turbo", "glm-4.7", "glm-4.7-flash",
@@ -998,6 +1003,53 @@ def _optimizer_available_models(provider: Mapping[str, Any]) -> list[str]:
     return names
 
 
+def _optimizer_log_url(url: str) -> str:
+    """Return an endpoint identifier without query parameters or credentials."""
+    try:
+        parsed = urllib.parse.urlsplit(str(url or ""))
+        if parsed.scheme and parsed.netloc:
+            return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", ""))
+    except (TypeError, ValueError):
+        pass
+    return "<invalid endpoint>"
+
+
+def _optimizer_log_media_summary(media_parts: list[Mapping[str, Any]]) -> str:
+    """Summarize attached media without exposing filenames or Base64 payloads."""
+    if not media_parts:
+        return "none"
+    summary: dict[str, list[int]] = {}
+    for part in media_parts:
+        kind = "unknown"
+        encoded = ""
+        if isinstance(part.get("inlineData"), Mapping):
+            inline = part["inlineData"]
+            kind = str(inline.get("mimeType") or "inline")
+            encoded = str(inline.get("data") or "")
+        elif str(part.get("type") or "") == "image_url":
+            kind = "image_url"
+            image_url = part.get("image_url") if isinstance(part.get("image_url"), Mapping) else {}
+            encoded = str(image_url.get("url") or "")
+        elif str(part.get("type") or "") == "ollama_image":
+            kind = "ollama_image"
+            encoded = str(part.get("data") or "")
+        summary.setdefault(kind, []).append(len(encoded))
+    return ", ".join(
+        f"{kind}×{len(sizes)} (~{sum(sizes) * 3 // 4 // 1024} KiB encoded)"
+        for kind, sizes in sorted(summary.items())
+    )
+
+
+def _redact_optimizer_log_text(value: Any, limit: int = 2000) -> str:
+    """Keep provider diagnostics useful while never logging secrets or media data."""
+    text = str(value or "").replace("\r", " ").replace("\n", " ")
+    text = re.sub(r"data:[^\s\"']+;base64,[A-Za-z0-9+/=_-]+", "data:<redacted>", text, flags=re.I)
+    text = re.sub(r"\b(?:sk|rk|key)-[A-Za-z0-9._-]{8,}\b", "<redacted-key>", text, flags=re.I)
+    text = re.sub(r"(?i)(authorization|api[_ -]?key|x-goog-api-key)(\s*[:=]\s*)([^,}\]\s]+)", r"\1\2<redacted>", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text[:limit] + ("…" if len(text) > limit else "")
+
+
 def _optimizer_http_json(
     api_url: str,
     api_key: str,
@@ -1014,6 +1066,7 @@ def _optimizer_http_json(
     _minimal_openai_payload: bool = False,
 ) -> str:
     url = _normalize_optimizer_url(api_url, api_format, model)
+    request_id = uuid.uuid4().hex[:8]
     media_parts = list(media_parts or [])
     temperature = min(2.0, max(0.0, float(temperature)))
     max_tokens = min(PROMPT_OPTIMIZER_MAX_OUTPUT_TOKENS, max(1, int(max_tokens)))
@@ -1067,6 +1120,15 @@ def _optimizer_http_json(
         if not _minimal_openai_payload:
             payload.update({"temperature": temperature, "max_tokens": max_tokens, "top_p": top_p})
     request = urllib.request.Request(url, data=json.dumps(payload, ensure_ascii=False).encode("utf-8"), headers=headers, method="POST")
+    logging.info(
+        "[Easy H3 Prompt API %s] request format=%s model=%s url=%s stream=%s media=%s",
+        request_id,
+        api_format,
+        model,
+        _optimizer_log_url(url),
+        bool(payload.get("stream")),
+        _optimizer_log_media_summary(media_parts),
+    )
     try:
         with urllib.request.urlopen(request, timeout=PROMPT_OPTIMIZER_TIMEOUT_SECONDS) as response:
             raw_response = response.read().decode("utf-8", errors="replace")
@@ -1119,13 +1181,40 @@ def _optimizer_http_json(
                 preview = raw_response.strip().replace("\n", " ")[:500]
                 if not preview:
                     preview = "<empty response>"
+                logging.error(
+                    "[Easy H3 Prompt API %s] non-JSON response http=%s content_type=%s model=%s body=%s",
+                    request_id,
+                    status,
+                    content_type,
+                    model,
+                    _redact_optimizer_log_text(raw_response),
+                )
                 raise RuntimeError(
                     f"提示词优化接口返回非 JSON 内容（HTTP {status}，{content_type}）：{preview}"
                 ) from exc
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"Prompt optimization API error ({exc.code}): {detail[:1000]}") from exc
+        safe_detail = _redact_optimizer_log_text(detail)
+        logging.error(
+            "[Easy H3 Prompt API %s] HTTP %s content_type=%s format=%s model=%s url=%s response=%s",
+            request_id,
+            exc.code,
+            str(exc.headers.get("Content-Type") or "unknown") if exc.headers else "unknown",
+            api_format,
+            model,
+            _optimizer_log_url(url),
+            safe_detail or "<empty response>",
+        )
+        raise RuntimeError(f"Prompt optimization API error ({exc.code}): {(safe_detail or '<empty response>')[:1000]}") from exc
     except urllib.error.URLError as exc:
+        logging.error(
+            "[Easy H3 Prompt API %s] network failure format=%s model=%s url=%s reason=%s",
+            request_id,
+            api_format,
+            model,
+            _optimizer_log_url(url),
+            _redact_optimizer_log_text(exc.reason, 500),
+        )
         raise RuntimeError(f"Prompt optimization request failed: {exc.reason}") from exc
     if api_format == "gemini":
         candidates = data.get("candidates") if isinstance(data, dict) else None
@@ -1181,8 +1270,88 @@ def _optimizer_asset_path(asset: Mapping[str, Any]) -> str | None:
     return candidate if os.path.isfile(candidate) else None
 
 
-def _optimizer_media_parts(resources: list[Mapping[str, Any]], api_format: str) -> list[dict[str, Any]]:
+def _optimizer_reference_short_edge(value: Any) -> int:
+    """Resolve the node's reference-image-size selector to a supported edge."""
+    legacy_short_edges = {"match": 480, "1k": 1024, "1.5k": 1088, "2k": 1088, "original": 1088}
+    try:
+        short_edge = int(str(value or REF_IMAGE_DEFAULT))
+    except (TypeError, ValueError):
+        short_edge = legacy_short_edges.get(str(value or "").strip().lower(), int(REF_IMAGE_DEFAULT))
+    allowed = tuple(int(item) for item in REFERENCE_SHORT_EDGES)
+    return short_edge if short_edge in allowed else min(allowed, key=lambda item: abs(item - short_edge))
+
+
+def _optimizer_jpeg_bytes(image: Any, short_edge: int) -> bytes:
+    """Make an API-only RGB JPEG; originals used by H3 are never altered."""
+    from PIL import Image, ImageOps
+
+    normalized = ImageOps.exif_transpose(image)
+    if normalized.mode in {"RGBA", "LA"} or (normalized.mode == "P" and "transparency" in normalized.info):
+        rgba = normalized.convert("RGBA")
+        canvas = Image.new("RGB", rgba.size, "white")
+        canvas.paste(rgba, mask=rgba.getchannel("A"))
+        normalized = canvas
+    elif normalized.mode != "RGB":
+        normalized = normalized.convert("RGB")
+    width, height = normalized.size
+    scale = min(1.0, float(short_edge) / max(1, min(width, height)))
+    if scale < 1.0:
+        target = (max(1, round(width * scale)), max(1, round(height * scale)))
+        normalized = normalized.resize(target, Image.Resampling.LANCZOS)
+    buffer = io.BytesIO()
+    normalized.save(buffer, format="JPEG", quality=PROMPT_OPTIMIZER_JPEG_QUALITY, optimize=True)
+    return buffer.getvalue()
+
+
+def _optimizer_image_jpeg(path: str, short_edge: int) -> bytes:
+    from PIL import Image
+
+    with Image.open(path) as image:
+        return _optimizer_jpeg_bytes(image, short_edge)
+
+
+def _optimizer_video_keyframes(path: str) -> list[Any]:
+    """Read approximate first/middle/last video frames without sending video bytes."""
+    import av
+
+    frames: list[Any] = []
+    with av.open(path, mode="r") as container:
+        stream = next((item for item in container.streams if item.type == "video"), None)
+        if stream is None:
+            return frames
+        time_base = float(stream.time_base) if stream.time_base else 0.0
+        duration = float(stream.duration * stream.time_base) if stream.duration and stream.time_base else 0.0
+        if duration <= 0.0 and getattr(container, "duration", None):
+            duration = float(container.duration) / float(av.time_base)
+        targets = [0.0] if duration <= 0.0 else [0.0, duration * 0.5, max(0.0, duration - 0.05)]
+        for timestamp in targets[:PROMPT_OPTIMIZER_VIDEO_SAMPLE_COUNT]:
+            try:
+                if time_base:
+                    container.seek(max(0, int(timestamp / time_base)), stream=stream, backward=True, any_frame=False)
+                frame = next(container.decode(stream), None)
+                if frame is not None:
+                    frames.append(frame.to_image())
+            except Exception:
+                continue
+    return frames
+
+
+def _optimizer_encoded_image_part(encoded: str, api_format: str) -> dict[str, Any]:
+    if api_format == "gemini":
+        return {"inlineData": {"mimeType": "image/jpeg", "data": encoded}}
+    if api_format == "ollama":
+        return {"type": "ollama_image", "data": encoded}
+    return {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded}"}}
+
+
+def _optimizer_media_parts(
+    resources: list[Mapping[str, Any]],
+    api_format: str,
+    reference_short_edge: Any = REF_IMAGE_DEFAULT,
+) -> list[dict[str, Any]]:
+    """Attach compact visual evidence only; audio stays local to the H3 run."""
     parts: list[dict[str, Any]] = []
+    short_edge = _optimizer_reference_short_edge(reference_short_edge)
     for resource in resources[:MAX_MEDIA]:
         asset = resource.get("asset") if isinstance(resource.get("asset"), Mapping) else {}
         path = _optimizer_asset_path(asset)
@@ -1190,18 +1359,16 @@ def _optimizer_media_parts(resources: list[Mapping[str, Any]], api_format: str) 
         if not path or media_type not in {"image", "video", "audio"}:
             continue
         try:
-            if os.path.getsize(path) > 32 * 1024 * 1024:
-                continue
-            with open(path, "rb") as handle:
-                encoded = base64.b64encode(handle.read()).decode("ascii")
-            mime = mimetypes.guess_type(path)[0] or {"image": "image/jpeg", "video": "video/mp4", "audio": "audio/wav"}[media_type]
-            if api_format == "gemini":
-                parts.append({"inlineData": {"mimeType": mime, "data": encoded}})
-            elif api_format == "ollama" and media_type == "image":
-                parts.append({"type": "ollama_image", "data": encoded})
-            elif media_type == "image":
-                parts.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{encoded}"}})
-        except (OSError, ValueError):
+            if media_type == "image":
+                encoded = base64.b64encode(_optimizer_image_jpeg(path, short_edge)).decode("ascii")
+                parts.append(_optimizer_encoded_image_part(encoded, api_format))
+            elif media_type == "video":
+                for frame in _optimizer_video_keyframes(path):
+                    encoded = base64.b64encode(_optimizer_jpeg_bytes(frame, short_edge)).decode("ascii")
+                    parts.append(_optimizer_encoded_image_part(encoded, api_format))
+            # Audio has no portable OpenAI-compatible message schema.  Keep it
+            # for H3 generation, but do not transmit it to the prompt API.
+        except (OSError, ValueError, ImportError):
             continue
     return parts
 
@@ -1233,8 +1400,8 @@ def _optimizer_system_prompt(
             "\n\n=== MEDIA EVIDENCE RULE ===\n"
             f"Actual media parts attached to this request: {actual_count}.\n"
             "The presence of a media part in the request does not prove that you can perceive it. "
-            "Use visual, video, or audio details only when they are directly observable to your model in the attached media parts. "
-            "If your model or API does not support the media modality, treat that media as unavailable. "
+            "Only compact still images are attached to this request. Reference videos are represented by sampled first, middle, and last frames when available; standalone audio and video audio tracks are not attached. "
+            "Use visual details only when they are directly observable in those attached images. "
             "Do not invent or confidently describe details for any referenced media that is not actually attached. "
             "For a media tag without corresponding attached evidence, preserve the tag and infer only from the original user prompt and explicit instructions, never from an imagined asset."
         )
@@ -1315,6 +1482,7 @@ def _run_configured_prompt_optimizer(
     media_counts: Mapping[str, Any] | None = None,
     resources: list[Mapping[str, Any]] | None = None,
     settings: Mapping[str, Any] | None = None,
+    reference_short_edge: Any = REF_IMAGE_DEFAULT,
 ) -> tuple[str, str, str]:
     config = settings if isinstance(settings, Mapping) else _read_prompt_optimizer_config()
     provider = _active_optimizer_provider(config, service_model)
@@ -1344,7 +1512,7 @@ def _run_configured_prompt_optimizer(
     selected_is_vlm = bool(requested_model and requested_model in vlm_models)
     media_model = requested_model if selected_is_vlm else (configured_vlm if not requested_model else "")
     media_parts = (
-        _optimizer_media_parts(resource_items, api_format)
+        _optimizer_media_parts(resource_items, api_format, reference_short_edge)
         if bool(config.get("read_media")) and media_model
         else []
     )
@@ -1485,6 +1653,7 @@ def _register_prompt_optimizer_route() -> bool:
                 raw_counts,
                 resources,
                 settings,
+                payload.get("ref_image_size") or REF_IMAGE_DEFAULT,
             )
             return web.json_response({
                 "ok": True,
@@ -2246,6 +2415,7 @@ class FeiHouEasyH3:
                     str(prompt_optimizer_scene_guide or "none"),
                     _media_counts_from_kwargs(kwargs),
                     _optimizer_resources_from_kwargs(kwargs),
+                    reference_short_edge=ref_image_size,
                 )
             except Exception as exc:
                 raise RuntimeError(f"Easy H3 提示词扩写/反推失败: {exc}") from exc

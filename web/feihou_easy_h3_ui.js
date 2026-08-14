@@ -3734,6 +3734,7 @@ async function optimizePromptFromEditor(node) {
                 prompt: sourcePrompt,
                 mode: canonicalOption("mode", getWidgetValue(node, "mode", MODE_IMAGE)),
                 seconds: Math.min(MAX_SECONDS, Math.max(MIN_SECONDS, Number(getWidgetValue(node, "seconds", 10)) || 10)),
+                ref_image_size: canonicalOption("ref_image_size", getWidgetValue(node, "ref_image_size", REF_IMAGE_DEFAULT)),
                 service_model: state.requested_service,
                 provider_id: state.requested_provider,
                 model: state.requested_model,
