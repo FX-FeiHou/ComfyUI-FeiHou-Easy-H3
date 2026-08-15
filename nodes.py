@@ -2360,6 +2360,21 @@ class FeiHouEasyH3:
         }
 
     @classmethod
+    def VALIDATE_INPUTS(cls, advanced, prompt_optimizer_enabled, prompt_optimizer_provider, prompt_optimizer_scene_guide):
+        if not (_as_bool(advanced) and _as_bool(prompt_optimizer_enabled)):
+            return True
+
+        provider = str(prompt_optimizer_provider or "")
+        if not provider or provider not in _prompt_optimizer_provider_choices():
+            return f"提示词优化服务不可用：{provider or '未选择'}。请在 Easy H3 设置中配置并重新选择服务与模型。"
+
+        scene_guide = str(prompt_optimizer_scene_guide or "none")
+        scene_guides, _default_scene_guide = _prompt_optimizer_scheme_choices()
+        if scene_guide not in scene_guides:
+            return f"提示词优化场景方案不可用：{scene_guide}。请重新选择场景方案。"
+        return True
+
+    @classmethod
     def IS_CHANGED(cls, **kwargs):
         return float("nan")
 
