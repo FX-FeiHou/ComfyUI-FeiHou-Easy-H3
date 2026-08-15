@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.3.2
+
+- Built-in prompt-optimization services now start with only their editable default API address; no model is preloaded or selected automatically.
+- Migrates only models injected by older plugin defaults: user-added models and API keys are preserved, while an obsolete default selection is cleared.
+
 ## v1.3.1
 
 - Fixes saved workflows failing validation while prompt optimization is disabled. Dynamic API service/model and prompt-guide selections are no longer validated against the current Settings list before the node can read the optimization switch.

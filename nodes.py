@@ -113,7 +113,7 @@ PROMPT_OPTIMIZER_MAX_OUTPUT_TOKENS = 50000
 PROMPT_OPTIMIZER_MODEL_LIST_TIMEOUT_SECONDS = 20
 PROMPT_OPTIMIZER_JPEG_QUALITY = 85
 PROMPT_OPTIMIZER_VIDEO_SAMPLE_COUNT = 3
-PROMPT_OPTIMIZER_CONFIG_VERSION = 4
+PROMPT_OPTIMIZER_CONFIG_VERSION = 5
 PROMPT_OPTIMIZER_ZHIPU_MODELS = (
     "glm-5.1", "glm-5", "glm-5-turbo", "glm-5v-turbo", "glm-4.7", "glm-4.7-flash",
     "glm-4.7-flashx", "glm-4.6", "glm-4.6v", "glm-4.6v-flash", "glm-4.5",
@@ -508,7 +508,10 @@ def _normalize_model_names(value: Any, fallback: Any = None) -> list[str]:
     return result
 
 
-_PROMPT_OPTIMIZER_V3_SEEDED_MODELS = {
+# Models injected by old releases.  Built-in services now deliberately start
+# with only their editable endpoint; users choose models after configuring a
+# provider.  This map is used solely to remove those old automatic defaults.
+_PROMPT_OPTIMIZER_LEGACY_SEEDED_MODELS = {
     "zhipu": {
         "llm_models": ["glm-4-flash-250414", "glm-4.5-flash"],
         "vlm_models": ["glm-4.6V-Flash", "glm-4v-flash"],
@@ -575,21 +578,28 @@ def _normalize_prompt_optimizer_config(
         template = defaults.get(provider_id, {})
         item = supplied.get(provider_id, template)
         previous_item = previous_providers.get(provider_id, {})
-        if source_version < 4 and provider_id in _PROMPT_OPTIMIZER_V3_SEEDED_MODELS:
-            seeded = _PROMPT_OPTIMIZER_V3_SEEDED_MODELS[provider_id]
+        if source_version < 5 and provider_id in _PROMPT_OPTIMIZER_LEGACY_SEEDED_MODELS:
+            seeded = _PROMPT_OPTIMIZER_LEGACY_SEEDED_MODELS[provider_id]
             migrated_item = dict(item)
             for model_kind in ("llm", "vlm"):
                 list_key = f"{model_kind}_models"
                 active_key = f"{model_kind}_model"
                 seeded_models = seeded[list_key]
                 current_models = _normalize_model_names(migrated_item.get(list_key))
+                active_model = str(migrated_item.get(active_key) or "").strip()
                 if current_models == seeded_models:
                     migrated_item[list_key] = []
                     migrated_item[active_key] = ""
                     if model_kind == "llm":
                         migrated_item["model"] = ""
+                # Preserve user-added models, but never leave an old
+                # auto-selected model active once the defaults are removed.
+                elif active_model in seeded_models:
+                    migrated_item[active_key] = ""
+                    if model_kind == "llm":
+                        migrated_item["model"] = ""
             item = migrated_item
-        elif source_version < 4 and provider_id == "ollama" and str(item.get("api_key") or "") == "ollama":
+        elif source_version < 5 and provider_id == "ollama" and str(item.get("api_key") or "") == "ollama":
             item = {**item, "api_key": ""}
         api_format = str(item.get("api_format") or template.get("api_format") or "openai").strip().lower()
         if api_format not in {"openai", "gemini", "ollama"}:
@@ -616,13 +626,11 @@ def _normalize_prompt_optimizer_config(
             or previous_item.get("llm_model")
             or template.get("llm_model")
             or legacy_model
-            or (llm_models[0] if llm_models else "")
         ).strip()
         vlm_model = str(
             item.get("vlm_model")
             or previous_item.get("vlm_model")
             or template.get("vlm_model")
-            or (vlm_models[0] if vlm_models else "")
         ).strip()
         if llm_model and llm_model not in llm_models:
             llm_models.insert(0, llm_model)
