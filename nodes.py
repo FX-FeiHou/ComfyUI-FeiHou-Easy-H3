@@ -2360,6 +2360,18 @@ class FeiHouEasyH3:
         }
 
     @classmethod
+    def VALIDATE_INPUTS(cls, prompt_optimizer_provider, prompt_optimizer_scene_guide):
+        """Allow saved dynamic optimizer selections to survive settings changes.
+
+        ComfyUI validates combo values before ``generate`` can inspect the
+        optimizer switch.  These two lists are populated from user settings,
+        so a workflow saved with a removed/renamed API model must still run
+        when prompt optimization is off.  When it is on, the optimizer backend
+        performs its own current-service validation with a useful error.
+        """
+        return True
+
+    @classmethod
     def IS_CHANGED(cls, **kwargs):
         return float("nan")
 
