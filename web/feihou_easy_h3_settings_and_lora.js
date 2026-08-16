@@ -312,11 +312,9 @@ async function mountInlineSettings(root) {
         const addProvider = button("＋", "fh-inline-provider-add");
         addProvider.title = t("添加自定义 API", "Add custom API");
         addProvider.addEventListener("click", async () => {
-            const name = window.prompt(t("请输入自定义 API 名称", "Custom API name"), t("自定义 API", "Custom API"))?.trim();
-            if (!name) return;
             const id = `custom_${Date.now().toString(36)}`;
             state.providers.push({
-                id, name, description: t("自定义 OpenAI 兼容接口", "Custom OpenAI-compatible endpoint"),
+                id, name: t("自定义 API", "Custom API"), description: t("自定义 OpenAI 兼容接口", "Custom OpenAI-compatible endpoint"),
                 api_format: "openai", api_url: "", api_key: "", api_key_exists: false, api_key_masked: "",
                 llm_models: [], vlm_models: [], llm_model: "", vlm_model: "",
                 temperature: 0.7, max_tokens: 4096, top_p: 0.9, builtin: false,
@@ -397,6 +395,25 @@ async function mountInlineSettings(root) {
         apiKey.addEventListener("blur", () => void saveKey());
 
         const credentials = el("div", "fh-inline-credentials");
+        if (!provider.builtin) {
+            const serviceName = input("text", provider.name);
+            serviceName.placeholder = t("自定义 API 名称", "Custom API name");
+            let nameTimer = 0;
+            const saveName = () => {
+                window.clearTimeout(nameTimer);
+                const nextName = serviceName.value.trim();
+                provider.name = nextName || t("自定义 API", "Custom API");
+                if (!nextName) serviceName.value = provider.name;
+                void persist(t("服务名称已自动保存", "Service name saved"));
+            };
+            serviceName.addEventListener("input", () => {
+                window.clearTimeout(nameTimer);
+                nameTimer = window.setTimeout(saveName, 650);
+            });
+            serviceName.addEventListener("change", saveName);
+            serviceName.addEventListener("blur", saveName);
+            credentials.append(field(t("服务名称", "Service name"), serviceName));
+        }
         credentials.append(field("Base URL", baseUrl), field("API Key", apiKey));
         card.append(credentials);
 

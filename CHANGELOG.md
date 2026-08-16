@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.3.4
+
+- Fixes the “＋ Add custom API” button in ComfyUI Settings. It now creates a custom API tab directly instead of relying on a browser-native prompt dialog that some ComfyUI hosts suppress.
+- Custom API cards now include an auto-saving, editable service-name field.
+
+## v1.3.3
+
+- Fixes FeiHou Easy H3 Loader model dropdowns retaining a stale plugin-level
+  file list. Newly saved models under `models/diffusion_models` now appear the
+  next time ComfyUI refreshes node definitions, without requiring a further
+  server restart.
+
 ## v1.3.2
 
 - Built-in prompt-optimization services now start with only their editable default API address; no model is preloaded or selected automatically.

@@ -320,8 +320,14 @@ def _filesystem_weight_names(categories: tuple[str, ...]) -> list[str]:
     return names
 
 
-@lru_cache(maxsize=16)
 def _collect_weight_names(categories: tuple[str, ...]) -> list[str]:
+    """Collect the current contents of ComfyUI's model directories.
+
+    Do not cache this result at the plugin level.  ComfyUI's own filename
+    cache already tracks directory changes, while an additional permanent
+    cache here made models written after startup invisible to Easy H3 Loader
+    until the Python process was restarted.
+    """
     names: list[str] = []
     seen: set[str] = set()
     for category in categories:
