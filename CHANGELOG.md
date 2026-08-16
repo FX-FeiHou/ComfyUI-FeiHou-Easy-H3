@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.3.5
+
+- Embedded images, videos, and audio can now be dragged within their own galleries to change their reference order. The new order is saved in the workflow and used by H3 and prompt optimization.
+
 ## v1.3.4
 
 - Fixes the “＋ Add custom API” button in ComfyUI Settings. It now creates a custom API tab directly instead of relying on a browser-native prompt dialog that some ComfyUI hosts suppress.

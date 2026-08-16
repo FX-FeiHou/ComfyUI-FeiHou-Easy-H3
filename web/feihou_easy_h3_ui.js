@@ -136,6 +136,7 @@ const TEXT = {
     embeddedVideos: ZH_BROWSER ? "\u53c2\u8003\u89c6\u9891 \u00b7 3" : "Reference videos \u00b7 3",
     embeddedAudios: ZH_BROWSER ? "\u53c2\u8003\u97f3\u9891 \u00b7 3" : "Reference audio \u00b7 3",
     embeddedPick: ZH_BROWSER ? "\u70b9\u51fb\u6216\u62d6\u5165\u6587\u4ef6" : "Click or drop a file",
+    embeddedReorder: ZH_BROWSER ? "\u6309\u4f4f\u5e76\u62d6\u52a8\u4ee5\u8c03\u6574\u987a\u5e8f" : "Drag to reorder",
     embeddedDisabled: ZH_BROWSER ? "\u56fe\u751f\u89c6\u9891\u6a21\u5f0f\u4ec5\u4f7f\u7528\u524d 2 \u5f20\u56fe" : "Image mode uses the first 2 images",
     embeddedUploading: ZH_BROWSER ? "\u4e0a\u4f20\u4e2d\u2026" : "Uploading\u2026",
 };
@@ -491,6 +492,7 @@ const EMBEDDED_MEDIA_ACCEPT = Object.freeze({
     video: "video/mp4,video/webm,video/quicktime,video/x-matroska,video/x-msvideo",
     audio: "audio/*,video/mp4,video/webm,video/quicktime",
 });
+const EMBEDDED_MEDIA_REORDER_MIME = "application/x-feihou-h3-media-reorder";
 
 function embeddedMediaKey(mediaType, ordinal) {
     return `${String(mediaType)}_${Number(ordinal)}`;
@@ -577,6 +579,48 @@ function setEmbeddedMedia(node, mediaType, ordinal, value) {
     requestMentionPreviewRefresh();
     node.setDirtyCanvas?.(true, true);
     app.graph?.change?.();
+}
+
+function embeddedMediaDragPayload(event) {
+    const raw = event.dataTransfer?.getData?.(EMBEDDED_MEDIA_REORDER_MIME);
+    if (!raw) return null;
+    try {
+        const value = JSON.parse(raw);
+        const mediaType = String(value?.media_type || "").toLowerCase();
+        const ordinal = Number(value?.ordinal);
+        if (!Object.hasOwn(EMBEDDED_MEDIA_LIMITS, mediaType) || !Number.isInteger(ordinal)) return null;
+        return { node_id: String(value?.node_id ?? ""), media_type: mediaType, ordinal };
+    } catch {
+        return null;
+    }
+}
+
+function reorderEmbeddedMedia(node, mediaType, sourceOrdinal, targetOrdinal) {
+    if (mediaType !== "image" && mediaType !== "video" && mediaType !== "audio") return false;
+    if (sourceOrdinal === targetOrdinal) return false;
+    const allRecords = ensureEmbeddedMedia(node);
+    const typedRecords = allRecords.filter((item) => item.media_type === mediaType);
+    const sourceIndex = typedRecords.findIndex((item) => item.ordinal === sourceOrdinal);
+    if (sourceIndex < 0) return false;
+    const targetIndex = typedRecords.findIndex((item) => item.ordinal === targetOrdinal);
+    const insertAt = targetIndex >= 0
+        ? targetIndex
+        : typedRecords.filter((item) => item.ordinal < targetOrdinal).length;
+    const reordered = [...typedRecords];
+    const [moved] = reordered.splice(sourceIndex, 1);
+    reordered.splice(Math.min(insertAt, reordered.length), 0, moved);
+    const otherRecords = allRecords.filter((item) => item.media_type !== mediaType);
+    node.properties[EMBEDDED_MEDIA_PROP] = [
+        ...otherRecords,
+        ...reordered.map((item, index) => ({ ...item, ordinal: index + 1 })),
+    ];
+    ensureEmbeddedMedia(node);
+    renderEmbeddedMediaGallery(node);
+    renderEditorFromNode(node);
+    requestMentionPreviewRefresh();
+    node.setDirtyCanvas?.(true, true);
+    app.graph?.change?.();
+    return true;
 }
 
 function ensureLinks(node) {
@@ -4917,6 +4961,7 @@ function createEmbeddedMediaSlot(node, mediaType, ordinal) {
     cell.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
+        if (Date.now() < (cell.__h3SuppressClickUntil || 0)) return;
         if (cell.classList.contains("is-disabled") || cell.classList.contains("is-uploading")) return;
         chooseEmbeddedMediaFile(node, mediaType, ordinal);
     });
@@ -4926,18 +4971,44 @@ function createEmbeddedMediaSlot(node, mediaType, ordinal) {
         event.stopPropagation();
         chooseEmbeddedMediaFile(node, mediaType, ordinal);
     });
+    cell.addEventListener("dragstart", (event) => {
+        if (!cell.classList.contains("has-media") || cell.classList.contains("is-disabled")) {
+            event.preventDefault();
+            return;
+        }
+        cell.__h3SuppressClickUntil = Date.now() + 350;
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData(EMBEDDED_MEDIA_REORDER_MIME, JSON.stringify({
+            node_id: String(node.id ?? ""), media_type: mediaType, ordinal,
+        }));
+        cell.classList.add("is-reordering");
+    });
+    cell.addEventListener("dragend", () => {
+        node.__feihouMediaGallery?.querySelectorAll?.(".is-reordering, .is-reorder-target, .is-dragover")
+            .forEach((element) => element.classList.remove("is-reordering", "is-reorder-target", "is-dragover"));
+    });
     cell.addEventListener("dragover", (event) => {
         if (cell.classList.contains("is-disabled")) return;
+        const payload = embeddedMediaDragPayload(event);
         event.preventDefault();
         event.stopPropagation();
+        if (payload) {
+            if (payload.node_id === String(node.id ?? "") && payload.media_type === mediaType && payload.ordinal !== ordinal) cell.classList.add("is-reorder-target");
+            return;
+        }
         cell.classList.add("is-dragover");
     });
-    cell.addEventListener("dragleave", () => cell.classList.remove("is-dragover"));
+    cell.addEventListener("dragleave", () => cell.classList.remove("is-dragover", "is-reorder-target"));
     cell.addEventListener("drop", (event) => {
-        cell.classList.remove("is-dragover");
+        cell.classList.remove("is-dragover", "is-reorder-target");
         if (cell.classList.contains("is-disabled")) return;
+        const payload = embeddedMediaDragPayload(event);
         event.preventDefault();
         event.stopPropagation();
+        if (payload) {
+            if (payload.node_id === String(node.id ?? "") && payload.media_type === mediaType) reorderEmbeddedMedia(node, mediaType, payload.ordinal, ordinal);
+            return;
+        }
         const file = event.dataTransfer?.files?.[0];
         if (file) uploadEmbeddedMediaFile(node, mediaType, ordinal, file);
     });
@@ -4977,6 +5048,8 @@ function renderEmbeddedMediaGallery(node) {
             const record = records.find((item) => item.media_type === mediaType && item.ordinal === ordinal);
             cell.classList.toggle("is-disabled", disabled);
             cell.classList.toggle("has-media", Boolean(record));
+            cell.draggable = Boolean(record) && !disabled;
+            cell.title = record && !disabled ? TEXT.embeddedReorder : "";
             cell.tabIndex = disabled ? -1 : 0;
             cell.setAttribute("aria-disabled", disabled ? "true" : "false");
             cell.replaceChildren();
@@ -5412,6 +5485,9 @@ function install() {
       .fh-h3-media-slot:hover, .fh-h3-media-slot:focus-visible, .fh-h3-media-slot.is-dragover {
         border-color: rgba(0,226,187,.64); background: rgba(0,226,187,.075); outline: none;
       }
+      .fh-h3-media-slot.has-media[draggable="true"] { cursor: grab; }
+      .fh-h3-media-slot.is-reordering { opacity: .45; cursor: grabbing; }
+      .fh-h3-media-slot.is-reorder-target { border-color: rgba(79,150,255,.95); background: rgba(79,150,255,.16); box-shadow: inset 0 0 0 1px rgba(79,150,255,.4); }
       .fh-h3-media-slot:active:not(.is-disabled) { transform: scale(.985); }
       .fh-h3-media-slot.has-media { border-style: solid; border-color: rgba(255,255,255,.18); background: rgba(0,0,0,.28); }
       .fh-h3-media-slot.is-disabled { opacity: .24; cursor: not-allowed; filter: grayscale(.8); }
