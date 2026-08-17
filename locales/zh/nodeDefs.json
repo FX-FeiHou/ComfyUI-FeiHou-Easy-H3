@@ -1,0 +1,115 @@
+{
+  "FeiHouEasyH3LoraStack": {
+    "display_name": "加载LoRA（旁路，仅模型）（用于调试）",
+    "description": "供 FeiHou Easy H3 加载器使用的动态 LoRA 堆栈。",
+    "inputs": {
+      "optional_lora_stack": { "name": "可选 LoRA 堆栈" }
+    },
+    "outputs": {
+      "0": { "name": "LoRA 堆栈" }
+    }
+  },
+  "FeiHouEasyH3Loader": {
+    "display_name": "FeiHou Easy H3 加载器",
+    "description": "加载 MiniMax H3 主模型、文本编码器、视频 VAE 与音频 VAE。",
+    "inputs": {
+      "fl2va_model": { "name": "FL2VA 模型" },
+      "ref2va_model": { "name": "REF2VA 模型" },
+      "text_encoder": { "name": "文本编码器" },
+      "video_vae": { "name": "视频 VAE" },
+      "audio_vae": { "name": "音频 VAE" },
+      "lora_stack": { "name": "LoRA 堆栈" },
+      "custom_second_sampling_models": { "name": "自定义二采模型" },
+      "second_fl2va_model": { "name": "二采 FL2VA 模型" },
+      "second_ref2va_model": { "name": "二采 REF2VA 模型" },
+      "second_sampling_use_lora": { "name": "二采使用 LoRA" }
+    },
+    "outputs": {
+      "0": { "name": "H3 模型组合" }
+    }
+  },
+  "FeiHouEasyH3ModelAdapter": {
+    "display_name": "FeiHou Easy H3 模型中转",
+    "description": "从标准 ComfyUI 的模型、CLIP 与 VAE 连接组装 H3 模型组合。",
+    "inputs": {
+      "text_encoder": { "name": "文本编码器" },
+      "video_vae": { "name": "视频 VAE" },
+      "audio_vae": { "name": "音频 VAE" },
+      "fl2va_model": { "name": "FL2VA 模型" },
+      "ref2va_model": { "name": "REF2VA 模型" }
+    },
+    "outputs": {
+      "0": { "name": "H3 模型组合" }
+    }
+  },
+  "FeiHouEasyH3": {
+    "display_name": "ComfyUI-FeiHou-Easy-H3",
+    "description": "内嵌 9 张图片、3 个视频、3 个音频媒体栏的 MiniMax H3 生成节点。",
+    "inputs": {
+      "h3_bundle": { "name": "H3 模型组合" },
+      "mode": {
+        "name": "模式",
+        "options": {
+          "image": "图生或首尾帧",
+          "reference": "参考生视频"
+        }
+      },
+      "prompt": { "name": "提示词" },
+      "resolution": { "name": "分辨率" },
+      "aspect_ratio": { "name": "宽高比" },
+      "width": { "name": "宽度" },
+      "height": { "name": "高度" },
+      "seconds": { "name": "秒数" },
+      "advanced": { "name": "高级选项" },
+      "fps": { "name": "帧率（FPS）" },
+      "keyframe_role": {
+        "name": "首尾帧设置",
+        "options": {
+          "first": "首帧优先",
+          "last": "尾帧优先"
+        }
+      },
+      "ref_image_size": { "name": "参考图尺寸（短边）" },
+      "reference_mention_mode": {
+        "name": "@引用方式",
+        "options": {
+          "filename": "按文件名",
+          "index": "按序号"
+        }
+      },
+      "prompt_optimizer_enabled": { "name": "提示词优化" },
+      "prompt_optimizer_provider": { "name": "API 服务/模型" },
+      "prompt_optimizer_scene_guide": { "name": "提示词方案" }
+    },
+    "outputs": {
+      "0": { "name": "模型" },
+      "1": { "name": "二次采样模型" },
+      "2": { "name": "H3 Context" }
+    }
+  },
+  "FeiHouEasyH3Output": {
+    "display_name": "FeiHou Easy H3 输出",
+    "description": "从 H3 Context 拆出条件、潜空间、VAE、帧率与提示词预览。",
+    "inputs": {
+      "h3_context": { "name": "H3 Context" }
+    },
+    "outputs": {
+      "0": { "name": "正面条件" },
+      "1": { "name": "潜空间" },
+      "2": { "name": "视频 VAE" },
+      "3": { "name": "音频 VAE" },
+      "4": { "name": "FPS" },
+      "5": { "name": "提示词反推输出" }
+    }
+  },
+  "FeiHouEasyH3PromptPreview": {
+    "display_name": "FeiHou Easy H3 提示词预览",
+    "description": "预览最终扩写或反推得到的提示词。",
+    "inputs": {
+      "text": { "name": "提示词反推输出" }
+    },
+    "outputs": {
+      "0": { "name": "文本" }
+    }
+  }
+}

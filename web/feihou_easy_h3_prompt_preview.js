@@ -2,7 +2,20 @@ import { app } from "../../scripts/app.js";
 
 const NODE_CLASS = "FeiHouEasyH3PromptPreview";
 const VALUE_PROP = "feihou_h3_prompt_preview_text";
-const ZH = /^zh(?:[-_]|$)/i.test(String(navigator.language || ""));
+function isChineseLocale() {
+    const locale = app.ui?.settings?.getSettingValue?.("Comfy.Locale") || navigator.language || "en";
+    return /^zh(?:[-_]|$)/i.test(String(locale));
+}
+
+function previewTitle() {
+    return isChineseLocale() ? "FeiHou Easy H3 提示词预览" : "FeiHou Easy H3 Prompt Preview";
+}
+
+function previewPlaceholder() {
+    return isChineseLocale()
+        ? "执行工作流后在这里显示最终扩写 / 反推提示词"
+        : "The final expanded / inferred prompt appears here after execution";
+}
 
 function installStyle() {
     if (document.getElementById("feihou-h3-prompt-preview-style")) return;
@@ -21,7 +34,7 @@ function installPreview(node) {
     const textarea = document.createElement("textarea");
     textarea.className = "fh-h3-prompt-preview";
     textarea.readOnly = true;
-    textarea.placeholder = ZH ? "执行工作流后在这里显示最终扩写 / 反推提示词" : "The final expanded / inferred prompt appears here after execution";
+    textarea.placeholder = previewPlaceholder();
     textarea.value = String(node.properties[VALUE_PROP] || "");
     textarea.addEventListener("pointerdown", (event) => event.stopPropagation());
     textarea.addEventListener("wheel", (event) => event.stopPropagation(), { passive: true });
@@ -52,7 +65,7 @@ app.registerExtension({
     },
     beforeRegisterNodeDef(nodeType, nodeData) {
         if (nodeData?.name !== NODE_CLASS) return;
-        nodeData.display_name = ZH ? "FeiHou Easy H3 提示词预览" : "FeiHou Easy H3 Prompt Preview";
+        nodeData.display_name = previewTitle();
         nodeData.category = "FeiHou Easy H3";
         const originalCreated = nodeType.prototype.onNodeCreated;
         nodeType.prototype.onNodeCreated = function onNodeCreatedPromptPreview() {
@@ -64,6 +77,7 @@ app.registerExtension({
         const originalConfigure = nodeType.prototype.onConfigure;
         nodeType.prototype.onConfigure = function onConfigurePromptPreview(info) {
             const result = originalConfigure?.apply(this, arguments);
+            this.title = previewTitle();
             installPreview(this);
             if (info?.properties?.[VALUE_PROP] != null) updatePreview(this, { text: [info.properties[VALUE_PROP]] });
             return result;

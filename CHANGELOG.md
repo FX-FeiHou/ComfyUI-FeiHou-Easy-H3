@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.3.6
+
+- Adds optional custom second-pass FL2VA and REF2VA model selection in the Loader, plus a dedicated second-sampling model output from the main node.
+- Adds optional second-pass LoRA disabling and releases first-pass model / LoRA resources before second-pass sampling.
+- Releases the text encoder and video/audio VAEs from VRAM after preprocessing and before sampling, reducing peak VRAM pressure while retaining automatic ComfyUI offload behavior.
+- Adds ComfyUI-native Chinese/English node-definition translations and localizes embedded LoRA-stack and prompt-preview UI text according to the ComfyUI language setting.
+
 ## v1.3.5
 
 - Embedded images, videos, and audio can now be dragged within their own galleries to change their reference order. The new order is saved in the workflow and used by H3 and prompt optimization.

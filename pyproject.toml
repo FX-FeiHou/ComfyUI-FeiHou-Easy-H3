@@ -1,11 +1,15 @@
 [project]
 name = "comfyui-feihou-easy-h3"
 description = "MiniMax H3 generation for ComfyUI with an embedded 9-image, 3-video, and 3-audio reference gallery."
-version = "1.3.5"
+version = "1.3.6"
 license = { file = "LICENSE" }
 dependencies = []
 
+[project.urls]
+Repository = "https://github.com/FX-FeiHou/ComfyUI-FeiHou-Easy-H3"
+Documentation = "https://github.com/FX-FeiHou/ComfyUI-FeiHou-Easy-H3#readme"
+Issues = "https://github.com/FX-FeiHou/ComfyUI-FeiHou-Easy-H3/issues"
+
 [tool.comfy]
-PublisherId = "feihou"
+PublisherId = "fx-feihou"
 DisplayName = "ComfyUI-FeiHou-Easy-H3"
-Icon = ""

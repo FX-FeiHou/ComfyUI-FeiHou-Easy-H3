@@ -53,8 +53,15 @@ const PROMPT_HISTORY_LIMIT = 120;
 const PROMPT_UNDO_VERSION = "2026-08-05-editor-undo-shield-v1";
 const CARET_SENTINEL = "\u200B";
 const AUDIO_ICON_SVG = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect x='0.5' y='10' width='3' height='4' rx='1.5' fill='%2300e2bb'/%3E%3Crect x='5.5' y='7' width='3' height='10' rx='1.5' fill='%2300e2bb'/%3E%3Crect x='10.5' y='4' width='3' height='16' rx='1.5' fill='%2300e2bb'/%3E%3Crect x='15.5' y='7' width='3' height='10' rx='1.5' fill='%2300e2bb'/%3E%3Crect x='20.5' y='10' width='3' height='4' rx='1.5' fill='%2300e2bb'/%3E%3C/svg%3E";
-const PRIMARY_BROWSER_LANGUAGE = String(globalThis.navigator?.language || globalThis.navigator?.languages?.[0] || "");
+// Follow ComfyUI's own Locale setting rather than the operating-system or
+// browser language.  Node schema labels use the native `locales/` files;
+// this helper keeps the embedded gallery and custom dialogs in step with it.
+function currentComfyLocale() {
+    return String(app.ui?.settings?.getSettingValue?.("Comfy.Locale") || globalThis.navigator?.language || globalThis.navigator?.languages?.[0] || "en");
+}
+const PRIMARY_BROWSER_LANGUAGE = currentComfyLocale();
 const ZH_BROWSER = /^(zh)(?:[-_]|$)/i.test(PRIMARY_BROWSER_LANGUAGE);
+const t = (zh, en) => (ZH_BROWSER ? zh : en);
 const TEXT = {
     image: ZH_BROWSER ? "\u56fe\u7247" : "Image",
     video: ZH_BROWSER ? "\u89c6\u9891" : "Video",
@@ -121,8 +128,14 @@ const TEXT = {
     textEncoder: ZH_BROWSER ? "\u6587\u672c\u7f16\u7801\u5668" : "Text encoder",
     videoVae: ZH_BROWSER ? "\u89c6\u9891 VAE" : "Video VAE",
     audioVae: ZH_BROWSER ? "\u97f3\u9891 VAE" : "Audio VAE",
+    customSecondSampling: ZH_BROWSER ? "\u81ea\u5b9a\u4e49\u4e8c\u91c7\u6a21\u578b" : "Custom second-pass models",
+    secondFl2vaModel: ZH_BROWSER ? "\u4e8c\u91c7 FL2VA \u6a21\u578b" : "Second-pass FL2VA model",
+    secondRef2vaModel: ZH_BROWSER ? "\u4e8c\u91c7 REF2VA \u6a21\u578b" : "Second-pass REF2VA model",
+    secondSamplingUseLora: ZH_BROWSER ? "\u4e8c\u91c7\u4f7f\u7528 LoRA" : "Use LoRA for second pass",
+    loraStack: ZH_BROWSER ? "LoRA \u5806\u6808" : "LoRA stack",
     noneModel: ZH_BROWSER ? "\u65e0" : "None",
     outputModel: "Model",
+    outputSecondSamplingModel: ZH_BROWSER ? "\u4e8c\u6b21\u91c7\u6837\u6a21\u578b" : "Second sampling model",
     outputConditioning: "Conditioning",
     outputLatent: "Latent",
     outputVideoVae: "Video VAE",
@@ -391,10 +404,10 @@ function localizeNodeInstance(node) {
     if (!node) return;
     if (isLoader(node)) {
         node.title = TEXT.loaderTitle;
-        const labels = { lora_stack: "LoRA \u5806\u6808", fl2va_model: TEXT.fl2vaModel, ref2va_model: TEXT.ref2vaModel, text_encoder: TEXT.textEncoder, video_vae: TEXT.videoVae, audio_vae: TEXT.audioVae };
+        const labels = { lora_stack: TEXT.loraStack, fl2va_model: TEXT.fl2vaModel, ref2va_model: TEXT.ref2vaModel, text_encoder: TEXT.textEncoder, video_vae: TEXT.videoVae, audio_vae: TEXT.audioVae, custom_second_sampling_models: TEXT.customSecondSampling, second_fl2va_model: TEXT.secondFl2vaModel, second_ref2va_model: TEXT.secondRef2vaModel, second_sampling_use_lora: TEXT.secondSamplingUseLora };
         for (const widget of node.widgets || []) {
             if (labels[widget.name]) widget.label = labels[widget.name];
-            if (widget.name === "fl2va_model" || widget.name === "ref2va_model") localizeOptionalModelWidget(widget);
+            if (["fl2va_model", "ref2va_model", "second_fl2va_model", "second_ref2va_model"].includes(widget.name)) localizeOptionalModelWidget(widget);
         }
         for (const input of node.inputs || []) if (labels[input.name]) setLocalizedSlotLabel(input, labels[input.name]);
         return;
@@ -429,7 +442,7 @@ function localizeNodeInstance(node) {
         if (input.name === "h3_bundle") setLocalizedSlotLabel(input, TEXT.bundle);
         if (input.name === "media") setLocalizedSlotLabel(input, TEXT.inputMedia);
     }
-    const outputLabels = { model: TEXT.outputModel, h3_context: TEXT.outputContext };
+    const outputLabels = { model: TEXT.outputModel, second_sampling_model: TEXT.outputSecondSamplingModel, h3_context: TEXT.outputContext };
     for (const output of node.outputs || []) {
         const key = String(output.name || "").toLowerCase();
         if (outputLabels[key]) setLocalizedSlotLabel(output, outputLabels[key]);
@@ -1688,6 +1701,10 @@ function patchGraphToPrompt() {
                 node.__h3OptimizerLastResult
                 && currentPromptText === String(node.__h3OptimizerLastResult),
             );
+            const secondSamplingOutput = (node.outputs || []).find((item) => String(item?.name || "") === "second_sampling_model");
+            promptNode.inputs.second_sampling_output_connected = Array.isArray(secondSamplingOutput?.links)
+                ? secondSamplingOutput.links.length > 0
+                : secondSamplingOutput?.links != null;
             promptNode.inputs.fps = Number(getWidgetValue(node, "fps", 24));
             promptNode.inputs.keyframe_role = canonicalOption("keyframe_role", getWidgetValue(node, "keyframe_role", KEYFRAME_FIRST));
             promptNode.inputs.ref_image_size = canonicalOption("ref_image_size", getWidgetValue(node, "ref_image_size", REF_IMAGE_DEFAULT));
@@ -3424,6 +3441,22 @@ function syncModeWidgets(node, { adjustHeight = true } = {}) {
     return changed;
 }
 
+function syncLoaderWidgets(node, { adjustHeight = true } = {}) {
+    if (!isLoader(node)) return false;
+    const enabled = asBoolean(getWidgetValue(node, "custom_second_sampling_models", false));
+    const changed = [
+        setConditionalWidgetVisible(node, getWidget(node, "second_fl2va_model"), enabled, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "second_ref2va_model"), enabled, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "second_sampling_use_lora"), enabled, { adjustHeight }),
+    ].some(Boolean);
+    if (changed) {
+        node._widgetSlotsDirty = true;
+        node.setDirtyCanvas?.(true, true);
+        app.graph?.setDirtyCanvas?.(true, true);
+    }
+    return changed;
+}
+
 function repairNodeLayout(node) {
     if (!node) return;
     const run = () => {
@@ -4708,7 +4741,8 @@ function isTransportInputName(name) {
     return /^media$/i.test(String(name || ""))
         || /^media_[0-9]+$/i.test(String(name || ""))
         || /^media_type_[0-9]+$/i.test(String(name || ""))
-        || /^prompt_optimizer_applied$/i.test(String(name || ""));
+        || /^prompt_optimizer_applied$/i.test(String(name || ""))
+        || /^second_sampling_output_connected$/i.test(String(name || ""));
 }
 
 function removeInputSlot(node, index) {
@@ -5395,12 +5429,23 @@ function installLoaderNode(nodeType, nodeData) {
     nodeType.prototype.onNodeCreated = function onNodeCreatedH3Loader() {
         const result = originalCreated?.apply(this, arguments);
         localizeNodeInstance(this);
+        syncLoaderWidgets(this, { adjustHeight: false });
+        const toggle = getWidget(this, "custom_second_sampling_models");
+        if (toggle && !toggle.__h3SecondSamplingCallbackBound) {
+            toggle.__h3SecondSamplingCallbackBound = true;
+            const originalCallback = toggle.callback;
+            toggle.callback = (value) => {
+                originalCallback?.call(toggle, value);
+                syncLoaderWidgets(this);
+            };
+        }
         return result;
     };
     const originalConfigure = nodeType.prototype.onConfigure;
     nodeType.prototype.onConfigure = function onConfigureH3Loader(info) {
         const result = originalConfigure?.apply(this, arguments);
         localizeNodeInstance(this);
+        syncLoaderWidgets(this, { adjustHeight: false });
         return result;
     };
 }

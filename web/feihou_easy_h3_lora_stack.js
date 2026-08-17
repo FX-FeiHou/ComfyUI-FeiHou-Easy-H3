@@ -20,7 +20,6 @@ import { rgthreeApi } from "../../rgthree/common/rgthree_api.js";
 import { moveArrayItem, removeArrayItem } from "../../rgthree/common/shared_utils.js";
 
 const STACK_CLASS = "FeiHouEasyH3LoraStack";
-const STACK_TITLE = "加载LoRA（旁路，仅模型）（用于调试）";
 const STACK_WIDTH = 440;
 const BOTTOM_MARGIN = 14;
 
@@ -31,6 +30,25 @@ function isChineseLocale() {
 
 function t(zh, en) {
     return isChineseLocale() ? zh : en;
+}
+
+function stackTitle() {
+    return t("加载LoRA（旁路，仅模型）（用于调试）", "Load LoRA (Bypass, Model Only) (Debug)");
+}
+
+function localizeLoraSlots(node) {
+    for (const input of node?.inputs || []) {
+        if (input?.name === "optional_lora_stack") {
+            input.label = t("可选 LoRA 堆栈", "Optional LoRA stack");
+            input.localized_name = input.label;
+        }
+    }
+    for (const output of node?.outputs || []) {
+        if (output?.name === "lora_stack") {
+            output.label = t("LoRA 堆栈", "LoRA stack");
+            output.localized_name = output.label;
+        }
+    }
 }
 
 function normalizeLoraValue(value) {
@@ -63,7 +81,7 @@ function migrateLoraValues(values) {
 }
 
 class FeiHouEasyH3LoraStackNode extends RgthreeBaseServerNode {
-    constructor(title = STACK_TITLE) {
+    constructor(title = stackTitle()) {
         super(title);
         this.loraWidgetsCounter = 0;
         this.widgetButtonSpacer = null;
@@ -72,6 +90,7 @@ class FeiHouEasyH3LoraStackNode extends RgthreeBaseServerNode {
 
     configure(info) {
         const values = migrateLoraValues(info?.widgets_values || []);
+        this.title = stackTitle();
         while (this.widgets?.length) this.removeWidget(0);
         this.widgetButtonSpacer = null;
         this.loraWidgetsCounter = 0;
@@ -81,12 +100,15 @@ class FeiHouEasyH3LoraStackNode extends RgthreeBaseServerNode {
             row.value = value;
         }
         this.addNonLoraWidgets();
+        localizeLoraSlots(this);
         this.resizeToContent();
     }
 
     onNodeCreated() {
         super.onNodeCreated?.();
+        this.title = stackTitle();
         this.addNonLoraWidgets();
+        localizeLoraSlots(this);
         this.resizeToContent();
         this.setDirtyCanvas(true, true);
     }
@@ -239,7 +261,7 @@ class FeiHouEasyH3LoraStackNode extends RgthreeBaseServerNode {
     }
 }
 
-FeiHouEasyH3LoraStackNode.title = STACK_TITLE;
+FeiHouEasyH3LoraStackNode.title = stackTitle();
 FeiHouEasyH3LoraStackNode.type = STACK_CLASS;
 FeiHouEasyH3LoraStackNode.comfyClass = STACK_CLASS;
 

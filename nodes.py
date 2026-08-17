@@ -18,6 +18,7 @@ import threading
 import uuid
 import base64
 import asyncio
+import gc
 import json
 import mimetypes
 import tempfile
@@ -1810,12 +1811,20 @@ class MiniMaxH3Bundle:
     lora_stack: tuple[tuple[str, float], ...] = ()
     fl2va_model_obj: Any = None
     ref2va_model_obj: Any = None
+    second_sampling_enabled: bool = False
+    second_fl2va_model_name: str = NONE_MODEL
+    second_ref2va_model_name: str = NONE_MODEL
+    second_sampling_use_lora: bool = True
 
     def __post_init__(self) -> None:
         self._model = None
         self._model_kind = ""
         self._model_name = ""
         self._model_cache_key: tuple[str, Any] | None = None
+        self._second_model = None
+        self._second_model_kind = ""
+        self._second_model_name = ""
+        self._second_model_cache_key: tuple[str, Any] | None = None
         self._loaded_loras: dict[str, tuple[int, int, Any]] = {}
         self._lock = threading.RLock()
 
@@ -1872,6 +1881,13 @@ class MiniMaxH3Bundle:
             result, _clip = loader(result, None, lora, float(strength), 0.0)
         return result
 
+    def release_lora_cache(self) -> None:
+        """Drop raw LoRA tensors after the first-pass model has been released."""
+        with self._lock:
+            self._loaded_loras.clear()
+        gc.collect()
+        comfy.model_management.soft_empty_cache()
+
     def model_for(self, kind: str):
         kind = "ref2va" if kind == "ref2va" else "fl2va"
         with self._lock:
@@ -1903,6 +1919,139 @@ class MiniMaxH3Bundle:
             self._model_name = model_name
             self._model_cache_key = cache_key
             return self._model
+
+    def second_sampling_model_for(self, kind: str):
+        """Load only the explicitly selected second-pass transformer.
+
+        No fallback to the first-pass models is intentional: enabling the
+        switch without selecting a matching second-pass model keeps this output
+        empty and does not consume RAM or VRAM.
+        """
+        if not self.second_sampling_enabled:
+            return None
+        kind = "ref2va" if kind == "ref2va" else "fl2va"
+        model_name = self.second_ref2va_model_name if kind == "ref2va" else self.second_fl2va_model_name
+        if _is_none_model(model_name):
+            return None
+        cache_key = ("file", model_name)
+        with self._lock:
+            if self._second_model is not None and self._second_model_cache_key == cache_key:
+                model = self._second_model
+            else:
+                if self._second_model is not None:
+                    self._second_model = None
+                    self._second_model_kind = ""
+                    self._second_model_name = ""
+                    self._second_model_cache_key = None
+                    comfy.model_management.soft_empty_cache()
+                if _is_gguf_file(model_name):
+                    base_model = _load_gguf_unet(model_name)
+                else:
+                    base_model, = nodes.UNETLoader().load_unet(model_name, "default")
+                model = self._apply_loras(base_model) if self.second_sampling_use_lora else base_model
+                self._second_model = model
+                self._second_model_kind = kind
+                self._second_model_name = model_name
+                self._second_model_cache_key = cache_key
+
+            # The marker is consumed immediately before the second sampler
+            # prepares this model on GPU.  It unloads only the first-pass
+            # transformer, never the shared CLIP or VAEs.
+            first_model = self._model
+            if first_model is not None and first_model is not model:
+                setattr(model, "_feihou_h3_unload_before_second_sampling", first_model)
+            # The intermediate decode/encode branch between the two samplers
+            # can load both VAEs again.  Mark the second model so they are
+            # released a second time at the exact hand-off to sampling.
+            setattr(model, "_feihou_h3_release_auxiliary_before_second_sampling", self)
+            if not self.second_sampling_use_lora:
+                setattr(model, "_feihou_h3_release_lora_cache_before_second_sampling", self)
+            return model
+
+
+def _install_second_sampling_memory_hook() -> None:
+    """Release the first H3 transformer immediately before second-pass load."""
+    try:
+        import comfy.sampler_helpers as sampler_helpers
+    except Exception:
+        return
+    original = getattr(sampler_helpers, "prepare_sampling", None)
+    if not callable(original) or getattr(original, "_feihou_h3_second_sampling_hook", False):
+        return
+
+    def prepare_sampling_with_h3_second_pass_release(model, *args, **kwargs):
+        first_model = getattr(model, "_feihou_h3_unload_before_second_sampling", None)
+        if first_model is not None:
+            try:
+                delattr(model, "_feihou_h3_unload_before_second_sampling")
+            except AttributeError:
+                pass
+            if first_model is not model:
+                try:
+                    comfy.model_management.unload_model_and_clones(first_model, unload_additional_models=False)
+                    logging.info("Easy H3: released first-pass transformer before loading the second-pass model")
+                except Exception as exc:
+                    logging.warning("Easy H3: unable to release first-pass transformer before second sampling: %s", exc)
+        auxiliary_owner = getattr(model, "_feihou_h3_release_auxiliary_before_second_sampling", None)
+        if auxiliary_owner is not None:
+            try:
+                delattr(model, "_feihou_h3_release_auxiliary_before_second_sampling")
+            except AttributeError:
+                pass
+            _release_auxiliary_models_for_sampling(auxiliary_owner, phase="second-pass sampling")
+        lora_owner = getattr(model, "_feihou_h3_release_lora_cache_before_second_sampling", None)
+        if lora_owner is not None:
+            try:
+                delattr(model, "_feihou_h3_release_lora_cache_before_second_sampling")
+            except AttributeError:
+                pass
+            try:
+                lora_owner.release_lora_cache()
+                logging.info("Easy H3: released LoRA cache before second-pass sampling")
+            except Exception as exc:
+                logging.warning("Easy H3: unable to release LoRA cache before second sampling: %s", exc)
+        return original(model, *args, **kwargs)
+
+    prepare_sampling_with_h3_second_pass_release._feihou_h3_second_sampling_hook = True
+    sampler_helpers.prepare_sampling = prepare_sampling_with_h3_second_pass_release
+
+
+_install_second_sampling_memory_hook()
+
+
+def _release_auxiliary_models_for_sampling(bundle: MiniMaxH3Bundle, phase: str = "sampling") -> None:
+    """Free CLIP and AV-VAE VRAM after H3 conditioning is fully prepared.
+
+    ``conditioning`` and reference latents are already materialized at this
+    point.  The sampler only needs the transformer and those tensors; the
+    VAE objects remain in the H3 context and ComfyUI will load them again for
+    the final decode node.  This is deliberately automatic to leave the
+    maximum headroom available for H3 sampling.
+    """
+    released = []
+    seen_patchers = set()
+    for label, component in (
+        ("CLIP", bundle.clip),
+        ("video VAE", bundle.video_vae),
+        ("audio VAE", bundle.audio_vae),
+    ):
+        patcher = getattr(component, "patcher", None)
+        if patcher is None or id(patcher) in seen_patchers:
+            continue
+        seen_patchers.add(id(patcher))
+        try:
+            comfy.model_management.unload_model_and_clones(
+                patcher,
+                unload_additional_models=False,
+            )
+            released.append(label)
+        except Exception as exc:
+            # A custom VAE/CLIP implementation may not expose a standard
+            # ModelPatcher.  It remains usable; only this optional VRAM
+            # release is skipped.
+            logging.debug("Easy H3: unable to release %s before sampling: %s", label, exc)
+    if released:
+        logging.info("Easy H3: released %s from VRAM before %s", ", ".join(released), phase)
 
 
 @dataclass(frozen=True)
@@ -2007,6 +2156,10 @@ class FeiHouEasyH3Loader:
                 "text_encoder": (_clip_choices(),),
                 "video_vae": (_vae_choices(("minimax_h3_video_vae",), "minimax_h3_video_vae_fp16.safetensors"),),
                 "audio_vae": (_vae_choices(("minimax_h3_audio_vae",), "minimax_h3_audio_vae_fp32.safetensors"),),
+                "custom_second_sampling_models": ("BOOLEAN", {"default": False}),
+                "second_fl2va_model": (_model_choices(), {"default": NONE_MODEL}),
+                "second_ref2va_model": (_ref_model_choices(), {"default": NONE_MODEL}),
+                "second_sampling_use_lora": ("BOOLEAN", {"default": True}),
             },
             "optional": {
                 "lora_stack": (LORA_STACK_TYPE,),
@@ -2015,10 +2168,10 @@ class FeiHouEasyH3Loader:
 
     @classmethod
     def IS_CHANGED(cls, **kwargs):
-        base = "|".join(str(kwargs.get(key, "")) for key in ("fl2va_model", "ref2va_model", "text_encoder", "video_vae", "audio_vae"))
+        base = "|".join(str(kwargs.get(key, "")) for key in ("fl2va_model", "ref2va_model", "text_encoder", "video_vae", "audio_vae", "custom_second_sampling_models", "second_fl2va_model", "second_ref2va_model", "second_sampling_use_lora"))
         return base + "|" + json.dumps(_normalize_lora_stack(kwargs.get("lora_stack")), ensure_ascii=False)
 
-    def load(self, fl2va_model, ref2va_model, text_encoder, video_vae, audio_vae, lora_stack=None):
+    def load(self, fl2va_model, ref2va_model, text_encoder, video_vae, audio_vae, custom_second_sampling_models=False, second_fl2va_model=NONE_MODEL, second_ref2va_model=NONE_MODEL, second_sampling_use_lora=True, lora_stack=None):
         if _is_none_model(fl2va_model) and _is_none_model(ref2va_model):
             raise ValueError("Select at least one MiniMax H3 transformer: FL2VA or REF2VA.")
         clip = _load_text_encoder(text_encoder)
@@ -2034,6 +2187,10 @@ class FeiHouEasyH3Loader:
             video_vae=video_vae_obj,
             audio_vae=audio_vae_obj,
             lora_stack=_normalize_lora_stack(lora_stack),
+            second_sampling_enabled=_as_bool(custom_second_sampling_models),
+            second_fl2va_model_name=second_fl2va_model,
+            second_ref2va_model_name=second_ref2va_model,
+            second_sampling_use_lora=_as_bool(second_sampling_use_lora),
         ),)
 
 
@@ -2330,8 +2487,8 @@ def _reference_conditioning(bundle, prompt, width, height, length, ref_image_siz
 class FeiHouEasyH3:
     CATEGORY = "FeiHou Easy H3"
     FUNCTION = "generate"
-    RETURN_TYPES = ("MODEL", "MINIMAX_H3_CONTEXT")
-    RETURN_NAMES = ("model", "h3_context")
+    RETURN_TYPES = ("MODEL", "MODEL", "MINIMAX_H3_CONTEXT")
+    RETURN_NAMES = ("model", "second_sampling_model", "h3_context")
     DESCRIPTION = "MiniMax H3 generation with an embedded 9-image, 3-video and 3-audio media gallery."
 
     @classmethod
@@ -2351,6 +2508,7 @@ class FeiHouEasyH3:
             optional[f"media_{index}"] = ("STRING", {"default": "", "hidden": True})
             optional[f"media_type_{index}"] = ("STRING", {"default": "", "hidden": True})
         optional["prompt_optimizer_applied"] = ("BOOLEAN", {"default": False, "hidden": True})
+        optional["second_sampling_output_connected"] = ("BOOLEAN", {"default": False, "hidden": True})
         return {
             "required": {
                 "h3_bundle": ("MINIMAX_H3_BUNDLE",),
@@ -2424,6 +2582,9 @@ class FeiHouEasyH3:
     def generate(cls, h3_bundle, mode, prompt, resolution, aspect_ratio, width, height, seconds, advanced, fps, keyframe_role, ref_image_size, reference_mention_mode, prompt_optimizer_enabled=False, prompt_optimizer_provider="", prompt_optimizer_scene_guide="none", prompt_optimizer_applied=False, **kwargs):
         if not isinstance(h3_bundle, MiniMaxH3Bundle):
             raise ValueError("Connect a FeiHou Easy H3 Loader bundle")
+        second_sampling_connected = _as_bool(kwargs.get("second_sampling_output_connected", False))
+        if second_sampling_connected and not h3_bundle.second_sampling_enabled:
+            raise ValueError("第二次采样模型输出已连接，但 FeiHou Easy H3 加载器未打开“自定义二采模型”开关。")
         mode = str(mode)
         keyframe_role = KEYFRAME_LAST if str(keyframe_role) == KEYFRAME_LAST else KEYFRAME_FIRST
         width, height = _canvas_dimensions(resolution, aspect_ratio, width, height)
@@ -2465,6 +2626,9 @@ class FeiHouEasyH3:
             model = h3_bundle.model_for("fl2va")
             conditioning, latent = _empty_image_conditioning(h3_bundle, prompt, width, height, length, first_frame, last_frame)
             prompt_preview = str(prompt or "")
+        second_sampling_model = None
+        if second_sampling_connected:
+            second_sampling_model = h3_bundle.second_sampling_model_for("ref2va" if mode == MODE_REFERENCE else "fl2va")
         context = MiniMaxH3Context(
             conditioning=conditioning,
             latent=latent,
@@ -2473,7 +2637,8 @@ class FeiHouEasyH3:
             fps=float(fps),
             prompt_preview=prompt_preview,
         )
-        return model, context
+        _release_auxiliary_models_for_sampling(h3_bundle)
+        return model, second_sampling_model, context
 
 
 class FeiHouEasyH3Output:
