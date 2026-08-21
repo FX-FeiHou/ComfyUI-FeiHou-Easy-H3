@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.3.7
+
+- Adds the built-in **R2VA Enhanced** prompt guide directly below “General only”. It uses the supplied six-section full-reference prompt template for complex reference-video, identity-retention, source-video, audio, and digital-human workflows.
+- With **Force offload** enabled, a cached second-pass transformer from the prior workflow execution is now released before the next first-pass model is prepared, preventing the two stages from unnecessarily sharing VRAM.
+- Further improves the embedded media gallery and prompt-editor responsive layout when resizing the node.
+
 ## v1.3.6
 
 - Adds optional custom second-pass FL2VA and REF2VA model selection in the Loader, plus a dedicated second-sampling model output from the main node.

@@ -10,6 +10,7 @@
   },
   "scene_guides": [
     {"id": "none", "name": "General only", "name_zh": "仅通用方案"},
+    {"id": "r2va_enhanced", "name": "R2VA Enhanced", "name_zh": "R2VA 加强版", "path": "r2va_enhanced/guide.md"},
     {"id": "3d_animation_short", "name": "3D Animation Short", "name_zh": "3D 动画短片", "path": "3d_animation_short/guide.md"},
     {"id": "brand_promo", "name": "Brand Promo Video", "name_zh": "品牌宣传片", "path": "brand_promo/guide.md"},
     {"id": "coop_game_intro", "name": "Co-op Game Intro", "name_zh": "合作游戏开场", "path": "coop_game_intro/guide.md"},

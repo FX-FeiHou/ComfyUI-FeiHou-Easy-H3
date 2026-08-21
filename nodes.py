@@ -1888,6 +1888,41 @@ class MiniMaxH3Bundle:
         gc.collect()
         comfy.model_management.soft_empty_cache()
 
+    def release_residual_second_sampling_model(self) -> bool:
+        """Release a prior run's optional second-pass transformer.
+
+        The Loader bundle is deliberately cached by ComfyUI between workflow
+        executions.  Without this cleanup, a second-pass model may still be
+        resident when the next run begins loading its first-pass model.  This
+        is only called from the explicit Force offload path.
+        """
+        with self._lock:
+            model = self._second_model
+            if model is None:
+                return False
+            self._second_model = None
+            self._second_model_kind = ""
+            self._second_model_name = ""
+            self._second_model_cache_key = None
+        for attribute in (
+            "_feihou_h3_unload_before_second_sampling",
+            "_feihou_h3_release_auxiliary_before_second_sampling",
+            "_feihou_h3_release_lora_cache_before_second_sampling",
+        ):
+            try:
+                delattr(model, attribute)
+            except AttributeError:
+                pass
+        try:
+            comfy.model_management.unload_model_and_clones(model, unload_additional_models=False)
+            logging.info("Easy H3: released residual second-pass transformer before the next generation")
+        except Exception as exc:
+            logging.warning("Easy H3: unable to release residual second-pass transformer: %s", exc)
+        finally:
+            gc.collect()
+            comfy.model_management.soft_empty_cache()
+        return True
+
     def model_for(self, kind: str):
         kind = "ref2va" if kind == "ref2va" else "fl2va"
         with self._lock:
@@ -1963,7 +1998,8 @@ class MiniMaxH3Bundle:
             # The intermediate decode/encode branch between the two samplers
             # can load both VAEs again.  Mark the second model so they are
             # released a second time at the exact hand-off to sampling.
-            setattr(model, "_feihou_h3_release_auxiliary_before_second_sampling", self)
+            if getattr(self, "force_offload_enabled", False):
+                setattr(model, "_feihou_h3_release_auxiliary_before_second_sampling", self)
             if not self.second_sampling_use_lora:
                 setattr(model, "_feihou_h3_release_lora_cache_before_second_sampling", self)
             return model
@@ -2025,8 +2061,9 @@ def _release_auxiliary_models_for_sampling(bundle: MiniMaxH3Bundle, phase: str =
     ``conditioning`` and reference latents are already materialized at this
     point.  The sampler only needs the transformer and those tensors; the
     VAE objects remain in the H3 context and ComfyUI will load them again for
-    the final decode node.  This is deliberately automatic to leave the
-    maximum headroom available for H3 sampling.
+    the final decode node. This is called only when the node's force-offload
+    switch is enabled, leaving ComfyUI's normal model-management policy intact
+    for ordinary workflows.
     """
     released = []
     seen_patchers = set()
@@ -2527,6 +2564,7 @@ class FeiHouEasyH3:
                 "prompt_optimizer_enabled": ("BOOLEAN", {"default": False}),
                 "prompt_optimizer_provider": (prompt_provider_values, {"default": prompt_providers[0]}),
                 "prompt_optimizer_scene_guide": (prompt_schemes, {"default": default_prompt_scheme}),
+                "force_offload": ("BOOLEAN", {"default": False}),
             },
             "optional": optional,
         }
@@ -2579,12 +2617,13 @@ class FeiHouEasyH3:
         return images[0], images[1]
 
     @classmethod
-    def generate(cls, h3_bundle, mode, prompt, resolution, aspect_ratio, width, height, seconds, advanced, fps, keyframe_role, ref_image_size, reference_mention_mode, prompt_optimizer_enabled=False, prompt_optimizer_provider="", prompt_optimizer_scene_guide="none", prompt_optimizer_applied=False, **kwargs):
+    def generate(cls, h3_bundle, mode, prompt, resolution, aspect_ratio, width, height, seconds, advanced, fps, keyframe_role, ref_image_size, reference_mention_mode, prompt_optimizer_enabled=False, prompt_optimizer_provider="", prompt_optimizer_scene_guide="none", force_offload=False, prompt_optimizer_applied=False, **kwargs):
         if not isinstance(h3_bundle, MiniMaxH3Bundle):
             raise ValueError("Connect a FeiHou Easy H3 Loader bundle")
+        h3_bundle.force_offload_enabled = _as_bool(force_offload)
+        if h3_bundle.force_offload_enabled:
+            h3_bundle.release_residual_second_sampling_model()
         second_sampling_connected = _as_bool(kwargs.get("second_sampling_output_connected", False))
-        if second_sampling_connected and not h3_bundle.second_sampling_enabled:
-            raise ValueError("第二次采样模型输出已连接，但 FeiHou Easy H3 加载器未打开“自定义二采模型”开关。")
         mode = str(mode)
         keyframe_role = KEYFRAME_LAST if str(keyframe_role) == KEYFRAME_LAST else KEYFRAME_FIRST
         width, height = _canvas_dimensions(resolution, aspect_ratio, width, height)
@@ -2627,8 +2666,14 @@ class FeiHouEasyH3:
             conditioning, latent = _empty_image_conditioning(h3_bundle, prompt, width, height, length, first_frame, last_frame)
             prompt_preview = str(prompt or "")
         second_sampling_model = None
-        if second_sampling_connected:
-            second_sampling_model = h3_bundle.second_sampling_model_for("ref2va" if mode == MODE_REFERENCE else "fl2va")
+        if h3_bundle.second_sampling_enabled:
+            second_kind = "ref2va" if mode == MODE_REFERENCE else "fl2va"
+            second_model_name = h3_bundle.second_ref2va_model_name if second_kind == "ref2va" else h3_bundle.second_fl2va_model_name
+            if _is_none_model(second_model_name):
+                model_label = "REF2VA" if second_kind == "ref2va" else "FL2VA"
+                raise ValueError(f"“自定义二采模型”已开启，但未选择 {model_label} 二采模型。请选择模型，或关闭该开关。")
+            if second_sampling_connected:
+                second_sampling_model = h3_bundle.second_sampling_model_for(second_kind)
         context = MiniMaxH3Context(
             conditioning=conditioning,
             latent=latent,
@@ -2637,7 +2682,14 @@ class FeiHouEasyH3:
             fps=float(fps),
             prompt_preview=prompt_preview,
         )
-        _release_auxiliary_models_for_sampling(h3_bundle)
+        if h3_bundle.force_offload_enabled:
+            _release_auxiliary_models_for_sampling(h3_bundle, phase="first-pass sampling")
+            if h3_bundle.lora_stack:
+                # Bypass-LoRA adapters remain attached to the transformer for
+                # sampling, but their original file tensors are no longer
+                # needed after the adapter has been constructed.
+                h3_bundle.release_lora_cache()
+                logging.info("Easy H3: released raw LoRA cache from RAM before first-pass sampling")
         return model, second_sampling_model, context
 
 

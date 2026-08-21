@@ -112,6 +112,7 @@ const TEXT = {
     height: ZH_BROWSER ? "\u9ad8\u5ea6" : "Height",
     seconds: ZH_BROWSER ? "\u79d2\u6570" : "Seconds",
     advanced: ZH_BROWSER ? "\u9ad8\u7ea7\u9009\u9879" : "Advanced options",
+    forceOffload: ZH_BROWSER ? "\u5f3a\u5236\u5378\u8f7d" : "Force offload",
     promptOptimizerEnabled: ZH_BROWSER ? "\u63d0\u793a\u8bcd\u4f18\u5316" : "Prompt optimization",
     promptOptimizerSettings: ZH_BROWSER ? "\u6253\u5f00\u63d0\u793a\u8bcd\u4f18\u5316 API \u8bbe\u7f6e" : "Optimizer settings",
     promptOptimizerSceneGuide: ZH_BROWSER ? "\u63d0\u793a\u8bcd\u65b9\u6848" : "Prompt Guide",
@@ -433,7 +434,7 @@ function localizeNodeInstance(node) {
     }
     if (!isTarget(node)) return;
     node.title = TEXT.mainTitle;
-    const labels = { mode: TEXT.mode, prompt: TEXT.prompt, resolution: TEXT.resolution, aspect_ratio: TEXT.aspectRatio, width: TEXT.width, height: TEXT.height, seconds: TEXT.seconds, advanced: TEXT.advanced, prompt_optimizer_enabled: TEXT.promptOptimizerEnabled, prompt_optimizer_provider: TEXT.promptOptimizerProvider, prompt_optimizer_scene_guide: TEXT.promptOptimizerSceneGuide, fps: TEXT.fps, keyframe_role: TEXT.keyframeRole, ref_image_size: TEXT.refImageSize, reference_mention_mode: TEXT.referenceMentionMode };
+    const labels = { mode: TEXT.mode, prompt: TEXT.prompt, resolution: TEXT.resolution, aspect_ratio: TEXT.aspectRatio, width: TEXT.width, height: TEXT.height, seconds: TEXT.seconds, advanced: TEXT.advanced, force_offload: TEXT.forceOffload, prompt_optimizer_enabled: TEXT.promptOptimizerEnabled, prompt_optimizer_provider: TEXT.promptOptimizerProvider, prompt_optimizer_scene_guide: TEXT.promptOptimizerSceneGuide, fps: TEXT.fps, keyframe_role: TEXT.keyframeRole, ref_image_size: TEXT.refImageSize, reference_mention_mode: TEXT.referenceMentionMode };
     for (const widget of node.widgets || []) {
         if (labels[widget.name]) widget.label = labels[widget.name];
         localizeComboWidget(widget);
@@ -500,6 +501,27 @@ function referenceMentionMode(node) {
 
 const EMBEDDED_MEDIA_LIMITS = Object.freeze({ image: 9, video: 3, audio: 3 });
 const EMBEDDED_MEDIA_ORDER = Object.freeze({ image: 0, video: 1, audio: 2 });
+const EMBEDDED_MEDIA_LAYOUT = Object.freeze({
+    imageSlotBase: 72,
+    // Gallery and prompt heights are distributed by ComfyUI together. Keep
+    // their requested growth equal to the actual added node height so the
+    // gallery never renders beyond the space allocated to it.
+    previewGrowthRate: 1,
+    imageSlotMin: 48,
+    imageSlotMax: 128,
+    videoToImageRatio: 68 / 72,
+    promptBase: 96,
+    promptMin: 50,
+    galleryPromptGap: 8,
+    // Fixed rows/gaps inside the gallery. Keep this in sync with the CSS below:
+    // headings (16px), section/grid gaps (4px), grid gaps (4px), gallery
+    // gaps (8px), gallery padding (2px top/bottom), and the fixed 54px audio row.
+    // A DOM widget with margin: 0 still has ComfyUI's fixed 4px widget-row
+    // layout offset. Keep it separate from the actual media content height.
+    widgetRowOffset: 4,
+    imageModeChrome: 32,
+    referenceModeChrome: 142,
+});
 const EMBEDDED_MEDIA_ACCEPT = Object.freeze({
     image: "image/png,image/jpeg,image/webp,image/gif,image/bmp",
     video: "video/mp4,video/webm,video/quicktime,video/x-matroska,video/x-msvideo",
@@ -1690,6 +1712,7 @@ function patchGraphToPrompt() {
             // gate, so this never calls an API while disabled.
             const providerId = canonicalPromptProvider(getWidgetValue(node, "prompt_optimizer_provider", ""));
             promptNode.inputs.advanced = advanced;
+            promptNode.inputs.force_offload = advanced && asBoolean(getWidgetValue(node, "force_offload", false));
             delete promptNode.inputs.prompt_optimizer_settings;
             promptNode.inputs.prompt_optimizer_enabled = optimizerEnabled;
             promptNode.inputs.prompt_optimizer_provider = providerId;
@@ -3425,6 +3448,7 @@ function syncModeWidgets(node, { adjustHeight = true } = {}) {
         setConditionalWidgetVisible(node, getWidget(node, "keyframe_role"), advanced && !isReferenceMode(node), { adjustHeight }),
         setConditionalWidgetVisible(node, getWidget(node, "ref_image_size"), advanced, { adjustHeight }),
         setConditionalWidgetVisible(node, getWidget(node, "reference_mention_mode"), advanced && isReferenceMode(node), { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "force_offload"), advanced, { adjustHeight }),
         setConditionalWidgetVisible(node, getWidget(node, "prompt_optimizer_enabled"), advanced, { adjustHeight }),
         setConditionalWidgetVisible(node, getWidget(node, "prompt_optimizer_provider"), optimizerEnabled, { adjustHeight }),
         setConditionalWidgetVisible(node, getWidget(node, "prompt_optimizer_scene_guide"), optimizerEnabled, { adjustHeight }),
@@ -3841,14 +3865,11 @@ function syncEditorMode(node) {
     const widget = getWidget(node, "prompt");
     const editor = node.__h3Editor;
     const wrap = node.__h3EditorWrap;
-    const domWidget = node.__h3DomWidget;
-    if (!widget || !editor || !wrap || !domWidget) return;
+    if (!widget || !editor || !wrap) return;
     syncPromptExternalConnectionState(node);
     const reference = isReferenceMode(node);
     const raw = isRawPromptMode(node);
     hideOriginalPromptWidget(widget);
-    setWidgetOption(domWidget, "canvasOnly", false);
-    showDomEditorWidget(domWidget);
     editor.style.display = "block";
     wrap.style.display = "block";
     editor.dataset.placeholder = raw ? TEXT.rawPromptPlaceholder : reference ? TEXT.referencePromptPlaceholder : TEXT.promptPlaceholder;
@@ -4637,24 +4658,8 @@ function ensurePromptEditor(node) {
     renderEditorFromNode(node);
     syncPromptOptimizerButton(node);
     resetPromptHistory(node);
-    const domWidget = node.addDOMWidget("h3_prompt_mentions", "h3_prompt_mentions", wrap, {
-        getValue: () => String(getWidget(node, "prompt")?.value || ""),
-        setValue: (value) => {
-            const promptWidget = getWidget(node, "prompt");
-            if (promptWidget) promptWidget.value = String(value || "");
-            renderEditorFromNode(node);
-        },
-        margin: 10,
-        serialize: false,
-        getMinHeight: () => 50,
-        afterResize: () => {
-            applyNativeEditorTheme(wrap);
-            node._widgetSlotsDirty = true;
-            node.setDirtyCanvas?.(true, true);
-        },
-        onDraw: () => applyNativeEditorTheme(wrap),
-    });
-    if (!domWidget) {
+    const workbench = node.__feihouMediaWorkbench;
+    if (!workbench) {
         restoreOriginalPromptWidget(widget);
         wrap.remove();
         node.__h3Editor = null;
@@ -4664,20 +4669,13 @@ function ensurePromptEditor(node) {
         node.__h3PromptOptimizeButton = null;
         return;
     }
-    node.__h3DomWidget = domWidget;
-    domWidget.serialize = false;
-    setWidgetOption(domWidget, "serialize", false);
-    setWidgetOption(domWidget, "canvasOnly", false);
-    domWidget.__h3EditorType = domWidget.type;
-    domWidget.__h3EditorComputeSize = domWidget.computeSize;
-    const domIndex = node.widgets?.indexOf(domWidget) ?? -1;
-    const promptIndex = node.widgets?.indexOf(widget) ?? -1;
-    if (domIndex >= 0 && promptIndex >= 0 && domIndex !== promptIndex + 1) {
-        node.widgets.splice(domIndex, 1);
-        const nextPromptIndex = node.widgets.indexOf(widget);
-        node.widgets.splice(nextPromptIndex + 1, 0, domWidget);
-    }
+    // Gallery and prompt deliberately share one DOM widget. New ComfyUI
+    // layouts distribute height per DOM widget, so separate widgets can leave
+    // blank space or overlap while their inner content scales.
+    workbench.append(wrap);
+    node.__h3DomWidget = null;
     syncEditorMode(node);
+    syncEmbeddedMediaResponsiveLayout(node, { resetBaseline: true });
     repairNodeLayout(node);
 }
 
@@ -4869,6 +4867,7 @@ function repairConfiguredWidgetValues(node, info) {
         height: 768,
         seconds: 10,
         advanced: false,
+        force_offload: false,
         fps: 24,
         keyframe_role: KEYFRAME_FIRST,
         ref_image_size: REF_IMAGE_DEFAULT,
@@ -4922,6 +4921,7 @@ function repairConfiguredWidgetValues(node, info) {
             ? Math.min(MAX_SECONDS, Math.max(MIN_SECONDS, Number(values[6])))
             : defaults.seconds,
         advanced: asBoolean(values[7], defaults.advanced),
+        force_offload: asBoolean(values[15], defaults.force_offload),
         fps: Number.isFinite(Number(values[8])) ? Number(values[8]) : defaults.fps,
         keyframe_role: Object.prototype.hasOwnProperty.call(OPTION_DEFS.keyframe_role, canonicalOption("keyframe_role", values[9]))
             ? canonicalOption("keyframe_role", values[9]) : defaults.keyframe_role,
@@ -5064,6 +5064,74 @@ function createEmbeddedMediaSection(node, mediaType, count, title) {
     return section;
 }
 
+function embeddedGalleryHeight(reference, imageSlotHeight) {
+    const layout = EMBEDDED_MEDIA_LAYOUT;
+    const imageHeight = Math.round(Number(imageSlotHeight) || layout.imageSlotBase);
+    if (!reference) return imageHeight * 3 + layout.imageModeChrome + layout.widgetRowOffset;
+    const videoHeight = Math.round(imageHeight * layout.videoToImageRatio);
+    return imageHeight * 3 + videoHeight + layout.referenceModeChrome + layout.widgetRowOffset;
+}
+
+function syncEmbeddedMediaResponsiveLayout(node, { resetBaseline = false } = {}) {
+    const gallery = node?.__feihouMediaGallery;
+    const workbench = node?.__feihouMediaWorkbench;
+    const galleryWidget = node?.__feihouMediaGalleryWidget;
+    const promptWrap = node?.__h3EditorWrap;
+    if (!gallery || !workbench || !galleryWidget || !promptWrap) return false;
+    const reference = isReferenceMode(node);
+    const layout = EMBEDDED_MEDIA_LAYOUT;
+    const modeKey = reference ? "reference" : "image";
+    const minGalleryHeight = embeddedGalleryHeight(reference, layout.imageSlotMin);
+    const hostMinHeight = minGalleryHeight + layout.promptMin + layout.galleryPromptGap;
+    const nodeHeight = Number(node?.size?.[1]);
+    let state = node.__h3EmbeddedResponsiveLayout;
+    if (resetBaseline || !state || state.mode !== modeKey) {
+        state = {
+            mode: modeKey,
+            nodeHeight: Number.isFinite(nodeHeight) && nodeHeight > 0 ? nodeHeight : 0,
+            hostHeight: Math.max(hostMinHeight, Number(galleryWidget.computedHeight) || hostMinHeight),
+        };
+        node.__h3EmbeddedResponsiveLayout = state;
+    }
+    // In modern ComfyUI, computedHeight is the actual height assigned to this
+    // single DOM host after widget layout. It is more reliable than inferring
+    // it from node height because native rows and slots are outside the host.
+    const allocatedHeight = Number(galleryWidget.computedHeight);
+    const delta = Number.isFinite(nodeHeight) && nodeHeight > 0 ? nodeHeight - state.nodeHeight : 0;
+    const hostHeight = Math.max(
+        hostMinHeight,
+        Number.isFinite(allocatedHeight) && allocatedHeight > 0
+            ? allocatedHeight
+            : state.hostHeight + delta,
+    );
+    const minimumScale = layout.imageSlotMin / layout.imageSlotBase;
+    const maximumScale = layout.imageSlotMax / layout.imageSlotBase;
+    const galleryVariableHeight = (reference ? 3 + layout.videoToImageRatio : 3) * layout.imageSlotBase;
+    const galleryChromeHeight = reference ? layout.referenceModeChrome : layout.imageModeChrome;
+    const rawScale = (hostHeight - layout.galleryPromptGap - galleryChromeHeight) / (galleryVariableHeight + layout.promptBase);
+    const proportionalScale = Math.max(minimumScale, Math.min(maximumScale, rawScale));
+    const imageSlotHeight = layout.imageSlotBase * proportionalScale;
+    const galleryHeight = embeddedGalleryHeight(reference, imageSlotHeight);
+    const previewAtMax = proportionalScale >= maximumScale;
+    const promptHeight = previewAtMax
+        ? Math.max(layout.promptMin, hostHeight - galleryHeight - layout.galleryPromptGap)
+        : Math.max(layout.promptMin, layout.promptBase * proportionalScale);
+    const videoSlotHeight = Math.round(imageSlotHeight * layout.videoToImageRatio);
+    gallery.style.setProperty("--fh-h3-image-slot-height", `${Math.round(imageSlotHeight)}px`);
+    gallery.style.setProperty("--fh-h3-video-slot-height", `${videoSlotHeight}px`);
+    workbench.style.setProperty("--fh-h3-gallery-height", `${Math.round(galleryHeight)}px`);
+    workbench.style.setProperty("--fh-h3-prompt-height", `${Math.round(promptHeight)}px`);
+    workbench.classList.toggle("is-preview-capped", previewAtMax);
+    node.__h3EmbeddedPreviewAtMax = previewAtMax;
+    node.__h3EmbeddedResponsiveMetrics = {
+        galleryHeight,
+        promptHeight,
+        hostHeight,
+    };
+    node._widgetSlotsDirty = true;
+    return true;
+}
+
 function renderEmbeddedMediaGallery(node) {
     const gallery = node?.__feihouMediaGallery;
     if (!gallery) return;
@@ -5137,12 +5205,7 @@ function renderEmbeddedMediaGallery(node) {
             }
         }
     }
-    const galleryWidget = node.__feihouMediaGalleryWidget;
-    if (galleryWidget) {
-        const height = reference ? 460 : 275;
-        galleryWidget.computedHeight = height;
-        if (galleryWidget._state) galleryWidget._state.computedHeight = height;
-    }
+    syncEmbeddedMediaResponsiveLayout(node);
     node._widgetSlotsDirty = true;
     repairNodeLayout(node);
 }
@@ -5161,6 +5224,8 @@ function ensureEmbeddedMediaGallery(node) {
     if (node.__feihouMediaGallery || typeof document === "undefined" || typeof node.addDOMWidget !== "function") return;
     removeEmbeddedMediaGalleryWidgets(node);
     ensureEmbeddedMedia(node);
+    const workbench = document.createElement("div");
+    workbench.className = "fh-h3-embedded-workbench";
     const gallery = document.createElement("div");
     gallery.className = "fh-h3-media-gallery";
     gallery.addEventListener("pointerdown", (event) => event.stopPropagation());
@@ -5170,20 +5235,30 @@ function ensureEmbeddedMediaGallery(node) {
         createEmbeddedMediaSection(node, "video", 3, TEXT.embeddedVideos),
         createEmbeddedMediaSection(node, "audio", 3, TEXT.embeddedAudios),
     );
-    const domWidget = node.addDOMWidget("feihou_h3_embedded_media", "feihou_h3_embedded_media", gallery, {
+    workbench.append(gallery);
+    const domWidget = node.addDOMWidget("feihou_h3_embedded_media", "feihou_h3_embedded_media", workbench, {
         serialize: false,
-        margin: 10,
-        getMinHeight: () => isReferenceMode(node) ? 460 : 275,
-        afterResize: () => renderEmbeddedMediaGallery(node),
+        margin: 0,
+        // One flexible host owns gallery + prompt. Its lower bound is fixed;
+        // every extra pixel is then partitioned inside the workbench.
+        getMinHeight: () => embeddedGalleryHeight(
+            isReferenceMode(node), EMBEDDED_MEDIA_LAYOUT.imageSlotMin,
+        ) + EMBEDDED_MEDIA_LAYOUT.promptMin + EMBEDDED_MEDIA_LAYOUT.galleryPromptGap,
+        afterResize: () => {
+            syncEmbeddedMediaResponsiveLayout(node);
+            applyNativeEditorTheme(node.__h3EditorWrap);
+            requestAnimationFrame?.(() => syncEmbeddedMediaResponsiveLayout(node));
+        },
     });
     if (!domWidget) {
-        gallery.remove();
+        workbench.remove();
         return;
     }
     domWidget.serialize = false;
     setWidgetOption(domWidget, "serialize", false);
     setWidgetOption(domWidget, "canvasOnly", false);
     node.__feihouMediaGallery = gallery;
+    node.__feihouMediaWorkbench = workbench;
     node.__feihouMediaGalleryWidget = domWidget;
     const domIndex = node.widgets?.indexOf(domWidget) ?? -1;
     const modeIndex = node.widgets?.indexOf(getWidget(node, "mode")) ?? -1;
@@ -5352,6 +5427,13 @@ function installNode(nodeType, nodeData) {
         return result;
     };
 
+    const originalResize = nodeType.prototype.onResize;
+    nodeType.prototype.onResize = function onResizeH3Easy() {
+        const result = originalResize?.apply(this, arguments);
+        syncEmbeddedMediaResponsiveLayout(this);
+        return result;
+    };
+
     const originalConnectionsChange = nodeType.prototype.onConnectionsChange;
     nodeType.prototype.onConnectionsChange = function onConnectionsChangeH3Easy(type, index, connected, linkInfo) {
         const result = originalConnectionsChange?.apply(this, arguments);
@@ -5413,6 +5495,7 @@ function installNode(nodeType, nodeData) {
         this.__h3PromptOptimizerStatusText = null;
         this.__feihouMediaGallery?.remove?.();
         this.__feihouMediaGallery = null;
+        this.__feihouMediaWorkbench = null;
         this.__feihouMediaGalleryWidget = null;
         removeEmbeddedMediaGalleryWidgets(this);
         removePromptEditorWidgets(this);
@@ -5507,25 +5590,29 @@ function install() {
     setTimeout(() => loadPromptOptimizerSettings().catch(() => {}), 0);
     const style = document.createElement("style");
     style.textContent = `
+      .fh-h3-embedded-workbench {
+        display: flex; flex-direction: column; gap: 8px; width: auto; height: 100%; min-width: 0; min-height: 0; box-sizing: border-box; margin: 0 10px; padding: 2px 0;
+      }
       .fh-h3-media-gallery {
-        display: grid; gap: 8px; width: 100%; height: 100%; min-width: 0; box-sizing: border-box; padding: 2px 0;
+        --fh-h3-image-slot-height: 72px; --fh-h3-video-slot-height: 68px;
+        display: grid; grid-auto-rows: max-content; align-content: start; gap: 8px; width: 100%; height: var(--fh-h3-gallery-height, auto); flex: 0 0 var(--fh-h3-gallery-height, auto); min-width: 0; box-sizing: border-box; margin: 0; padding: 0;
         color: var(--h3-native-widget-text, rgba(255,255,255,.88)); font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       }
       .fh-h3-media-gallery.is-image-mode .fh-h3-media-section.is-video,
       .fh-h3-media-gallery.is-image-mode .fh-h3-media-section.is-audio { display: none; }
-      .fh-h3-media-section { display: grid; gap: 4px; min-width: 0; }
+      .fh-h3-media-section { display: grid; grid-auto-rows: max-content; align-content: start; gap: 4px; min-width: 0; }
       .fh-h3-media-heading {
         overflow: hidden; color: var(--h3-native-widget-muted, rgba(255,255,255,.54)); font-size: 10px; font-weight: 650;
         line-height: 16px; letter-spacing: .035em; text-transform: uppercase; text-overflow: ellipsis; white-space: nowrap;
       }
-      .fh-h3-media-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; min-width: 0; }
+      .fh-h3-media-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-auto-rows: max-content; align-content: start; gap: 4px; min-width: 0; }
       .fh-h3-media-slot {
-        appearance: none; position: relative; display: flex; align-items: center; justify-content: center; min-width: 0; height: 72px; overflow: hidden;
+        appearance: none; position: relative; display: flex; align-items: center; justify-content: center; min-width: 0; height: var(--fh-h3-image-slot-height); overflow: hidden;
         box-sizing: border-box; padding: 0; border: 1px dashed var(--h3-native-widget-outline, rgba(255,255,255,.18)); border-radius: 7px;
         background: rgba(255,255,255,.035); color: var(--h3-native-widget-muted, rgba(255,255,255,.48)); cursor: pointer;
         transition: border-color .12s ease, background-color .12s ease, opacity .12s ease, transform .12s ease;
       }
-      .fh-h3-media-grid.is-video .fh-h3-media-slot { height: 68px; }
+      .fh-h3-media-grid.is-video .fh-h3-media-slot { height: var(--fh-h3-video-slot-height); }
       .fh-h3-media-grid.is-audio .fh-h3-media-slot { height: 54px; }
       .fh-h3-media-slot:hover, .fh-h3-media-slot:focus-visible, .fh-h3-media-slot.is-dragover {
         border-color: rgba(0,226,187,.64); background: rgba(0,226,187,.075); outline: none;
@@ -5554,7 +5641,7 @@ function install() {
       }
       .fh-h3-media-slot-clear:hover, .fh-h3-media-slot-clear:focus-visible { background: rgba(212,70,70,.9); outline: none; }
       .h3-prompt-editor-wrap {
-        position: relative; display: block; width: 100%; height: 100%; min-width: 0; min-height: 0; max-height: 100%;
+        position: relative; display: block; width: 100%; height: var(--fh-h3-prompt-height, 96px); flex: 0 0 var(--fh-h3-prompt-height, 96px); min-width: 0; min-height: 0; max-height: none; margin: 0;
         box-sizing: border-box; padding: 0; border-radius: var(--h3-native-widget-radius, 0); overflow: hidden; contain: size layout paint;
       }
       .h3-prompt-editor {
