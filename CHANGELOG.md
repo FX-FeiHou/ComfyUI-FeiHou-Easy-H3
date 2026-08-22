@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.3.8
+
+- Fixes prompt-guide titles to read ComfyUI's current locale at display time rather than locking in the language during frontend module initialization.
+- Adds the missing Chinese/English fallback label for **R2VA 加强版 / R2VA Enhanced**, so the guide remains correctly named while the backend scheme list is loading or when frontend cache is refreshed.
+
 ## v1.3.7
 
 - Adds the built-in **R2VA Enhanced** prompt guide directly below “General only”. It uses the supplied six-section full-reference prompt template for complex reference-video, identity-retention, source-video, audio, and digital-human workflows.

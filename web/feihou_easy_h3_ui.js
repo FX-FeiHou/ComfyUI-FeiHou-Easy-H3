@@ -31,6 +31,7 @@ const PROMPT_VIEW_STRUCTURED = "structured";
 const PROMPT_VIEW_RAW = "raw";
 const PROMPT_GUIDES = [
     { value: "none", zh: "\u4ec5\u901a\u7528\u65b9\u6848", en: "General only" },
+    { value: "r2va_enhanced", zh: "R2VA \u52a0\u5f3a\u7248", en: "R2VA Enhanced" },
     { value: "3d_animation_short", zh: "3D \u52a8\u753b\u77ed\u7247", en: "3D Animation Short" },
     { value: "brand_promo", zh: "\u54c1\u724c\u5ba3\u4f20\u7247", en: "Brand Promo Video" },
     { value: "coop_game_intro", zh: "\u5408\u4f5c\u6e38\u620f\u5f00\u573a", en: "Co-op Game Intro" },
@@ -58,6 +59,9 @@ const AUDIO_ICON_SVG = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/
 // this helper keeps the embedded gallery and custom dialogs in step with it.
 function currentComfyLocale() {
     return String(app.ui?.settings?.getSettingValue?.("Comfy.Locale") || globalThis.navigator?.language || globalThis.navigator?.languages?.[0] || "en");
+}
+function isChineseComfyLocale() {
+    return /^(zh)(?:[-_]|$)/i.test(currentComfyLocale());
 }
 const PRIMARY_BROWSER_LANGUAGE = currentComfyLocale();
 const ZH_BROWSER = /^(zh)(?:[-_]|$)/i.test(PRIMARY_BROWSER_LANGUAGE);
@@ -358,9 +362,10 @@ function localizeComboWidget(widget) {
     const name = String(widget?.name || "");
     if (name === "prompt_optimizer_scene_guide") {
         const current = canonicalPromptGuide(widget?.value);
+        const isChinese = isChineseComfyLocale();
         widget.options ||= {};
-        widget.options.values = PROMPT_GUIDES.map((item) => ZH_BROWSER ? item.zh : item.en);
-        widget.value = PROMPT_GUIDES.find((item) => item.value === current)?.[ZH_BROWSER ? "zh" : "en"] || widget.value;
+        widget.options.values = PROMPT_GUIDES.map((item) => isChinese ? item.zh : item.en);
+        widget.value = PROMPT_GUIDES.find((item) => item.value === current)?.[isChinese ? "zh" : "en"] || widget.value;
         widget.__h3PromptGuideLocalized = true;
         return;
     }
@@ -4839,7 +4844,7 @@ function bindPromptOptimizerWidgetCallbacks(node) {
         const original = widget.callback;
         widget.callback = (value) => {
             original?.call(widget, value);
-            if (name === "prompt_optimizer_scene_guide") widget.value = ZH_BROWSER
+            if (name === "prompt_optimizer_scene_guide") widget.value = isChineseComfyLocale()
                 ? (PROMPT_GUIDES.find((item) => item.value === canonicalPromptGuide(value))?.zh || value)
                 : (PROMPT_GUIDES.find((item) => item.value === canonicalPromptGuide(value))?.en || value);
             if (name === "prompt_optimizer_provider") {
