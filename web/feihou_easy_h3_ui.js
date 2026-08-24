@@ -5,6 +5,7 @@ import { api } from "../../scripts/api.js";
 
 const NODE_CLASS = "FeiHouEasyH3";
 const LOADER_CLASS = "FeiHouEasyH3Loader";
+const REMIX_LOADER_CLASS = "FeiHouEasyH3RemixLoader";
 const ADAPTER_CLASS = "FeiHouEasyH3ModelAdapter";
 const OUTPUT_CLASS = "FeiHouEasyH3Output";
 const PROMPT_PREVIEW_CLASS = "FeiHouEasyH3PromptPreview";
@@ -105,6 +106,7 @@ const TEXT = {
     mentionEmpty: ZH_BROWSER ? "\u5148\u5c06\u7d20\u6750\u8fde\u63a5\u5230\u4e3b\u8282\u70b9" : "Connect media to the main node first",
     mainTitle: "ComfyUI-FeiHou-Easy-H3",
     loaderTitle: ZH_BROWSER ? "FeiHou Easy H3 \u52a0\u8f7d\u5668" : "FeiHou Easy H3 Loader",
+    remixLoaderTitle: ZH_BROWSER ? "FeiHou Easy H3 Remix\u52a0\u8f7d\u5668" : "FeiHou Easy H3 Remix Loader",
     adapterTitle: ZH_BROWSER ? "FeiHou Easy H3 \u6a21\u578b\u4e2d\u8f6c" : "FeiHou Easy H3 Model Bridge",
     outputTitle: ZH_BROWSER ? "FeiHou Easy H3 \u8f93\u51fa" : "FeiHou Easy H3 Output",
     category: "FeiHou Easy H3",
@@ -116,7 +118,8 @@ const TEXT = {
     height: ZH_BROWSER ? "\u9ad8\u5ea6" : "Height",
     seconds: ZH_BROWSER ? "\u79d2\u6570" : "Seconds",
     advanced: ZH_BROWSER ? "\u9ad8\u7ea7\u9009\u9879" : "Advanced options",
-    forceOffload: ZH_BROWSER ? "\u5f3a\u5236\u5378\u8f7d" : "Force offload",
+    forceOffload: ZH_BROWSER ? "\u5f3a\u5236\u5378\u8f7d\uff08\u542b\u91c7\u6837\u540e\u7f13\u5b58\u56de\u6536\uff09" : "Force offload (with post-sampling cache release)",
+    lowVramStreamedAttention: ZH_BROWSER ? "\u5b8c\u6574\u4f4e\u663e\u5b58\u5206\u5757\uff08\u5b9e\u9a8c\uff09" : "Complete low-VRAM streamed blocks (experimental)",
     promptOptimizerEnabled: ZH_BROWSER ? "\u63d0\u793a\u8bcd\u4f18\u5316" : "Prompt optimization",
     promptOptimizerSettings: ZH_BROWSER ? "\u6253\u5f00\u63d0\u793a\u8bcd\u4f18\u5316 API \u8bbe\u7f6e" : "Optimizer settings",
     promptOptimizerSceneGuide: ZH_BROWSER ? "\u63d0\u793a\u8bcd\u65b9\u6848" : "Prompt Guide",
@@ -138,6 +141,10 @@ const TEXT = {
     secondRef2vaModel: ZH_BROWSER ? "\u4e8c\u91c7 REF2VA \u6a21\u578b" : "Second-pass REF2VA model",
     secondSamplingUseLora: ZH_BROWSER ? "\u4e8c\u91c7\u4f7f\u7528 LoRA" : "Use LoRA for second pass",
     loraStack: ZH_BROWSER ? "LoRA \u5806\u6808" : "LoRA stack",
+    remixModel: ZH_BROWSER ? "Remix \u4e3b\u6a21\u578b" : "Remix main model",
+    secondSamplingModel: ZH_BROWSER ? "\u4e8c\u91c7\u6a21\u578b" : "Second-pass model",
+    firstPassLoraStack: ZH_BROWSER ? "\u4e00\u91c7 LoRA" : "First-pass LoRA",
+    secondPassLoraStack: ZH_BROWSER ? "\u4e8c\u91c7 LoRA" : "Second-pass LoRA",
     noneModel: ZH_BROWSER ? "\u65e0" : "None",
     outputModel: "Model",
     outputSecondSamplingModel: ZH_BROWSER ? "\u4e8c\u6b21\u91c7\u6837\u6a21\u578b" : "Second sampling model",
@@ -299,6 +306,10 @@ function isLoader(node) {
     return nodeMatchesClass(node, LOADER_CLASS, TEXT.loaderTitle, "__h3EasyLoaderInstalled");
 }
 
+function isRemixLoader(node) {
+    return nodeMatchesClass(node, REMIX_LOADER_CLASS, TEXT.remixLoaderTitle, "__h3EasyRemixLoaderInstalled");
+}
+
 function isAdapter(node) {
     return nodeMatchesClass(node, ADAPTER_CLASS, TEXT.adapterTitle, "__h3EasyAdapterInstalled");
 }
@@ -418,6 +429,24 @@ function localizeNodeInstance(node) {
         for (const input of node.inputs || []) if (labels[input.name]) setLocalizedSlotLabel(input, labels[input.name]);
         return;
     }
+    if (isRemixLoader(node)) {
+        node.title = TEXT.remixLoaderTitle;
+        const labels = {
+            remix_model: TEXT.remixModel,
+            text_encoder: TEXT.textEncoder,
+            video_vae: TEXT.videoVae,
+            audio_vae: TEXT.audioVae,
+            second_sampling_model: TEXT.secondSamplingModel,
+            first_pass_lora_stack: TEXT.firstPassLoraStack,
+            second_pass_lora_stack: TEXT.secondPassLoraStack,
+        };
+        for (const widget of node.widgets || []) {
+            if (labels[widget.name]) widget.label = labels[widget.name];
+            if (widget.name === "second_sampling_model") localizeOptionalModelWidget(widget);
+        }
+        for (const input of node.inputs || []) if (labels[input.name]) setLocalizedSlotLabel(input, labels[input.name]);
+        return;
+    }
     if (isAdapter(node)) {
         node.title = TEXT.adapterTitle;
         const labels = { fl2va_model: TEXT.fl2vaModel, ref2va_model: TEXT.ref2vaModel, text_encoder: TEXT.textEncoder, video_vae: TEXT.videoVae, audio_vae: TEXT.audioVae };
@@ -439,7 +468,7 @@ function localizeNodeInstance(node) {
     }
     if (!isTarget(node)) return;
     node.title = TEXT.mainTitle;
-    const labels = { mode: TEXT.mode, prompt: TEXT.prompt, resolution: TEXT.resolution, aspect_ratio: TEXT.aspectRatio, width: TEXT.width, height: TEXT.height, seconds: TEXT.seconds, advanced: TEXT.advanced, force_offload: TEXT.forceOffload, prompt_optimizer_enabled: TEXT.promptOptimizerEnabled, prompt_optimizer_provider: TEXT.promptOptimizerProvider, prompt_optimizer_scene_guide: TEXT.promptOptimizerSceneGuide, fps: TEXT.fps, keyframe_role: TEXT.keyframeRole, ref_image_size: TEXT.refImageSize, reference_mention_mode: TEXT.referenceMentionMode };
+    const labels = { mode: TEXT.mode, prompt: TEXT.prompt, resolution: TEXT.resolution, aspect_ratio: TEXT.aspectRatio, width: TEXT.width, height: TEXT.height, seconds: TEXT.seconds, advanced: TEXT.advanced, force_offload: TEXT.forceOffload, low_vram_streamed_attention: TEXT.lowVramStreamedAttention, prompt_optimizer_enabled: TEXT.promptOptimizerEnabled, prompt_optimizer_provider: TEXT.promptOptimizerProvider, prompt_optimizer_scene_guide: TEXT.promptOptimizerSceneGuide, fps: TEXT.fps, keyframe_role: TEXT.keyframeRole, ref_image_size: TEXT.refImageSize, reference_mention_mode: TEXT.referenceMentionMode };
     for (const widget of node.widgets || []) {
         if (labels[widget.name]) widget.label = labels[widget.name];
         localizeComboWidget(widget);
@@ -456,9 +485,11 @@ function localizeNodeInstance(node) {
 }
 
 function localizeNodeDefinition(nodeData) {
-    if (!nodeData || ![NODE_CLASS, LOADER_CLASS, ADAPTER_CLASS, OUTPUT_CLASS].includes(nodeData.name)) return;
+    if (!nodeData || ![NODE_CLASS, LOADER_CLASS, REMIX_LOADER_CLASS, ADAPTER_CLASS, OUTPUT_CLASS].includes(nodeData.name)) return;
     nodeData.display_name = nodeData.name === LOADER_CLASS
         ? TEXT.loaderTitle
+        : nodeData.name === REMIX_LOADER_CLASS
+            ? TEXT.remixLoaderTitle
         : nodeData.name === ADAPTER_CLASS
             ? TEXT.adapterTitle
             : nodeData.name === OUTPUT_CLASS
@@ -1718,6 +1749,7 @@ function patchGraphToPrompt() {
             const providerId = canonicalPromptProvider(getWidgetValue(node, "prompt_optimizer_provider", ""));
             promptNode.inputs.advanced = advanced;
             promptNode.inputs.force_offload = advanced && asBoolean(getWidgetValue(node, "force_offload", false));
+            promptNode.inputs.low_vram_streamed_attention = advanced && asBoolean(getWidgetValue(node, "low_vram_streamed_attention", false));
             delete promptNode.inputs.prompt_optimizer_settings;
             promptNode.inputs.prompt_optimizer_enabled = optimizerEnabled;
             promptNode.inputs.prompt_optimizer_provider = providerId;
@@ -3454,6 +3486,7 @@ function syncModeWidgets(node, { adjustHeight = true } = {}) {
         setConditionalWidgetVisible(node, getWidget(node, "ref_image_size"), advanced, { adjustHeight }),
         setConditionalWidgetVisible(node, getWidget(node, "reference_mention_mode"), advanced && isReferenceMode(node), { adjustHeight }),
         setConditionalWidgetVisible(node, getWidget(node, "force_offload"), advanced, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "low_vram_streamed_attention"), advanced, { adjustHeight }),
         setConditionalWidgetVisible(node, getWidget(node, "prompt_optimizer_enabled"), advanced, { adjustHeight }),
         setConditionalWidgetVisible(node, getWidget(node, "prompt_optimizer_provider"), optimizerEnabled, { adjustHeight }),
         setConditionalWidgetVisible(node, getWidget(node, "prompt_optimizer_scene_guide"), optimizerEnabled, { adjustHeight }),
@@ -3551,6 +3584,7 @@ function normalizePromptOptimizerSettings(value) {
             temperature: Number.isFinite(Number(provider.temperature)) ? Number(provider.temperature) : 0.7,
             max_tokens: Number.isFinite(Number(provider.max_tokens)) ? Number(provider.max_tokens) : 4096,
             top_p: Number.isFinite(Number(provider.top_p)) ? Number(provider.top_p) : 0.9,
+            ollama_disable_thinking: asBoolean(provider.ollama_disable_thinking, false),
             builtin: asBoolean(provider.builtin, false),
         };
     }) : [];
@@ -4873,6 +4907,7 @@ function repairConfiguredWidgetValues(node, info) {
         seconds: 10,
         advanced: false,
         force_offload: false,
+        low_vram_streamed_attention: false,
         fps: 24,
         keyframe_role: KEYFRAME_FIRST,
         ref_image_size: REF_IMAGE_DEFAULT,
@@ -4927,6 +4962,7 @@ function repairConfiguredWidgetValues(node, info) {
             : defaults.seconds,
         advanced: asBoolean(values[7], defaults.advanced),
         force_offload: asBoolean(values[15], defaults.force_offload),
+        low_vram_streamed_attention: asBoolean(values[16], defaults.low_vram_streamed_attention),
         fps: Number.isFinite(Number(values[8])) ? Number(values[8]) : defaults.fps,
         keyframe_role: Object.prototype.hasOwnProperty.call(OPTION_DEFS.keyframe_role, canonicalOption("keyframe_role", values[9]))
             ? canonicalOption("keyframe_role", values[9]) : defaults.keyframe_role,
@@ -5538,6 +5574,24 @@ function installLoaderNode(nodeType, nodeData) {
     };
 }
 
+function installRemixLoaderNode(nodeType, nodeData) {
+    if (nodeData?.name !== REMIX_LOADER_CLASS) return;
+    if (nodeType.prototype.__h3EasyRemixLoaderInstalled) return;
+    nodeType.prototype.__h3EasyRemixLoaderInstalled = true;
+    const originalCreated = nodeType.prototype.onNodeCreated;
+    nodeType.prototype.onNodeCreated = function onNodeCreatedH3RemixLoader() {
+        const result = originalCreated?.apply(this, arguments);
+        localizeNodeInstance(this);
+        return result;
+    };
+    const originalConfigure = nodeType.prototype.onConfigure;
+    nodeType.prototype.onConfigure = function onConfigureH3RemixLoader(info) {
+        const result = originalConfigure?.apply(this, arguments);
+        localizeNodeInstance(this);
+        return result;
+    };
+}
+
 function installAdapterNode(nodeType, nodeData) {
     if (nodeData?.name !== ADAPTER_CLASS) return;
     if (nodeType.prototype.__h3EasyAdapterInstalled) return;
@@ -5817,6 +5871,7 @@ app.registerExtension({
     beforeRegisterNodeDef(nodeType, nodeData) {
         localizeNodeDefinition(nodeData);
         installLoaderNode(nodeType, nodeData);
+        installRemixLoaderNode(nodeType, nodeData);
         installAdapterNode(nodeType, nodeData);
         installOutputNode(nodeType, nodeData);
         installNode(nodeType, nodeData);

@@ -45,6 +45,7 @@ function normalizeSettings(value) {
         temperature: numberValue(item?.temperature, 0.7, 0, 2),
         max_tokens: numberValue(item?.max_tokens, 4096, 1, 50000),
         top_p: numberValue(item?.top_p, 0.9, 0, 1),
+        ollama_disable_thinking: Boolean(item?.ollama_disable_thinking),
         builtin: Boolean(item?.builtin),
     })).filter((item) => item.id);
     const schemes = (Array.isArray(source.schemes) ? source.schemes : []).map((item) => ({
@@ -89,6 +90,7 @@ function settingsPayload(state) {
                 temperature: provider.temperature,
                 max_tokens: provider.max_tokens,
                 top_p: provider.top_p,
+                ollama_disable_thinking: Boolean(provider.ollama_disable_thinking),
                 builtin: provider.builtin,
             };
             if (provider.api_key) item.api_key = provider.api_key;
@@ -151,6 +153,7 @@ function mergeSavedState(state, saved) {
         if (!updated) continue;
         provider.api_key_exists = updated.api_key_exists;
         provider.api_key_masked = updated.api_key_masked;
+        provider.ollama_disable_thinking = Boolean(updated.ollama_disable_thinking);
         provider.api_key = "";
     }
 }
@@ -317,7 +320,7 @@ async function mountInlineSettings(root) {
                 id, name: t("自定义 API", "Custom API"), description: t("自定义 OpenAI 兼容接口", "Custom OpenAI-compatible endpoint"),
                 api_format: "openai", api_url: "", api_key: "", api_key_exists: false, api_key_masked: "",
                 llm_models: [], vlm_models: [], llm_model: "", vlm_model: "",
-                temperature: 0.7, max_tokens: 4096, top_p: 0.9, builtin: false,
+                temperature: 0.7, max_tokens: 4096, top_p: 0.9, ollama_disable_thinking: false, builtin: false,
             });
             selectedProviderId = id;
             state.active_provider = id;
@@ -418,6 +421,19 @@ async function mountInlineSettings(root) {
         card.append(credentials);
 
         const switches = el("div", "fh-inline-switches");
+        if (provider.api_format === "ollama") {
+            const disableThinking = input("checkbox");
+            disableThinking.checked = Boolean(provider.ollama_disable_thinking);
+            disableThinking.addEventListener("change", () => {
+                provider.ollama_disable_thinking = disableThinking.checked;
+                void persist(disableThinking.checked
+                    ? t("Ollama 已禁止思考", "Ollama thinking disabled")
+                    : t("Ollama 已允许思考", "Ollama thinking enabled"));
+            });
+            const disableThinkingLabel = el("label", "fh-inline-switch");
+            disableThinkingLabel.append(el("span", "", t("禁止思考", "Disable thinking")), disableThinking);
+            switches.append(disableThinkingLabel);
+        }
         const readMedia = input("checkbox");
         readMedia.checked = state.read_media;
         readMedia.addEventListener("change", () => {

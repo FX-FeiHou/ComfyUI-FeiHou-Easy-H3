@@ -1,6 +1,7 @@
 from .nodes import (
     FeiHouEasyH3,
     FeiHouEasyH3Loader,
+    FeiHouEasyH3RemixLoader,
     FeiHouEasyH3ModelAdapter,
     FeiHouEasyH3LoraStack,
     FeiHouEasyH3Output,
@@ -10,6 +11,7 @@ from .nodes import (
 NODE_CLASS_MAPPINGS = {
     "FeiHouEasyH3LoraStack": FeiHouEasyH3LoraStack,
     "FeiHouEasyH3Loader": FeiHouEasyH3Loader,
+    "FeiHouEasyH3RemixLoader": FeiHouEasyH3RemixLoader,
     "FeiHouEasyH3ModelAdapter": FeiHouEasyH3ModelAdapter,
     "FeiHouEasyH3": FeiHouEasyH3,
     "FeiHouEasyH3Output": FeiHouEasyH3Output,
@@ -19,6 +21,7 @@ NODE_CLASS_MAPPINGS = {
 NODE_DISPLAY_NAME_MAPPINGS = {
     "FeiHouEasyH3LoraStack": "加载LoRA（旁路，仅模型）（用于调试）",
     "FeiHouEasyH3Loader": "FeiHou Easy H3 Loader",
+    "FeiHouEasyH3RemixLoader": "FeiHou Easy H3 Remix加载器",
     "FeiHouEasyH3ModelAdapter": "FeiHou Easy H3 Model Adapter",
     "FeiHouEasyH3": "ComfyUI-FeiHou-Easy-H3",
     "FeiHouEasyH3Output": "FeiHou Easy H3 Output",

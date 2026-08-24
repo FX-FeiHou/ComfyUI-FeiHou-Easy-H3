@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.3.10
+
+- Adds **FeiHou Easy H3 Remix Loader**: FL2VA and REF2VA share one Remix transformer, while first-pass and second-pass LoRA stacks remain independent. The optional second-pass model selector now uses **None** to keep the normal model path.
+- Adds an Ollama-only **Disable thinking** setting. When enabled, Easy H3 sends the native Ollama `think: false` request option.
+- Adds non-blocking **complete low-VRAM streamed-block conflict diagnostics**. When that experimental switch is enabled, existing H3 block, output-head, and attention patches are reported in the console before generation continues.
+
+## v1.3.9
+
+- **Force offload** now also runs a one-time ComfyUI-native allocator cleanup immediately after each sampler returns and before VAE decoding. It releases only unused cached memory; it does not clear memory during denoising steps.
+- Replaces the attention-only experiment with optional **Complete low-VRAM streamed blocks (experimental)**. The embedded GPL-3.0-or-later-derived MAINodes implementation streams H3 QKV, attention, MLP/SwiGLU, and output-head work using exact bf16 K/V defaults. See NOTICE for attribution and license details.
+- Updates the low-VRAM sample workflow to use the built-in complete block-streaming switch and removes the competing `ModelAttentionBackend / comfy kitchen attention` patch from that workflow.
+
 ## v1.3.8
 
 - Fixes prompt-guide titles to read ComfyUI's current locale at display time rather than locking in the language during frontend module initialization.

@@ -15,6 +15,7 @@
 - 参考模式继续支持在提示词里输入 `@` 选择 `<Picture i>`、`<Video i>`、`<Audio i>`；
 - 视频原有音轨仍与该视频自动配对，3 个音频槽位作为独立参考音频；
 - 默认 24 FPS、10 秒；参考图尺寸可选短边 480、544、640、736、768、832、928、1024、1088；
+- 高级选项提供“强制卸载（含采样后缓存回收）”和可选“完整低显存分块（实验）”：前者在采样器结束、VAE 解码前回收未使用的缓存，后者对 H3 的 QKV、注意力、MLP/SwiGLU 和输出头执行完整分块；启用后不要再串联 `ModelAttentionBackend / comfy kitchen attention`；
 - 提示词优化支持智谱、xFlow-API 聚合、Ollama、阿里云、DeepSeek 和自定义 OpenAI/Gemini/Ollama 兼容 API；
 - 内置提示词方案之外，还可创建、编辑和选择自定义方案。
 
@@ -56,6 +57,8 @@
 本项目是改编版本，并非独立重写。H3 节点上游来源为 [nkxx188/ComfyUI-MiniMaxH3-Easy](https://github.com/nkxx188/ComfyUI-MiniMaxH3-Easy)，原作者为 `nkxx188`，采用 MIT License；其 MIT 文本和版权声明保留在 [LICENSES/MIT-ComfyUI-MiniMaxH3-Easy.txt](LICENSES/MIT-ComfyUI-MiniMaxH3-Easy.txt)。上游项目要求对实质性复用或改编保留作者与项目署名；本仓库已在节点头部、README、[NOTICE](NOTICE) 和 Release 中明确保留该声明。
 
 节点的 API 服务配置、模型发现和提示词优化实现借鉴自 [yawiii/ComfyUI-Prompt-Assistant](https://github.com/yawiii/ComfyUI-Prompt-Assistant)，原作者为 `yawiii`，采用 GNU GPL v3。由于本仓库包含该来源的改编内容，整个仓库按 [GNU GPL v3](LICENSE) 发布。
+
+“完整低显存分块（实验）”包含来自 [matlowai/ComfyUI-MAINodes](https://github.com/matlowai/ComfyUI-MAINodes) 的 `H3 Streamed Blocks` 衍生实现，版权归 `MATLOWAI`，采用 GPL-3.0-or-later。保留的源文件、完整许可证与改动说明见 [NOTICE](NOTICE)、`third_party/mainodes_h3_streamed_blocks.py` 和 `LICENSES/GPL-3.0-or-later-ComfyUI-MAINodes.txt`。
 
 FeiHou 的改动包括：固定 9 图 / 3 视频 / 3 音频的内嵌媒体面板、上传与工作流持久化、FeiHou LoRA Stack 接入、ComfyUI 设置页内的 API 与提示词规则管理、服务/模型选择、运行时提示词扩写/反推，以及提示词预览输出。参考素材的 conditioning 规则及数量限制仍遵循 ComfyUI 官方 `MiniMax H3 Reference to Video` 行为。
 

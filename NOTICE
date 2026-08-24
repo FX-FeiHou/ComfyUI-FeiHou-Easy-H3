@@ -22,6 +22,19 @@ That project is published under the GNU General Public License, version 3.
 Because this repository contains adapted portions of that project, this
 repository as a whole is distributed under GNU GPL v3; see LICENSE.
 
+The optional "Complete low-VRAM streamed blocks" implementation is derived
+from:
+  ComfyUI-MAINodes / vram_lab.py
+  https://github.com/matlowai/ComfyUI-MAINodes
+  Copyright (C) 2026 MATLOWAI
+
+That code is retained in
+  third_party/mainodes_h3_streamed_blocks.py
+and is distributed under GNU GPL-3.0-or-later. Its full license text is kept
+in LICENSES/GPL-3.0-or-later-ComfyUI-MAINodes.txt. Easy H3 changes only its
+integration, workflow controls, and documentation; the vendored module keeps
+its source attribution and GPL SPDX identifier.
+
 This repository does not claim authorship of the upstream project's original
 implementation, including its MiniMax H3 workflow design, media/reference
 editor concepts, or other upstream code retained here. Changes made by FeiHou
