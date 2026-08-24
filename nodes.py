@@ -2872,7 +2872,9 @@ class FeiHouEasyH3:
     def generate(cls, h3_bundle, mode, prompt, resolution, aspect_ratio, width, height, seconds, advanced, fps, keyframe_role, ref_image_size, reference_mention_mode, prompt_optimizer_enabled=False, prompt_optimizer_provider="", prompt_optimizer_scene_guide="none", force_offload=False, low_vram_streamed_attention=False, prompt_optimizer_applied=False, **kwargs):
         if not isinstance(h3_bundle, MiniMaxH3Bundle):
             raise ValueError("Connect a FeiHou Easy H3 Loader bundle")
-        h3_bundle.force_offload_enabled = _as_bool(force_offload)
+        # ``advanced`` may itself come from an external input. Keep the backend
+        # as the source of truth for this UI-only visibility gate.
+        h3_bundle.force_offload_enabled = _as_bool(advanced) and _as_bool(force_offload)
         if h3_bundle.force_offload_enabled:
             h3_bundle.release_residual_second_sampling_model()
         second_sampling_connected = _as_bool(kwargs.get("second_sampling_output_connected", False))

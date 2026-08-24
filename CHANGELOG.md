@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.3.11
+
+- Fixes native ComfyUI external-input support for the embedded Easy H3 UI. Connected widgets now preserve their graph links instead of being overwritten by panel defaults during workflow serialization.
+- The fix covers duration, resolution, aspect ratio, width/height, FPS, advanced settings, force offload, reference options, and prompt-optimizer controls. Embedded image/video/audio uploads and ordering are unchanged.
+
 ## v1.3.10
 
 - Adds **FeiHou Easy H3 Remix Loader**: FL2VA and REF2VA share one Remix transformer, while first-pass and second-pass LoRA stacks remain independent. The optional second-pass model selector now uses **None** to keep the normal model path.
