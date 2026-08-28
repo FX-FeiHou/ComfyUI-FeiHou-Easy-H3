@@ -69,7 +69,7 @@
           "last": "尾帧优先"
         }
       },
-      "ref_image_size": { "name": "参考图尺寸（短边）" },
+      "ref_image_size": { "name": "参考图尺寸（短边）", "options": { "match": "匹配生成分辨率" } },
       "reference_mention_mode": {
         "name": "@引用方式",
         "options": {

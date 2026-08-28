@@ -69,7 +69,7 @@
           "last": "Last frame priority"
         }
       },
-      "ref_image_size": { "name": "Reference image size (short edge)" },
+      "ref_image_size": { "name": "Reference image size (short edge)", "options": { "match": "Match generation size" } },
       "reference_mention_mode": {
         "name": "@ reference mode",
         "options": {
