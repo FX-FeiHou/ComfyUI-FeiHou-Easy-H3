@@ -5064,7 +5064,17 @@ function repairConfiguredWidgetValues(node, info) {
         prompt_optimizer_provider: "",
         prompt_optimizer_scene_guide: "none",
     };
-    const names = Object.keys(defaults);
+    // This sequence is the backend INPUT_TYPES order and must also be the
+    // serialized widgets_values order.  Do not derive it from `defaults`:
+    // force-offload/low-VRAM are intentionally grouped in the defaults above
+    // but live after the prompt-optimizer fields in the node definition.
+    const names = [
+        "mode", "prompt", "resolution", "aspect_ratio", "width", "height",
+        "audio_duration_auto", "seconds", "advanced", "fps", "keyframe_role",
+        "ref_image_size", "reference_mention_mode", "prompt_optimizer_enabled",
+        "prompt_optimizer_provider", "prompt_optimizer_scene_guide",
+        "force_offload", "low_vram_streamed_attention",
+    ];
     const values = raw;
     // Embedded gallery and rich prompt editor DOM widgets serialize null
     // placeholders. Remove the gallery placeholder before applying the older
@@ -5086,7 +5096,7 @@ function repairConfiguredWidgetValues(node, info) {
     // Versions that exposed the API-settings toggle serialized two extra rows
     // before FPS: [settings boolean, prompt scheme]. Remove only the obsolete
     // API row and move the prompt scheme to its new, final widget position.
-    if (typeof values[8] === "boolean" && values.length >= 14) {
+    if (typeof values[8] === "boolean" && typeof values[9] === "string" && values.length >= 14) {
         const legacyPromptGuide = values[9];
         values.splice(8, 2);
         values[12] = legacyPromptGuide;
@@ -5098,6 +5108,22 @@ function repairConfiguredWidgetValues(node, info) {
     // workflows have a numeric Seconds value in slot 6, so insert the safe
     // disabled default only when that slot is not already the new boolean.
     if (typeof values[6] !== "boolean") values.splice(6, 0, false);
+
+    // v1.4.0 briefly wrote the final nine values in defaults-object order:
+    // force offload, low VRAM, FPS, keyframe, reference size, mention mode,
+    // optimizer switch, provider, guide. Restore that malformed sequence once
+    // before reading it with the real backend INPUT_TYPES order.
+    const malformedV140Order = typeof values[9] === "boolean"
+        && typeof values[10] === "boolean"
+        && Number.isFinite(Number(values[11]))
+        && [KEYFRAME_FIRST, KEYFRAME_LAST].includes(canonicalOption("keyframe_role", values[12]));
+    if (malformedV140Order) {
+        const malformed = values.slice(9, 18);
+        values.splice(9, 9,
+            malformed[2], malformed[3], malformed[4], malformed[5], malformed[6],
+            malformed[7], malformed[8], malformed[0], malformed[1],
+        );
+    }
 
     const normalized = {
         mode: Object.prototype.hasOwnProperty.call(OPTION_DEFS.mode, canonicalOption("mode", values[0]))
