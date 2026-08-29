@@ -117,6 +117,7 @@ const TEXT = {
     aspectRatio: ZH_BROWSER ? "\u5bbd\u9ad8\u6bd4" : "Aspect ratio",
     width: ZH_BROWSER ? "\u5bbd\u5ea6" : "Width",
     height: ZH_BROWSER ? "\u9ad8\u5ea6" : "Height",
+    audioDurationAuto: ZH_BROWSER ? "\u6570\u5b57\u4eba/MV \u81ea\u52a8\u65f6\u957f" : "Digital human/MV auto duration",
     seconds: ZH_BROWSER ? "\u79d2\u6570" : "Seconds",
     advanced: ZH_BROWSER ? "\u9ad8\u7ea7\u9009\u9879" : "Advanced options",
     forceOffload: ZH_BROWSER ? "\u5f3a\u5236\u5378\u8f7d\uff08\u542b\u91c7\u6837\u540e\u7f13\u5b58\u56de\u6536\uff09" : "Force offload (with post-sampling cache release)",
@@ -474,7 +475,7 @@ function localizeNodeInstance(node) {
     }
     if (!isTarget(node)) return;
     node.title = TEXT.mainTitle;
-    const labels = { mode: TEXT.mode, prompt: TEXT.prompt, resolution: TEXT.resolution, aspect_ratio: TEXT.aspectRatio, width: TEXT.width, height: TEXT.height, seconds: TEXT.seconds, advanced: TEXT.advanced, force_offload: TEXT.forceOffload, low_vram_streamed_attention: TEXT.lowVramStreamedAttention, prompt_optimizer_enabled: TEXT.promptOptimizerEnabled, prompt_optimizer_provider: TEXT.promptOptimizerProvider, prompt_optimizer_scene_guide: TEXT.promptOptimizerSceneGuide, fps: TEXT.fps, keyframe_role: TEXT.keyframeRole, ref_image_size: TEXT.refImageSize, reference_mention_mode: TEXT.referenceMentionMode };
+    const labels = { mode: TEXT.mode, prompt: TEXT.prompt, resolution: TEXT.resolution, aspect_ratio: TEXT.aspectRatio, width: TEXT.width, height: TEXT.height, audio_duration_auto: TEXT.audioDurationAuto, seconds: TEXT.seconds, advanced: TEXT.advanced, force_offload: TEXT.forceOffload, low_vram_streamed_attention: TEXT.lowVramStreamedAttention, prompt_optimizer_enabled: TEXT.promptOptimizerEnabled, prompt_optimizer_provider: TEXT.promptOptimizerProvider, prompt_optimizer_scene_guide: TEXT.promptOptimizerSceneGuide, fps: TEXT.fps, keyframe_role: TEXT.keyframeRole, ref_image_size: TEXT.refImageSize, reference_mention_mode: TEXT.referenceMentionMode };
     for (const widget of node.widgets || []) {
         if (labels[widget.name]) widget.label = labels[widget.name];
         localizeComboWidget(widget);
@@ -592,7 +593,7 @@ function parseAudioTrimPart(value) {
         seconds = values.length === 3
             ? values[0] * 60 + values[1] + fraction
             : values[0] * 3600 + values[1] * 60 + values[2] + fraction;
-        seconds = Math.ceil(seconds * 10 - 1e-9) / 10;
+        seconds = Math.round(seconds * 10 + 1e-9) / 10;
     }
     return { seconds, valid: true };
 }
@@ -711,6 +712,7 @@ function setEmbeddedMedia(node, mediaType, ordinal, value) {
     }
     node.properties[EMBEDDED_MEDIA_PROP] = next;
     ensureEmbeddedMedia(node);
+    syncAudioDurationAuto(node);
     renderEmbeddedMediaGallery(node);
     renderEditorFromNode(node);
     requestMentionPreviewRefresh();
@@ -736,6 +738,7 @@ function setEmbeddedAudioTrim(node, ordinal, value) {
     if (index < 0) return normalized;
     records[index] = { ...records[index], audio_trim: normalized };
     node.properties[EMBEDDED_MEDIA_PROP] = records;
+    syncAudioDurationAuto(node);
     node.setDirtyCanvas?.(true, true);
     app.graph?.change?.();
     return normalized;
@@ -3591,6 +3594,7 @@ function syncModeWidgets(node, { adjustHeight = true } = {}) {
     const advanced = isAdvancedEnabled(node);
     const optimizerEnabled = advanced && asBoolean(getWidgetValue(node, "prompt_optimizer_enabled", false));
     const changed = [
+        syncAudioDurationAuto(node),
         setConditionalWidgetVisible(node, getWidget(node, "fps"), advanced, { adjustHeight }),
         setConditionalWidgetVisible(node, getWidget(node, "keyframe_role"), advanced && !isReferenceMode(node), { adjustHeight }),
         setConditionalWidgetVisible(node, getWidget(node, "ref_image_size"), advanced, { adjustHeight }),
@@ -3611,6 +3615,38 @@ function syncModeWidgets(node, { adjustHeight = true } = {}) {
         app.graph?.setDirtyCanvas?.(true, true);
     }
     return changed;
+}
+
+function syncAudioDurationAuto(node) {
+    const secondsWidget = getWidget(node, "seconds");
+    if (!secondsWidget) return false;
+    const enabled = asBoolean(getWidgetValue(node, "audio_duration_auto", false));
+    const wasDisabled = Boolean(secondsWidget.__h3AudioDurationAutoDisabled);
+    secondsWidget.__h3AudioDurationAutoDisabled = enabled;
+    secondsWidget.disabled = enabled;
+    setWidgetOption(secondsWidget, "disabled", enabled);
+    if (secondsWidget.inputEl) secondsWidget.inputEl.disabled = enabled;
+    if (secondsWidget.element instanceof HTMLInputElement) secondsWidget.element.disabled = enabled;
+    if (secondsWidget._state) {
+        secondsWidget._state.disabled = enabled;
+        secondsWidget._state.options ||= {};
+        secondsWidget._state.options.disabled = enabled;
+    }
+    let valueChanged = false;
+    if (enabled) {
+        const [startRaw, endRaw] = normalizeAudioTrimRange(audioTrimForSlot(node, 1)).split("-", 2);
+        const start = parseAudioTrimPart(startRaw);
+        const end = parseAudioTrimPart(endRaw);
+        if (start.valid && end.valid && end.seconds > start.seconds) {
+            const next = Math.min(MAX_SECONDS, Math.max(MIN_SECONDS, end.seconds - start.seconds));
+            if (Math.abs(Number(secondsWidget.value) - next) > 1e-6) {
+                secondsWidget.value = next;
+                if (secondsWidget._state) secondsWidget._state.value = next;
+                valueChanged = true;
+            }
+        }
+    }
+    return wasDisabled !== enabled || valueChanged;
 }
 
 function syncLoaderWidgets(node, { adjustHeight = true } = {}) {
@@ -5015,6 +5051,7 @@ function repairConfiguredWidgetValues(node, info) {
         aspect_ratio: "16:9",
         width: 1344,
         height: 768,
+        audio_duration_auto: false,
         seconds: 10,
         advanced: false,
         force_offload: false,
@@ -5057,6 +5094,10 @@ function repairConfiguredWidgetValues(node, info) {
     // Earlier workflows did not have an explicit enable switch.  Add it ahead
     // of the selected API/model and keep optimization safely disabled.
     if (values.length <= 14) values.splice(12, 0, false);
+    // v1.4 adds an always-visible toggle immediately above Seconds. Old
+    // workflows have a numeric Seconds value in slot 6, so insert the safe
+    // disabled default only when that slot is not already the new boolean.
+    if (typeof values[6] !== "boolean") values.splice(6, 0, false);
 
     const normalized = {
         mode: Object.prototype.hasOwnProperty.call(OPTION_DEFS.mode, canonicalOption("mode", values[0]))
@@ -5068,22 +5109,23 @@ function repairConfiguredWidgetValues(node, info) {
             ? canonicalOption("aspect_ratio", values[3]) : defaults.aspect_ratio,
         width: Number.isFinite(Number(values[4])) ? Number(values[4]) : defaults.width,
         height: Number.isFinite(Number(values[5])) ? Number(values[5]) : defaults.height,
-        seconds: Number.isFinite(Number(values[6]))
-            ? Math.min(MAX_SECONDS, Math.max(MIN_SECONDS, Number(values[6])))
+        audio_duration_auto: asBoolean(values[6], defaults.audio_duration_auto),
+        seconds: Number.isFinite(Number(values[7]))
+            ? Math.min(MAX_SECONDS, Math.max(MIN_SECONDS, Number(values[7])))
             : defaults.seconds,
-        advanced: asBoolean(values[7], defaults.advanced),
-        force_offload: asBoolean(values[15], defaults.force_offload),
-        low_vram_streamed_attention: asBoolean(values[16], defaults.low_vram_streamed_attention),
-        fps: Number.isFinite(Number(values[8])) ? Number(values[8]) : defaults.fps,
-        keyframe_role: Object.prototype.hasOwnProperty.call(OPTION_DEFS.keyframe_role, canonicalOption("keyframe_role", values[9]))
-            ? canonicalOption("keyframe_role", values[9]) : defaults.keyframe_role,
-        ref_image_size: Object.prototype.hasOwnProperty.call(OPTION_DEFS.ref_image_size, canonicalOption("ref_image_size", values[10]))
-            ? canonicalOption("ref_image_size", values[10]) : defaults.ref_image_size,
-        reference_mention_mode: Object.prototype.hasOwnProperty.call(OPTION_DEFS.reference_mention_mode, canonicalOption("reference_mention_mode", values[11]))
-            ? canonicalOption("reference_mention_mode", values[11]) : defaults.reference_mention_mode,
-        prompt_optimizer_enabled: asBoolean(values[12], defaults.prompt_optimizer_enabled),
-        prompt_optimizer_provider: canonicalPromptProvider(values[13] ?? defaults.prompt_optimizer_provider),
-        prompt_optimizer_scene_guide: canonicalPromptGuide(values[14] ?? defaults.prompt_optimizer_scene_guide),
+        advanced: asBoolean(values[8], defaults.advanced),
+        force_offload: asBoolean(values[16], defaults.force_offload),
+        low_vram_streamed_attention: asBoolean(values[17], defaults.low_vram_streamed_attention),
+        fps: Number.isFinite(Number(values[9])) ? Number(values[9]) : defaults.fps,
+        keyframe_role: Object.prototype.hasOwnProperty.call(OPTION_DEFS.keyframe_role, canonicalOption("keyframe_role", values[10]))
+            ? canonicalOption("keyframe_role", values[10]) : defaults.keyframe_role,
+        ref_image_size: Object.prototype.hasOwnProperty.call(OPTION_DEFS.ref_image_size, canonicalOption("ref_image_size", values[11]))
+            ? canonicalOption("ref_image_size", values[11]) : defaults.ref_image_size,
+        reference_mention_mode: Object.prototype.hasOwnProperty.call(OPTION_DEFS.reference_mention_mode, canonicalOption("reference_mention_mode", values[12]))
+            ? canonicalOption("reference_mention_mode", values[12]) : defaults.reference_mention_mode,
+        prompt_optimizer_enabled: asBoolean(values[13], defaults.prompt_optimizer_enabled),
+        prompt_optimizer_provider: canonicalPromptProvider(values[14] ?? defaults.prompt_optimizer_provider),
+        prompt_optimizer_scene_guide: canonicalPromptGuide(values[15] ?? defaults.prompt_optimizer_scene_guide),
     };
     for (const name of names) setConfiguredWidgetValue(node, name, normalized[name]);
     info.widgets_values = names.map((name) => normalized[name]);
@@ -5222,40 +5264,22 @@ function createEmbeddedAudioTrimControls(node) {
     wrap.className = "fh-h3-audio-trim-grid";
     wrap.title = TEXT.audioTrim;
     for (let ordinal = 1; ordinal <= EMBEDDED_MEDIA_LIMITS.audio; ordinal += 1) {
-        const pair = document.createElement("div");
-        pair.className = "fh-h3-audio-trim-pair";
-        pair.dataset.audioTrimOrdinal = String(ordinal);
-        const parts = audioTrimParts(audioTrimForSlot(node, ordinal));
-        for (const side of ["start", "end"]) {
-            const input = document.createElement("input");
-            input.type = "text";
-            input.className = "fh-h3-audio-trim-input";
-            input.dataset.audioTrimSide = side;
-            input.placeholder = TEXT.audioTrimPlaceholder;
-            input.value = parts[side];
-            input.setAttribute("aria-label", `${TEXT.audioTrim} ${ordinal} ${side}`);
-            input.addEventListener("pointerdown", (event) => event.stopPropagation());
-            input.addEventListener("keydown", (event) => event.stopPropagation());
-            const commit = () => {
-                const start = pair.querySelector('[data-audio-trim-side="start"]')?.value || "00:00:000";
-                const end = pair.querySelector('[data-audio-trim-side="end"]')?.value || "00:00:000";
-                const normalized = setEmbeddedAudioTrim(node, ordinal, `${start}-${end}`);
-                const corrected = audioTrimParts(normalized);
-                pair.querySelector('[data-audio-trim-side="start"]').value = corrected.start;
-                pair.querySelector('[data-audio-trim-side="end"]').value = corrected.end;
-            };
-            input.addEventListener("change", commit);
-            input.addEventListener("blur", commit);
-            pair.append(input);
-            if (side === "start") {
-                const dash = document.createElement("span");
-                dash.className = "fh-h3-audio-trim-dash";
-                dash.textContent = "-";
-                dash.setAttribute("aria-hidden", "true");
-                pair.append(dash);
-            }
-        }
-        wrap.append(pair);
+        const input = document.createElement("input");
+        input.type = "text";
+        input.className = "fh-h3-audio-trim-input";
+        input.dataset.audioTrimOrdinal = String(ordinal);
+        input.placeholder = `${TEXT.audioTrimPlaceholder}-${TEXT.audioTrimPlaceholder}`;
+        input.value = audioTrimForSlot(node, ordinal);
+        input.setAttribute("aria-label", `${TEXT.audioTrim} ${ordinal}`);
+        input.title = TEXT.audioTrim;
+        input.addEventListener("pointerdown", (event) => event.stopPropagation());
+        input.addEventListener("keydown", (event) => event.stopPropagation());
+        const commit = () => {
+            input.value = setEmbeddedAudioTrim(node, ordinal, input.value);
+        };
+        input.addEventListener("change", commit);
+        input.addEventListener("blur", commit);
+        wrap.append(input);
     }
     return wrap;
 }
@@ -5405,14 +5429,11 @@ function renderEmbeddedMediaGallery(node) {
         }
     }
     for (let ordinal = 1; ordinal <= EMBEDDED_MEDIA_LIMITS.audio; ordinal += 1) {
-        const pair = gallery.querySelector(`.fh-h3-audio-trim-pair[data-audio-trim-ordinal="${ordinal}"]`);
-        if (!pair) continue;
+        const input = gallery.querySelector(`.fh-h3-audio-trim-input[data-audio-trim-ordinal="${ordinal}"]`);
+        if (!input) continue;
         const record = records.find((item) => item.media_type === "audio" && item.ordinal === ordinal);
-        const parts = audioTrimParts(record?.audio_trim || AUDIO_TRIM_DEFAULT);
-        for (const input of pair.querySelectorAll(".fh-h3-audio-trim-input")) {
-            input.disabled = !reference || !record;
-            input.value = input.dataset.audioTrimSide === "start" ? parts.start : parts.end;
-        }
+        input.disabled = !reference || !record;
+        input.value = normalizeAudioTrimRange(record?.audio_trim || AUDIO_TRIM_DEFAULT);
     }
     syncEmbeddedMediaResponsiveLayout(node);
     node._widgetSlotsDirty = true;
@@ -5531,6 +5552,17 @@ function setupMainNodeFrontend(node) {
             syncPromptOptimizerButton(node);
             repairNodeLayout(node);
             node.setDirtyCanvas?.(true, true);
+        };
+    }
+    const autoDurationWidget = getWidget(node, "audio_duration_auto");
+    if (autoDurationWidget && !autoDurationWidget.__h3AudioDurationCallbackBound) {
+        autoDurationWidget.__h3AudioDurationCallbackBound = true;
+        const originalCallback = autoDurationWidget.callback;
+        autoDurationWidget.callback = (value) => {
+            originalCallback?.call(autoDurationWidget, value);
+            syncAudioDurationAuto(node);
+            node.setDirtyCanvas?.(true, true);
+            app.graph?.change?.();
         };
     }
     const referenceMentionWidget = getWidget(node, "reference_mention_mode");
@@ -5846,7 +5878,6 @@ function install() {
       .fh-h3-media-grid.is-video .fh-h3-media-slot { height: var(--fh-h3-video-slot-height); }
       .fh-h3-media-grid.is-audio .fh-h3-media-slot { height: 54px; }
       .fh-h3-audio-trim-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; min-width: 0; }
-      .fh-h3-audio-trim-pair { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 3px; min-width: 0; }
       .fh-h3-audio-trim-input {
         display: block; width: 100%; min-width: 0; height: 24px; box-sizing: border-box; padding: 1px 5px;
         border: 1px solid var(--h3-native-widget-outline, rgba(255,255,255,.18)); border-radius: 4px;
@@ -5855,7 +5886,6 @@ function install() {
       }
       .fh-h3-audio-trim-input:focus { border-color: var(--h3-native-widget-focus, rgba(79,150,255,.9)); }
       .fh-h3-audio-trim-input:disabled { opacity: .42; cursor: not-allowed; }
-      .fh-h3-audio-trim-dash { color: var(--h3-native-widget-muted, rgba(255,255,255,.52)); font: 700 11px/1 Consolas, "Courier New", monospace; user-select: none; }
       .fh-h3-media-slot:hover, .fh-h3-media-slot:focus-visible, .fh-h3-media-slot.is-dragover {
         border-color: rgba(0,226,187,.64); background: rgba(0,226,187,.075); outline: none;
       }

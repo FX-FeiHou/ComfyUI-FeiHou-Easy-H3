@@ -47,6 +47,7 @@ from comfy_api.latest import InputImpl
 
 MODE_IMAGE = "image"
 MODE_REFERENCE = "reference"
+H3_DURATION_CONTROL_TYPE = "FEIHOU_H3_DURATION_CONTROL"
 KEYFRAME_FIRST = "first"
 KEYFRAME_LAST = "last"
 # ``match`` intentionally mirrors the official MiniMaxH3ReferenceToVideo
@@ -2288,6 +2289,15 @@ class MiniMaxH3Context:
     fps: float
     prompt_preview: str
     audio_1: Any = None
+    duration_control: Any = None
+
+
+@dataclass(frozen=True)
+class H3DurationControl:
+    """Carries the exact Audio 1 duration from Easy H3 to the output cutter."""
+
+    enabled: bool = False
+    target_seconds: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -2630,10 +2640,10 @@ def _audio_trim_seconds(value: Any) -> float:
     if len(values) == 3:
         minutes, seconds, milliseconds = values
         fraction = milliseconds * (10 ** (3 - min(3, len(parts[2])))) / 1000.0
-        return math.ceil((minutes * 60 + seconds + fraction) * 10 - 1e-9) / 10.0
+        return math.floor((minutes * 60 + seconds + fraction) * 10 + 0.5 + 1e-9) / 10.0
     hours, minutes, seconds, milliseconds = values
     fraction = milliseconds * (10 ** (3 - min(3, len(parts[3])))) / 1000.0
-    return math.ceil((hours * 3600 + minutes * 60 + seconds + fraction) * 10 - 1e-9) / 10.0
+    return math.floor((hours * 3600 + minutes * 60 + seconds + fraction) * 10 + 0.5 + 1e-9) / 10.0
 
 
 def _audio_trim_range(value: Any) -> tuple[float, float]:
@@ -2674,6 +2684,23 @@ def _trim_reference_audio(audio: Mapping, trim_range: Any) -> Mapping:
     trimmed = dict(audio)
     trimmed["waveform"] = waveform[..., start_sample:end_sample]
     return trimmed
+
+
+def _reference_audio_duration(items: list[_MediaInput]) -> float:
+    """Return the trimmed duration of Audio 1 for digital-human/MV timing."""
+    for item in items:
+        if item.media_type != "audio":
+            continue
+        if not isinstance(item.value, Mapping) or "waveform" not in item.value:
+            raise ValueError("数字人/MV 自动时长需要有效的 AUDIO 参考音频")
+        trimmed = _trim_reference_audio(item.value, item.audio_trim)
+        waveform = trimmed.get("waveform")
+        sample_rate = float(trimmed.get("sample_rate") or 0)
+        total_samples = int(waveform.shape[-1]) if waveform is not None and getattr(waveform, "ndim", 0) else 0
+        if sample_rate <= 0 or total_samples <= 0:
+            raise ValueError("数字人/MV 自动时长无法读取 Audio 1 的有效时长")
+        return total_samples / sample_rate
+    raise ValueError("数字人/MV 自动时长已开启，但未加载 Audio 1 参考音频")
 
 
 def _first_reference_audio(items: list[_MediaInput]) -> Any:
@@ -2727,9 +2754,10 @@ def _canvas_dimensions(resolution: str, aspect_ratio: str, custom_width: int, cu
     return _align_canvas_dimension(ratio_w * scale), _align_canvas_dimension(ratio_h * scale)
 
 
-def _frame_length(seconds: float, fps: float) -> int:
+def _frame_length(seconds: float, fps: float, round_up: bool = False) -> int:
     target_frames = max(5.0, float(seconds) * float(fps))
-    block_count = max(0, round((target_frames - 5) / 17))
+    blocks = (target_frames - 5) / 17
+    block_count = max(0, math.ceil(blocks) if round_up else round(blocks))
     return block_count * 17 + 5
 
 
@@ -2902,6 +2930,7 @@ class FeiHouEasyH3:
                 "aspect_ratio": (list(ASPECT_RATIOS), {"default": ASPECT_WIDESCREEN}),
                 "width": ("INT", {"default": 1344, "min": 32, "max": nodes.MAX_RESOLUTION, "step": 32}),
                 "height": ("INT", {"default": 768, "min": 32, "max": nodes.MAX_RESOLUTION, "step": 32}),
+                "audio_duration_auto": ("BOOLEAN", {"default": False}),
                 "seconds": ("FLOAT", {"default": 10.0, "min": MIN_SECONDS, "max": MAX_SECONDS, "step": 0.1}),
                 "advanced": ("BOOLEAN", {"default": False}),
                 "fps": ("FLOAT", {"default": 24.0, "min": 1.0, "max": 120.0, "step": 1.0}),
@@ -2965,7 +2994,7 @@ class FeiHouEasyH3:
         return images[0], images[1]
 
     @classmethod
-    def generate(cls, h3_bundle, mode, prompt, resolution, aspect_ratio, width, height, seconds, advanced, fps, keyframe_role, ref_image_size, reference_mention_mode, prompt_optimizer_enabled=False, prompt_optimizer_provider="", prompt_optimizer_scene_guide="none", force_offload=False, low_vram_streamed_attention=False, prompt_optimizer_applied=False, **kwargs):
+    def generate(cls, h3_bundle, mode, prompt, resolution, aspect_ratio, width, height, audio_duration_auto, seconds, advanced, fps, keyframe_role, ref_image_size, reference_mention_mode, prompt_optimizer_enabled=False, prompt_optimizer_provider="", prompt_optimizer_scene_guide="none", force_offload=False, low_vram_streamed_attention=False, prompt_optimizer_applied=False, **kwargs):
         if not isinstance(h3_bundle, MiniMaxH3Bundle):
             raise ValueError("Connect a FeiHou Easy H3 Loader bundle")
         # ``advanced`` may itself come from an external input. Keep the backend
@@ -2977,8 +3006,17 @@ class FeiHouEasyH3:
         mode = str(mode)
         keyframe_role = KEYFRAME_LAST if str(keyframe_role) == KEYFRAME_LAST else KEYFRAME_FIRST
         width, height = _canvas_dimensions(resolution, aspect_ratio, width, height)
+        items = cls._collect_media(kwargs)
+        audio_duration_enabled = _as_bool(audio_duration_auto)
+        requested_audio_seconds = 0.0
+        if audio_duration_enabled:
+            requested_audio_seconds = _reference_audio_duration(items)
+            seconds = requested_audio_seconds
         seconds = min(MAX_SECONDS, max(MIN_SECONDS, float(seconds)))
-        length = _frame_length(seconds, fps)
+        # MiniMax H3 accepts only 5 + 17N frames.  Automatic audio timing
+        # rounds upward so the output cutter can later restore the exact audio
+        # duration instead of producing a video shorter than its soundtrack.
+        length = _frame_length(seconds, fps, round_up=audio_duration_enabled)
         optimizer_enabled = _as_bool(advanced) and _as_bool(prompt_optimizer_enabled)
         optimizer_already_applied = prompt_optimizer_applied is True or str(prompt_optimizer_applied).strip().lower() in {"1", "true", "yes", "on"}
         if optimizer_enabled and not optimizer_already_applied:
@@ -2995,7 +3033,6 @@ class FeiHouEasyH3:
                 )
             except Exception as exc:
                 raise RuntimeError(f"Easy H3 提示词扩写/反推失败: {exc}") from exc
-        items = cls._collect_media(kwargs)
         second_sampling_model = None
         second_sampling_requested = h3_bundle.second_sampling_enabled and second_sampling_connected
         second_kind = "ref2va" if mode == MODE_REFERENCE else "fl2va"
@@ -3061,6 +3098,10 @@ class FeiHouEasyH3:
             fps=float(fps),
             prompt_preview=prompt_preview,
             audio_1=_first_reference_audio(items),
+            duration_control=H3DurationControl(
+                enabled=audio_duration_enabled,
+                target_seconds=requested_audio_seconds,
+            ),
         )
         if h3_bundle.force_offload_enabled:
             _release_auxiliary_models_for_sampling(h3_bundle, phase="first-pass sampling")
@@ -3077,8 +3118,8 @@ class FeiHouEasyH3Output:
     CATEGORY = "FeiHou Easy H3"
     FUNCTION = "unpack"
     # Append new outputs so existing saved workflow links retain their slots.
-    RETURN_TYPES = ("CONDITIONING", "LATENT", "VAE", "VAE", "FLOAT", "STRING", "CLIP", "AUDIO")
-    RETURN_NAMES = ("positive", "latent", "video_vae", "audio_vae", "fps", "prompt_preview", "clip", "audio_1")
+    RETURN_TYPES = ("CONDITIONING", "LATENT", "VAE", "VAE", "FLOAT", "STRING", "CLIP", "AUDIO", H3_DURATION_CONTROL_TYPE)
+    RETURN_NAMES = ("positive", "latent", "video_vae", "audio_vae", "fps", "prompt_preview", "clip", "audio_1", "duration_control")
     DESCRIPTION = "Unpack the non-model outputs from a FeiHou Easy H3 context."
 
     @classmethod
@@ -3102,7 +3143,55 @@ class FeiHouEasyH3Output:
             h3_context.prompt_preview,
             h3_context.clip,
             h3_context.audio_1,
+            getattr(h3_context, "duration_control", H3DurationControl()),
         )
+
+
+class FeiHouEasyH3DurationCrop:
+    """Restore the exact Audio 1 duration after H3's required frame alignment.
+
+    The control payload is disabled in ordinary workflows, so this node becomes
+    a pure pass-through unless Digital human/MV auto duration is enabled.
+    """
+
+    CATEGORY = "FeiHou Easy H3"
+    FUNCTION = "crop"
+    RETURN_TYPES = ("IMAGE", "FLOAT", "AUDIO")
+    RETURN_NAMES = ("images", "fps", "audio")
+    DESCRIPTION = "Uses the Easy H3 duration-control output to restore the exact Audio 1 duration. Disabled control passes media through unchanged."
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "images": ("IMAGE",),
+                "fps": ("FLOAT", {"default": 24.0, "min": 1.0, "max": 120.0, "step": 0.001}),
+                "duration_control": (H3_DURATION_CONTROL_TYPE,),
+            },
+            "optional": {
+                "audio": ("AUDIO",),
+            },
+        }
+
+    @staticmethod
+    def crop(images, fps, duration_control, audio=None):
+        enabled = bool(getattr(duration_control, "enabled", False))
+        target_seconds = float(getattr(duration_control, "target_seconds", 0.0) or 0.0)
+        source_fps = max(0.001, float(fps))
+        if not enabled or target_seconds <= 0.0 or not isinstance(images, torch.Tensor) or images.ndim < 1:
+            return images, source_fps, audio
+
+        source_frames = int(images.shape[0])
+        if source_frames <= 0:
+            return images, source_fps, audio
+        target_frames = max(1, int(round(target_seconds * source_fps)))
+        if target_frames != source_frames:
+            # Uniformly retain/duplicate frames so both first and last frame
+            # survive.  Recomputing FPS then makes the container duration exact.
+            positions = torch.linspace(0, source_frames - 1, target_frames, device=images.device)
+            frame_indices = positions.round().to(dtype=torch.long)
+            images = images.index_select(0, frame_indices)
+        return images, float(target_frames / target_seconds), audio
 
 
 class FeiHouEasyH3PromptPreview:
@@ -3132,5 +3221,6 @@ NODE_CLASS_MAPPINGS = {
     "FeiHouEasyH3ModelAdapter": FeiHouEasyH3ModelAdapter,
     "FeiHouEasyH3": FeiHouEasyH3,
     "FeiHouEasyH3Output": FeiHouEasyH3Output,
+    "FeiHouEasyH3DurationCrop": FeiHouEasyH3DurationCrop,
     "FeiHouEasyH3PromptPreview": FeiHouEasyH3PromptPreview,
 }
