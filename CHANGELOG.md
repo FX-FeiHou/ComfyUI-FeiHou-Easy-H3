@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.4.1
+
+- Adds a play/stop control beside each reference-audio trim range. Preview playback starts at the normalized trim start, stops at the trim end, and never changes the source file or the audio sent to H3.
+
 ## v1.4.0
 
 - Adds **Digital human/MV auto duration**. When enabled, Audio 1's trimmed duration controls generation and locks the manual duration field.

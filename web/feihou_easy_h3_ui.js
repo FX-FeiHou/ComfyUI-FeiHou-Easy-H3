@@ -166,6 +166,9 @@ const TEXT = {
     embeddedAudios: ZH_BROWSER ? "\u53c2\u8003\u97f3\u9891 \u00b7 3" : "Reference audio \u00b7 3",
     audioTrim: ZH_BROWSER ? "\u65f6\u95f4\u622a\u53d6" : "Trim range",
     audioTrimPlaceholder: "00:00:000",
+    audioPreviewPlay: ZH_BROWSER ? "\u64ad\u653e\u5f53\u524d\u88c1\u526a\u97f3\u9891" : "Play trimmed audio",
+    audioPreviewStop: ZH_BROWSER ? "\u505c\u6b62\u64ad\u653e" : "Stop playback",
+    audioPreviewMissing: ZH_BROWSER ? "\u8bf7\u5148\u4e0a\u4f20\u5bf9\u5e94\u7684\u53c2\u8003\u97f3\u9891" : "Upload the reference audio first",
     embeddedPick: ZH_BROWSER ? "\u70b9\u51fb\u6216\u62d6\u5165\u6587\u4ef6" : "Click or drop a file",
     embeddedReorder: ZH_BROWSER ? "\u6309\u4f4f\u5e76\u62d6\u52a8\u4ee5\u8c03\u6574\u987a\u5e8f" : "Drag to reorder",
     embeddedDisabled: ZH_BROWSER ? "\u56fe\u751f\u89c6\u9891\u6a21\u5f0f\u4ec5\u4f7f\u7528\u524d 2 \u5f20\u56fe" : "Image mode uses the first 2 images",
@@ -5285,11 +5288,90 @@ function createEmbeddedMediaSection(node, mediaType, count, title) {
     return section;
 }
 
+function stopEmbeddedAudioPreview(node) {
+    const state = node?.__h3AudioTrimPlayback;
+    if (!state) return;
+    node.__h3AudioTrimPlayback = null;
+    try {
+        state.audio?.pause?.();
+        state.audio?.removeAttribute?.("src");
+        state.audio?.load?.();
+    } catch {
+        // A preview is best-effort; a stale browser audio element is safe.
+    }
+    if (state.button?.isConnected) {
+        state.button.textContent = "▶";
+        state.button.title = TEXT.audioPreviewPlay;
+        state.button.setAttribute("aria-label", TEXT.audioPreviewPlay);
+    }
+}
+
+function playEmbeddedAudioTrim(node, ordinal, button) {
+    const active = node?.__h3AudioTrimPlayback;
+    if (active?.ordinal === ordinal) {
+        stopEmbeddedAudioPreview(node);
+        return;
+    }
+    stopEmbeddedAudioPreview(node);
+    const record = ensureEmbeddedMedia(node).find((item) => item.media_type === "audio" && item.ordinal === ordinal);
+    if (!record) {
+        notifyPromptOptimizer(TEXT.audioPreviewMissing);
+        return;
+    }
+    const [startRaw, endRaw] = normalizeAudioTrimRange(record.audio_trim).split("-", 2);
+    const start = parseAudioTrimPart(startRaw).seconds;
+    const requestedEnd = parseAudioTrimPart(endRaw).seconds;
+    const audio = new Audio(embeddedMediaViewUrl(record));
+    audio.preload = "metadata";
+    const state = { ordinal, audio, button, end: 0 };
+    node.__h3AudioTrimPlayback = state;
+    button.textContent = "■";
+    button.title = TEXT.audioPreviewStop;
+    button.setAttribute("aria-label", TEXT.audioPreviewStop);
+    const finish = () => {
+        if (node?.__h3AudioTrimPlayback === state) stopEmbeddedAudioPreview(node);
+    };
+    audio.addEventListener("loadedmetadata", async () => {
+        if (node?.__h3AudioTrimPlayback !== state) return;
+        const duration = Number(audio.duration);
+        if (!Number.isFinite(duration) || duration <= 0 || start >= duration) {
+            notifyPromptOptimizer(ZH_BROWSER ? "音频时长不可用，或截取起点超出音频范围" : "Audio duration is unavailable or the trim start is out of range");
+            finish();
+            return;
+        }
+        state.end = requestedEnd > start ? Math.min(requestedEnd, duration) : duration;
+        if (state.end <= start) {
+            notifyPromptOptimizer(ZH_BROWSER ? "音频截取范围无效" : "Invalid audio trim range");
+            finish();
+            return;
+        }
+        audio.currentTime = start;
+        try {
+            await audio.play();
+        } catch (error) {
+            notifyPromptOptimizer(error?.message || String(error));
+            finish();
+        }
+    }, { once: true });
+    audio.addEventListener("timeupdate", () => {
+        if (node?.__h3AudioTrimPlayback === state && audio.currentTime >= state.end - 0.01) finish();
+    });
+    audio.addEventListener("ended", finish, { once: true });
+    audio.addEventListener("error", () => {
+        if (node?.__h3AudioTrimPlayback === state) {
+            notifyPromptOptimizer(ZH_BROWSER ? "参考音频试听加载失败" : "Reference audio preview failed to load");
+            finish();
+        }
+    }, { once: true });
+}
+
 function createEmbeddedAudioTrimControls(node) {
     const wrap = document.createElement("div");
     wrap.className = "fh-h3-audio-trim-grid";
     wrap.title = TEXT.audioTrim;
     for (let ordinal = 1; ordinal <= EMBEDDED_MEDIA_LIMITS.audio; ordinal += 1) {
+        const control = document.createElement("div");
+        control.className = "fh-h3-audio-trim-control";
         const input = document.createElement("input");
         input.type = "text";
         input.className = "fh-h3-audio-trim-input";
@@ -5305,7 +5387,21 @@ function createEmbeddedAudioTrimControls(node) {
         };
         input.addEventListener("change", commit);
         input.addEventListener("blur", commit);
-        wrap.append(input);
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "fh-h3-audio-preview-button";
+        button.dataset.audioPreviewOrdinal = String(ordinal);
+        button.textContent = "▶";
+        button.title = TEXT.audioPreviewPlay;
+        button.setAttribute("aria-label", TEXT.audioPreviewPlay);
+        button.addEventListener("pointerdown", (event) => event.stopPropagation());
+        button.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            playEmbeddedAudioTrim(node, ordinal, button);
+        });
+        control.append(input, button);
+        wrap.append(control);
     }
     return wrap;
 }
@@ -5385,6 +5481,14 @@ function renderEmbeddedMediaGallery(node) {
     const gallery = node?.__feihouMediaGallery;
     if (!gallery) return;
     const records = ensureEmbeddedMedia(node);
+    const activePlayback = node.__h3AudioTrimPlayback;
+    if (activePlayback && !records.some((item) => item.media_type === "audio" && item.ordinal === activePlayback.ordinal)) {
+        stopEmbeddedAudioPreview(node);
+    }
+    gallery.querySelectorAll?.(".fh-h3-audio-preview-button").forEach((button) => {
+        const ordinal = Number(button.dataset.audioPreviewOrdinal);
+        button.disabled = !records.some((item) => item.media_type === "audio" && item.ordinal === ordinal);
+    });
     const reference = isReferenceMode(node);
     gallery.dataset.feihouNodeId = String(node.id ?? "");
     gallery.dataset.mediaCount = String(records.length);
@@ -5904,14 +6008,18 @@ function install() {
       .fh-h3-media-grid.is-video .fh-h3-media-slot { height: var(--fh-h3-video-slot-height); }
       .fh-h3-media-grid.is-audio .fh-h3-media-slot { height: 54px; }
       .fh-h3-audio-trim-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; min-width: 0; }
+      .fh-h3-audio-trim-control { display: flex; min-width: 0; gap: 3px; }
       .fh-h3-audio-trim-input {
-        display: block; width: 100%; min-width: 0; height: 24px; box-sizing: border-box; padding: 1px 5px;
+        display: block; width: 100%; min-width: 0; flex: 1 1 auto; height: 24px; box-sizing: border-box; padding: 1px 5px;
         border: 1px solid var(--h3-native-widget-outline, rgba(255,255,255,.18)); border-radius: 4px;
         background: var(--h3-native-widget-bg, rgba(0,0,0,.22)); color: var(--h3-native-widget-text, rgba(255,255,255,.88));
         font: 500 10px/1 Consolas, "Courier New", monospace; outline: none;
       }
       .fh-h3-audio-trim-input:focus { border-color: var(--h3-native-widget-focus, rgba(79,150,255,.9)); }
       .fh-h3-audio-trim-input:disabled { opacity: .42; cursor: not-allowed; }
+      .fh-h3-audio-preview-button { flex: 0 0 24px; width: 24px; height: 24px; padding: 0; border: 1px solid var(--h3-native-widget-outline, rgba(255,255,255,.18)); border-radius: 4px; background: var(--h3-native-widget-bg, rgba(0,0,0,.22)); color: var(--h3-native-widget-text, rgba(255,255,255,.88)); cursor: pointer; font: 700 11px/1 system-ui; }
+      .fh-h3-audio-preview-button:hover:not(:disabled), .fh-h3-audio-preview-button:focus-visible { border-color: rgba(79,150,255,.9); background: rgba(79,150,255,.18); outline: none; }
+      .fh-h3-audio-preview-button:disabled { opacity: .42; cursor: not-allowed; }
       .fh-h3-media-slot:hover, .fh-h3-media-slot:focus-visible, .fh-h3-media-slot.is-dragover {
         border-color: rgba(0,226,187,.64); background: rgba(0,226,187,.075); outline: none;
       }
