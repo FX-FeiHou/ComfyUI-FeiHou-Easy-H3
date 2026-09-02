@@ -1128,7 +1128,7 @@ def _optimizer_available_models(provider: Mapping[str, Any]) -> list[str]:
     api_url = str(provider.get("api_url") or "").strip()
     api_key = str(provider.get("api_key") or "").strip()
     if api_format != "ollama" and not api_key:
-        raise ValueError("请先填写并保存 API Key")
+        raise ValueError("Enter and save an API key first")
 
     url = _optimizer_model_list_url(api_url, api_format)
     headers = {"Accept": "application/json", "Content-Type": "application/json"}
@@ -1141,14 +1141,14 @@ def _optimizer_available_models(provider: Mapping[str, Any]) -> list[str]:
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
         if exc.code == 401:
-            raise RuntimeError("API Key 错误，认证失败") from exc
+            raise RuntimeError("API key authentication failed") from exc
         if exc.code == 404:
-            raise RuntimeError("Base URL 未找到模型列表接口") from exc
-        raise RuntimeError(f"模型列表接口返回 HTTP {exc.code}: {detail[:500]}") from exc
+            raise RuntimeError("The base URL does not provide a model-list endpoint") from exc
+        raise RuntimeError(f"Model-list endpoint returned HTTP {exc.code}: {detail[:500]}") from exc
     except urllib.error.URLError as exc:
-        raise RuntimeError(f"无法连接模型列表接口: {exc.reason}") from exc
+        raise RuntimeError(f"Could not connect to the model-list endpoint: {exc.reason}") from exc
     except TimeoutError as exc:
-        raise RuntimeError("获取模型列表超时") from exc
+        raise RuntimeError("Timed out while retrieving the model list") from exc
 
     raw_models: Any
     if api_format == "ollama":
@@ -1167,7 +1167,7 @@ def _optimizer_available_models(provider: Mapping[str, Any]) -> list[str]:
         if text and text not in names:
             names.append(text[:200])
     if not names:
-        raise RuntimeError("接口未返回任何可用模型")
+        raise RuntimeError("The endpoint returned no usable models")
     return names
 
 
@@ -1364,7 +1364,7 @@ def _optimizer_http_json(
                     _redact_optimizer_log_text(raw_response),
                 )
                 raise RuntimeError(
-                    f"提示词优化接口返回非 JSON 内容（HTTP {status}，{content_type}）：{preview}"
+                    f"Prompt optimization API returned non-JSON content (HTTP {status}, {content_type}): {preview}"
                 ) from exc
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
@@ -1662,13 +1662,13 @@ def _run_configured_prompt_optimizer(
     config = settings if isinstance(settings, Mapping) else _read_prompt_optimizer_config()
     provider = _active_optimizer_provider(config, service_model)
     if not provider:
-        raise ValueError("提示词优化服务未启用或已不存在")
+        raise ValueError("The selected prompt optimization service is disabled or no longer exists")
 
     api_key = str(provider.get("api_key") or "")
     api_url = str(provider.get("api_url") or "")
     api_format = str(provider.get("api_format") or "openai").lower()
     if api_format not in {"openai", "gemini", "ollama"}:
-        raise ValueError("不支持当前 API 格式")
+        raise ValueError("The selected API format is not supported")
 
     raw_counts = media_counts if isinstance(media_counts, Mapping) else {}
     counts = {
@@ -1681,7 +1681,7 @@ def _run_configured_prompt_optimizer(
     requested_model = str(provider.get("_requested_model") or "").strip()
     configured_models = [*llm_models, *[name for name in vlm_models if name not in llm_models]]
     if requested_model and requested_model not in configured_models:
-        raise ValueError("所选模型已不在后台 API 设置中，请重新选择")
+        raise ValueError("The selected model is no longer configured in API Settings; select it again")
 
     configured_vlm = str(provider.get("vlm_model") or "").strip()
     selected_is_vlm = bool(requested_model and requested_model in vlm_models)
@@ -1694,9 +1694,9 @@ def _run_configured_prompt_optimizer(
     model = media_model if media_parts else requested_model or str(provider.get("llm_model") or "").strip()
     requires_key = api_format != "ollama"
     if not str(prompt or "").strip():
-        raise ValueError("提示词不能为空")
+        raise ValueError("Prompt cannot be empty")
     if not api_url.strip() or not model or (requires_key and not api_key.strip()):
-        raise ValueError("提示词优化 API 设置不完整")
+        raise ValueError("Prompt optimization API settings are incomplete")
 
     resolved_scene_guide, custom_prompt = _optimizer_scheme(config, scene_guide)
     result = _optimizer_http_json(
@@ -1834,7 +1834,7 @@ def _register_prompt_optimizer_route() -> bool:
                 None,
             )
             if provider is None:
-                return web.json_response({"ok": False, "error": "API 接口不存在"}, status=404)
+                return web.json_response({"ok": False, "error": "API service not found"}, status=404)
             models = await asyncio.to_thread(_optimizer_available_models, provider)
             return web.json_response({"ok": True, "models": models})
         except (ValueError, RuntimeError) as exc:
@@ -1989,8 +1989,8 @@ def _load_gguf_unet(model_name: str):
     loader_class = _registered_node_class("UnetLoaderGGUF", "UNETLoaderGGUF", "UnetLoaderGGUFAdvanced")
     if loader_class is None:
         raise RuntimeError(
-            "检测到 GGUF MiniMax H3 主模型，但当前 ComfyUI 未安装 GGUF 加载节点。"
-            "请安装 ComfyUI-GGUF 后重启 ComfyUI。"
+            "A GGUF MiniMax H3 transformer was selected, but this ComfyUI installation has no GGUF loader node. "
+            "Install ComfyUI-GGUF and restart ComfyUI."
         )
     loader = loader_class()
     return loader.load_unet(model_name)[0]
@@ -2003,8 +2003,8 @@ def _load_text_encoder(text_encoder: str):
     loader_class = _registered_node_class("CLIPLoaderGGUF", "CLIPLoaderGGUFAdvanced")
     if loader_class is None:
         raise RuntimeError(
-            "检测到 GGUF MiniMax H3 文本编码器，但当前 ComfyUI 未安装 GGUF 加载节点。"
-            "请安装 ComfyUI-GGUF 后重启 ComfyUI。"
+            "A GGUF MiniMax H3 text encoder was selected, but this ComfyUI installation has no GGUF loader node. "
+            "Install ComfyUI-GGUF and restart ComfyUI."
         )
     loader = loader_class()
     try:
@@ -2092,7 +2092,7 @@ class MiniMaxH3Bundle:
             return model
         loader = getattr(comfy.sd, "load_bypass_lora_for_models", None)
         if not callable(loader):
-            raise RuntimeError("当前 ComfyUI 不支持旁路 LoRA 加载，请更新 ComfyUI。")
+            raise RuntimeError("This ComfyUI version does not support bypass LoRA loading. Update ComfyUI and try again.")
         result = model
         for name, strength in stack:
             lora = self._load_lora(name)
@@ -2656,7 +2656,7 @@ class FeiHouEasyH3RemixLoader:
 
     def load(self, remix_model, text_encoder, video_vae, audio_vae, second_sampling_model=NONE_MODEL, first_pass_lora_stack=None, second_pass_lora_stack=None):
         if _is_none_model(remix_model):
-            raise ValueError("请选择 Remix 主模型。")
+            raise ValueError("Select a Remix main model")
         clip = _load_text_encoder(text_encoder)
         video_vae_obj, = nodes.VAELoader().load_vae(video_vae)
         audio_vae_obj, = nodes.VAELoader().load_vae(audio_vae)
@@ -2875,15 +2875,15 @@ def _reference_audio_duration(items: list[_MediaInput]) -> float:
         if item.media_type != "audio":
             continue
         if not isinstance(item.value, Mapping) or "waveform" not in item.value:
-            raise ValueError("数字人/MV 自动时长需要有效的 AUDIO 参考音频")
+            raise ValueError("Digital Human/MV auto duration requires a valid AUDIO reference")
         trimmed = _trim_reference_audio(item.value, item.audio_trim)
         waveform = trimmed.get("waveform")
         sample_rate = float(trimmed.get("sample_rate") or 0)
         total_samples = int(waveform.shape[-1]) if waveform is not None and getattr(waveform, "ndim", 0) else 0
         if sample_rate <= 0 or total_samples <= 0:
-            raise ValueError("数字人/MV 自动时长无法读取 Audio 1 的有效时长")
+            raise ValueError("Digital Human/MV auto duration could not read a valid duration from Audio 1")
         return total_samples / sample_rate
-    raise ValueError("数字人/MV 自动时长已开启，但未加载 Audio 1 参考音频")
+    raise ValueError("Digital Human/MV auto duration is enabled, but Audio 1 is not loaded")
 
 
 def _first_reference_audio(items: list[_MediaInput]) -> Any:
@@ -3215,7 +3215,7 @@ class FeiHouEasyH3:
                     reference_short_edge=ref_image_size,
                 )
             except Exception as exc:
-                raise RuntimeError(f"Easy H3 提示词扩写/反推失败: {exc}") from exc
+                raise RuntimeError(f"Easy H3 prompt expansion/inference failed: {exc}") from exc
         second_sampling_model = None
         second_sampling_requested = h3_bundle.second_sampling_enabled and second_sampling_connected
         second_kind = "ref2va" if mode == MODE_REFERENCE else "fl2va"
@@ -3224,9 +3224,9 @@ class FeiHouEasyH3:
             second_model_name = h3_bundle.second_ref2va_model_name if second_kind == "ref2va" else h3_bundle.second_fl2va_model_name
             if _is_none_model(second_model_name):
                 if h3_bundle.remix_loader:
-                    raise ValueError("已连接二次采样模型输出，但 Remix 加载器未选择二采模型。请选择“二采模型”，或断开二次采样模型输出。")
+                    raise ValueError("A second-sampling model output is connected, but the Remix Loader has no second-pass model selected. Select one or disconnect that output.")
                 model_label = "REF2VA" if second_kind == "ref2va" else "FL2VA"
-                raise ValueError(f"“自定义二采模型”已开启，但未选择 {model_label} 二采模型。请选择模型，或关闭该开关。")
+                raise ValueError(f"A custom second-pass model is enabled, but no {model_label} second-pass model is selected. Select a model or disable the custom second-pass model.")
             second_sampling_active = True
 
         if mode == MODE_REFERENCE and items:

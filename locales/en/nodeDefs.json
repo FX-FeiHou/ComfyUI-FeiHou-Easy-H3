@@ -28,6 +28,22 @@
       "0": { "name": "H3 model bundle" }
     }
   },
+  "FeiHouEasyH3RemixLoader": {
+    "display_name": "FeiHou Easy H3 Remix Loader",
+    "description": "Load one MiniMax H3 Remix transformer shared by FL2VA and REF2VA, with independent first- and second-pass LoRA stacks.",
+    "inputs": {
+      "remix_model": { "name": "Remix main model" },
+      "text_encoder": { "name": "Text encoder" },
+      "video_vae": { "name": "Video VAE" },
+      "audio_vae": { "name": "Audio VAE" },
+      "second_sampling_model": { "name": "Second-pass model" },
+      "first_pass_lora_stack": { "name": "First-pass LoRA stack" },
+      "second_pass_lora_stack": { "name": "Second-pass LoRA stack" }
+    },
+    "outputs": {
+      "0": { "name": "H3 model bundle" }
+    }
+  },
   "FeiHouEasyH3ModelAdapter": {
     "display_name": "FeiHou Easy H3 Model Bridge",
     "description": "Build an H3 bundle from standard ComfyUI model, CLIP, and VAE connections.",
@@ -99,7 +115,25 @@
       "2": { "name": "Video VAE" },
       "3": { "name": "Audio VAE" },
       "4": { "name": "FPS" },
-      "5": { "name": "Prompt inference output" }
+      "5": { "name": "Prompt inference output" },
+      "6": { "name": "CLIP" },
+      "7": { "name": "Audio 1" },
+      "8": { "name": "Duration control" }
+    }
+  },
+  "FeiHouEasyH3DurationCrop": {
+    "display_name": "FeiHou Easy H3 Digital Human/MV Duration Crop",
+    "description": "Uses the Easy H3 duration-control output to restore the exact Audio 1 duration. Disabled control passes media through unchanged.",
+    "inputs": {
+      "images": { "name": "Images" },
+      "fps": { "name": "FPS" },
+      "duration_control": { "name": "Duration control" },
+      "audio": { "name": "Audio" }
+    },
+    "outputs": {
+      "0": { "name": "Images" },
+      "1": { "name": "FPS" },
+      "2": { "name": "Audio" }
     }
   },
   "FeiHouEasyH3PromptPreview": {

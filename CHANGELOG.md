@@ -5,6 +5,7 @@
 - Adds a local custom-API host allow-list, validates every outbound prompt-API request, and blocks redirects to unvalidated destinations.
 - Restricts Easy H3 settings, model-discovery, prompt-optimization, and LoRA-list routes to the local ComfyUI host.
 - Documents the allow-list in the Settings UI and both READMEs.
+- Uses English as the backend/default node-language fallback and completes native ComfyUI `locales/en` and `locales/zh` definitions for the Remix Loader and Digital Human/MV Duration Crop.
 
 ## v1.4.1
 

@@ -28,6 +28,22 @@
       "0": { "name": "H3 模型组合" }
     }
   },
+  "FeiHouEasyH3RemixLoader": {
+    "display_name": "FeiHou Easy H3 Remix 加载器",
+    "description": "加载一个供 FL2VA 与 REF2VA 共用的 MiniMax H3 Remix 主模型，并支持独立的一采、二采 LoRA 堆栈。",
+    "inputs": {
+      "remix_model": { "name": "Remix 主模型" },
+      "text_encoder": { "name": "文本编码器" },
+      "video_vae": { "name": "视频 VAE" },
+      "audio_vae": { "name": "音频 VAE" },
+      "second_sampling_model": { "name": "二采模型" },
+      "first_pass_lora_stack": { "name": "一采 LoRA 堆栈" },
+      "second_pass_lora_stack": { "name": "二采 LoRA 堆栈" }
+    },
+    "outputs": {
+      "0": { "name": "H3 模型组合" }
+    }
+  },
   "FeiHouEasyH3ModelAdapter": {
     "display_name": "FeiHou Easy H3 模型中转",
     "description": "从标准 ComfyUI 的模型、CLIP 与 VAE 连接组装 H3 模型组合。",
@@ -99,7 +115,25 @@
       "2": { "name": "视频 VAE" },
       "3": { "name": "音频 VAE" },
       "4": { "name": "FPS" },
-      "5": { "name": "提示词反推输出" }
+      "5": { "name": "提示词反推输出" },
+      "6": { "name": "CLIP" },
+      "7": { "name": "音频 1" },
+      "8": { "name": "时长控制" }
+    }
+  },
+  "FeiHouEasyH3DurationCrop": {
+    "display_name": "FeiHou Easy H3 数字人/MV 时长裁剪",
+    "description": "使用 Easy H3 的时长控制输出还原 Audio 1 的精确时长；控制关闭时，媒体不作修改直接透传。",
+    "inputs": {
+      "images": { "name": "图像" },
+      "fps": { "name": "FPS" },
+      "duration_control": { "name": "时长控制" },
+      "audio": { "name": "音频" }
+    },
+    "outputs": {
+      "0": { "name": "图像" },
+      "1": { "name": "FPS" },
+      "2": { "name": "音频" }
     }
   },
   "FeiHouEasyH3PromptPreview": {
