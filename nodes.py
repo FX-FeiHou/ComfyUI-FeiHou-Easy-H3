@@ -911,6 +911,9 @@ def _prompt_optimizer_provider_choices(settings: Mapping[str, Any] | None = None
 
 
 def _read_prompt_optimizer_config() -> dict[str, Any]:
+    # Make the documented local allow-list discoverable as soon as Easy H3
+    # reads its configuration, without exposing a web route that can edit it.
+    _read_custom_allowed_optimizer_hosts()
     path = _prompt_optimizer_config_path()
     with _PROMPT_OPTIMIZER_CONFIG_LOCK:
         try:
