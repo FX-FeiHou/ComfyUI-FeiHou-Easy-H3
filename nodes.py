@@ -9,6 +9,7 @@ node; the browser extension sends their input-folder paths to this backend.
 from __future__ import annotations
 
 import io
+import ipaddress
 import inspect
 import logging
 import math
@@ -120,6 +121,15 @@ PROMPT_OPTIMIZER_MODEL_LIST_TIMEOUT_SECONDS = 20
 PROMPT_OPTIMIZER_JPEG_QUALITY = 85
 PROMPT_OPTIMIZER_VIDEO_SAMPLE_COUNT = 3
 PROMPT_OPTIMIZER_CONFIG_VERSION = 6
+PROMPT_OPTIMIZER_ALLOWED_HOSTS_VERSION = 1
+PROMPT_OPTIMIZER_ALLOWED_HOSTS_FILENAME = "allowed_api_hosts.json"
+PROMPT_OPTIMIZER_BUILTIN_ALLOWED_HOSTS = frozenset({
+    "open.bigmodel.cn",
+    "api.xflow.cc",
+    "dashscope.aliyuncs.com",
+    "api.deepseek.com",
+})
+PROMPT_OPTIMIZER_MAX_CUSTOM_ALLOWED_HOSTS = 100
 PROMPT_OPTIMIZER_ZHIPU_MODELS = (
     "glm-5.1", "glm-5", "glm-5-turbo", "glm-5v-turbo", "glm-4.7", "glm-4.7-flash",
     "glm-4.7-flashx", "glm-4.6", "glm-4.6v", "glm-4.6v-flash", "glm-4.5",
@@ -489,17 +499,127 @@ def _prompt_guide_bundle(
     return "\n\n".join(blocks)
 
 
-def _prompt_optimizer_config_path() -> str:
+def _prompt_optimizer_config_directory() -> str:
     return os.path.join(
         folder_paths.get_user_directory(),
         "default",
         "ComfyUI-FeiHou-Easy-H3",
-        "prompt_optimizer.json",
     )
+
+
+def _prompt_optimizer_config_path() -> str:
+    return os.path.join(_prompt_optimizer_config_directory(), "prompt_optimizer.json")
+
+
+def _prompt_optimizer_allowed_hosts_path() -> str:
+    """A local-only allow-list that is deliberately not writable by web routes."""
+    return os.path.join(_prompt_optimizer_config_directory(), PROMPT_OPTIMIZER_ALLOWED_HOSTS_FILENAME)
 
 
 def _legacy_prompt_optimizer_config_path() -> str:
     return os.path.join(os.path.dirname(os.path.realpath(__file__)), "prompt_optimizer.json")
+
+
+def _normalise_allowed_host(value: Any) -> str:
+    """Accept one DNS hostname, never a URL, wildcard, or IP address."""
+    host = str(value or "").strip().rstrip(".").lower()
+    if not host or any(token in host for token in ("://", "/", "\\", "@", "?", "#", ":", "*")):
+        return ""
+    try:
+        ipaddress.ip_address(host)
+        return ""
+    except ValueError:
+        pass
+    try:
+        host = host.encode("idna").decode("ascii")
+    except UnicodeError:
+        return ""
+    if len(host) > 253 or not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+", host):
+        return ""
+    return host
+
+
+def _read_custom_allowed_optimizer_hosts() -> set[str]:
+    """Read the user-maintained host allow-list without exposing a write route."""
+    path = _prompt_optimizer_allowed_hosts_path()
+    payload: Any = {}
+    with _PROMPT_OPTIMIZER_CONFIG_LOCK:
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+        except FileNotFoundError:
+            # Create a discoverable, intentionally empty local file.  The web
+            # UI can explain how to add custom hosts, but cannot modify it.
+            directory = os.path.dirname(path)
+            os.makedirs(directory, exist_ok=True)
+            temporary_path = ""
+            try:
+                with tempfile.NamedTemporaryFile(
+                    mode="w", encoding="utf-8", dir=directory,
+                    prefix=".allowed_api_hosts.", suffix=".tmp", delete=False,
+                ) as handle:
+                    temporary_path = handle.name
+                    json.dump({"version": PROMPT_OPTIMIZER_ALLOWED_HOSTS_VERSION, "hosts": []}, handle, ensure_ascii=False, indent=2)
+                    handle.write("\n")
+                os.replace(temporary_path, path)
+            finally:
+                if temporary_path and os.path.exists(temporary_path):
+                    try:
+                        os.remove(temporary_path)
+                    except OSError:
+                        pass
+        except (json.JSONDecodeError, OSError, TypeError, ValueError):
+            logging.warning("Easy H3: unable to read custom API host allow-list: %s", path)
+            return set()
+
+    entries = payload.get("hosts", []) if isinstance(payload, Mapping) else []
+    hosts: set[str] = set()
+    for value in entries[:PROMPT_OPTIMIZER_MAX_CUSTOM_ALLOWED_HOSTS] if isinstance(entries, list) else []:
+        host = _normalise_allowed_host(value)
+        if host:
+            hosts.add(host)
+    return hosts
+
+
+def _allowed_optimizer_hosts() -> set[str]:
+    return set(PROMPT_OPTIMIZER_BUILTIN_ALLOWED_HOSTS) | _read_custom_allowed_optimizer_hosts()
+
+
+def _validate_optimizer_base_url(api_url: str, api_format: str = "openai") -> str:
+    """Validate an outbound prompt-API URL before any request is created.
+
+    Custom hosts must be deliberately approved in the local allow-list file.
+    This closes the server-side request forgery path while preserving support
+    for user-selected third-party API providers.
+    """
+    base = str(api_url or "").strip().rstrip("/")
+    if not base:
+        raise ValueError("Prompt optimization API URL is required")
+    if not re.match(r"^https?://", base, flags=re.I):
+        base = "https://" + base
+    try:
+        parsed = urllib.parse.urlsplit(base)
+    except ValueError as exc:
+        raise ValueError("Prompt optimization API URL is invalid") from exc
+    scheme = parsed.scheme.lower()
+    host = (parsed.hostname or "").rstrip(".").lower()
+    if not host or parsed.username or parsed.password or parsed.fragment:
+        raise ValueError("Prompt optimization API URL is invalid")
+
+    normalized_format = str(api_format or "openai").strip().lower()
+    if normalized_format == "ollama":
+        if scheme not in {"http", "https"} or host not in {"localhost", "127.0.0.1", "::1"}:
+            raise ValueError("Ollama must use a local localhost, 127.0.0.1, or ::1 endpoint")
+        return base
+
+    if scheme != "https":
+        raise ValueError("External prompt optimization APIs must use HTTPS")
+    if host not in _allowed_optimizer_hosts():
+        raise ValueError(
+            f"API host '{host}' is not allowed. Add this hostname to "
+            f"{PROMPT_OPTIMIZER_ALLOWED_HOSTS_FILENAME} and restart ComfyUI."
+        )
+    return base
 
 
 def _safe_config_id(value: Any, prefix: str) -> str:
@@ -810,6 +930,14 @@ def _read_prompt_optimizer_config() -> dict[str, Any]:
 def _write_prompt_optimizer_config(value: Mapping[str, Any] | None) -> dict[str, Any]:
     current = _read_prompt_optimizer_config()
     normalized = _normalize_prompt_optimizer_config(value, current)
+    for provider in normalized.get("providers", []):
+        if not isinstance(provider, Mapping):
+            continue
+        api_url = str(provider.get("api_url") or "").strip()
+        # A blank newly-created custom provider remains editable. It becomes
+        # usable only after it has a valid, allow-listed endpoint.
+        if api_url:
+            _validate_optimizer_base_url(api_url, str(provider.get("api_format") or "openai"))
     path = _prompt_optimizer_config_path()
     directory = os.path.dirname(path)
     os.makedirs(directory, exist_ok=True)
@@ -847,13 +975,22 @@ _OPTIMIZER_GEMINI_ENDPOINT_RE = re.compile(
 )
 
 
-def _normalize_optimizer_base_url(api_url: str) -> str:
-    base = str(api_url or "").strip().rstrip("/")
-    if not base:
-        raise ValueError("Prompt optimization API URL is required")
-    if not re.match(r"^https?://", base, flags=re.I):
-        base = "https://" + base
-    return base.rstrip("/")
+class _OptimizerNoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Never follow a provider redirect to an unvalidated destination."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: D401
+        return None
+
+
+_OPTIMIZER_URL_OPENER = urllib.request.build_opener(_OptimizerNoRedirectHandler())
+
+
+def _optimizer_urlopen(request: urllib.request.Request, timeout: int):
+    return _OPTIMIZER_URL_OPENER.open(request, timeout=timeout)
+
+
+def _normalize_optimizer_base_url(api_url: str, api_format: str = "openai") -> str:
+    return _validate_optimizer_base_url(api_url, api_format).rstrip("/")
 
 
 def _optimizer_endpoint_kind(value: str) -> str:
@@ -896,7 +1033,7 @@ def _gemini_url_with_query(url: str, query: str) -> str:
 
 
 def _normalize_gemini_optimizer_url(api_url: str, model: str) -> str:
-    base = _normalize_optimizer_base_url(api_url)
+    base = _normalize_optimizer_base_url(api_url, "gemini")
     parsed = urllib.parse.urlsplit(base)
     clean = urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, parsed.path.rstrip("/"), "", ""))
     lower = clean.lower()
@@ -935,7 +1072,7 @@ def _normalize_optimizer_url(api_url: str, api_format: str, model: str) -> str:
     if api_format == "gemini":
         return _normalize_gemini_optimizer_url(api_url, model)
     if api_format == "ollama":
-        base = _normalize_optimizer_base_url(api_url)
+        base = _normalize_optimizer_base_url(api_url, "ollama")
         base = _strip_optimizer_endpoint(base)
         if base.lower().endswith("/v1"):
             base = base[:-3].rstrip("/")
@@ -944,7 +1081,7 @@ def _normalize_optimizer_url(api_url: str, api_format: str, model: str) -> str:
         if base.lower().endswith("/api"):
             return base + "/chat"
         return base + "/api/chat"
-    base = _normalize_optimizer_base_url(api_url)
+    base = _normalize_optimizer_base_url(api_url, api_format)
     endpoint = "/v1/chat/completions"
     base_kind = _optimizer_endpoint_kind(base)
     endpoint_kind = _optimizer_endpoint_kind(endpoint)
@@ -963,7 +1100,7 @@ def _normalize_optimizer_url(api_url: str, api_format: str, model: str) -> str:
 
 
 def _optimizer_model_list_url(api_url: str, api_format: str) -> str:
-    base = _normalize_optimizer_base_url(api_url)
+    base = _normalize_optimizer_base_url(api_url, api_format)
     base = _strip_optimizer_endpoint(base)
     if api_format == "ollama":
         if base.lower().endswith("/v1"):
@@ -996,7 +1133,7 @@ def _optimizer_available_models(provider: Mapping[str, Any]) -> list[str]:
         headers["Authorization"] = f"Bearer {api_key}"
     request = urllib.request.Request(url, headers=headers, method="GET")
     try:
-        with urllib.request.urlopen(request, timeout=PROMPT_OPTIMIZER_MODEL_LIST_TIMEOUT_SECONDS) as response:
+        with _optimizer_urlopen(request, timeout=PROMPT_OPTIMIZER_MODEL_LIST_TIMEOUT_SECONDS) as response:
             data = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
@@ -1163,7 +1300,7 @@ def _optimizer_http_json(
         _optimizer_log_media_summary(media_parts),
     )
     try:
-        with urllib.request.urlopen(request, timeout=PROMPT_OPTIMIZER_TIMEOUT_SECONDS) as response:
+        with _optimizer_urlopen(request, timeout=PROMPT_OPTIMIZER_TIMEOUT_SECONDS) as response:
             raw_response = response.read().decode("utf-8", errors="replace")
             status = getattr(response, "status", 200)
             content_type = str(response.headers.get("Content-Type") or "unknown")
@@ -1622,6 +1759,39 @@ class MiniMaxH3PromptOptimizer:
         return (_optimizer_http_json(str(api_url), str(api_key), str(model), str(api_format or "openai"), system, str(prompt or "")),)
 
 
+def _is_loopback_web_request(request: Any) -> bool:
+    """Only permit browser-control routes from the machine running ComfyUI."""
+    peer = None
+    try:
+        transport = getattr(request, "transport", None)
+        peer = transport.get_extra_info("peername") if transport is not None else None
+    except Exception:
+        peer = None
+    candidates = []
+    if isinstance(peer, tuple) and peer:
+        candidates.append(peer[0])
+    elif isinstance(peer, str):
+        candidates.append(peer)
+    remote = getattr(request, "remote", None)
+    if remote:
+        candidates.append(remote)
+    for candidate in candidates:
+        host = str(candidate or "").split("%", 1)[0]
+        try:
+            if ipaddress.ip_address(host).is_loopback:
+                return True
+        except ValueError:
+            continue
+    return False
+
+
+def _local_only_route_response(web: Any):
+    return web.json_response(
+        {"ok": False, "error": "This Easy H3 settings route is available only from the local ComfyUI host."},
+        status=403,
+    )
+
+
 def _register_prompt_optimizer_route() -> bool:
     try:
         from aiohttp import web
@@ -1634,10 +1804,14 @@ def _register_prompt_optimizer_route() -> bool:
 
     @routes.get("/feihou_easy_h3/prompt_optimizer_settings")
     async def _prompt_optimizer_settings_get(request):
+        if not _is_loopback_web_request(request):
+            return _local_only_route_response(web)
         return web.json_response({"ok": True, "settings": _public_prompt_optimizer_config(_read_prompt_optimizer_config())})
 
     @routes.post("/feihou_easy_h3/prompt_optimizer_settings")
     async def _prompt_optimizer_settings_post(request):
+        if not _is_loopback_web_request(request):
+            return _local_only_route_response(web)
         try:
             payload = await request.json()
             settings = _write_prompt_optimizer_config(payload if isinstance(payload, dict) else {})
@@ -1647,6 +1821,8 @@ def _register_prompt_optimizer_route() -> bool:
 
     @routes.get("/feihou_easy_h3/providers/{provider_id}/models")
     async def _prompt_optimizer_provider_models(request):
+        if not _is_loopback_web_request(request):
+            return _local_only_route_response(web)
         try:
             provider_id = _safe_config_id(request.match_info.get("provider_id"), "provider")
             settings = _read_prompt_optimizer_config()
@@ -1665,6 +1841,8 @@ def _register_prompt_optimizer_route() -> bool:
 
     @routes.get("/feihou_easy_h3/loras")
     async def _feihou_easy_h3_loras(request):
+        if not _is_loopback_web_request(request):
+            return _local_only_route_response(web)
         try:
             return web.json_response({"ok": True, "loras": folder_paths.get_filename_list("loras")})
         except Exception as exc:
@@ -1672,6 +1850,8 @@ def _register_prompt_optimizer_route() -> bool:
 
     @routes.post("/feihou_easy_h3/prompt_optimize")
     async def _prompt_optimize(request):
+        if not _is_loopback_web_request(request):
+            return _local_only_route_response(web)
         try:
             payload = await request.json()
             prompt = str(payload.get("prompt") or "")

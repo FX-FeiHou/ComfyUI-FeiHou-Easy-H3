@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.4.2
+
+- Adds a local custom-API host allow-list, validates every outbound prompt-API request, and blocks redirects to unvalidated destinations.
+- Restricts Easy H3 settings, model-discovery, prompt-optimization, and LoRA-list routes to the local ComfyUI host.
+- Documents the allow-list in the Settings UI and both READMEs.
+
 ## v1.4.1
 
 - Adds a play/stop control beside each reference-audio trim range. Preview playback starts at the normalized trim start, stops at the trim end, and never changes the source file or the audio sent to H3.

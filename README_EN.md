@@ -37,6 +37,26 @@ Place the LoRA stack to the left of `FeiHou Easy H3 Loader` and connect its `lor
 
 Prompt configuration is shown directly in the dedicated `🐵Easy H3` page in ComfyUI Settings, without secondary dialogs. Base URLs are editable, pasted API keys save automatically, and preset providers contain neither keys nor models. The same page contains the single prompt-optimization rule list. The main node shows the API and scheme controls only when Advanced options is enabled; the scheme is ignored until a configured API provider is selected. The final prompt is carried in H3 Context and can be connected from `FeiHou Easy H3 Output` to the bundled Prompt Preview node.
 
+### Custom API host allow-list
+
+The built-in Zhipu, xFlow, Alibaba Cloud Bailian, and DeepSeek hosts are already allowed. Ollama is limited to local `localhost`, `127.0.0.1`, or `::1`. Before configuring a new third-party API, start ComfyUI once so the plugin creates this local file:
+
+`ComfyUI/user/default/ComfyUI-FeiHou-Easy-H3/allowed_api_hosts.json`
+
+Add the API **hostname only** to its `hosts` array—do not enter `https://`, a path, port, wildcard, or IP address:
+
+```json
+{
+  "version": 1,
+  "hosts": [
+    "api.example.com",
+    "llm.company.cn"
+  ]
+}
+```
+
+Save the file and restart ComfyUI. You can then enter `https://api.example.com/v1`, its API key, and models in the Custom API panel. The allow-list is intentionally maintained in a local file and cannot be changed from the Settings page: it prevents an exposed ComfyUI server from being induced to request private-network addresses or send API keys to a malicious server. Settings, model discovery, and immediate prompt-optimization routes also accept requests only from the host running ComfyUI.
+
 The package uses unique `FeiHouEasyH3*` node IDs and dedicated prompt-optimizer routes, so it can be installed alongside the original project.
 
 ## Attribution, changes, and license

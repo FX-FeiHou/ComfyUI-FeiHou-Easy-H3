@@ -40,6 +40,26 @@
 
 提示词配置位于 ComfyUI“设置”左侧的 `🐵Easy H3` 独立插件分组。API 设置和“提示词优化规则”直接显示在右侧设置页，不再打开二级窗口；Base URL 可修改，API Key 粘贴后自动保存，预置服务不附带 Key 或模型。主节点关闭“高级选项”时不显示、也不执行 API 和提示词方案；打开后先选择已配置的 API 接口，再选择方案。API 未启用时方案不生效。API 密钥保存在 ComfyUI 用户目录下的本插件配置文件中，不随工作流导出。
 
+### 自定义 API 域名白名单
+
+内置的智谱、xFlow、阿里云百炼、DeepSeek 服务域名已自动允许；Ollama 仅允许本机 `localhost`、`127.0.0.1` 或 `::1`。使用新的第三方 API 前，先启动一次 ComfyUI，让插件在用户目录自动创建：
+
+`ComfyUI/user/default/ComfyUI-FeiHou-Easy-H3/allowed_api_hosts.json`
+
+然后在 `hosts` 数组内加入 API 的**域名**（仅域名，不填 `https://`、路径、端口、通配符或 IP），例如：
+
+```json
+{
+  "version": 1,
+  "hosts": [
+    "api.example.com",
+    "llm.company.cn"
+  ]
+}
+```
+
+保存文件并重启 ComfyUI 后，即可在“自定义 API”中填写 `https://api.example.com/v1`、API Key 和模型。此白名单由本机文件维护，节点设置页无法改写它；这是为了阻止公开的 ComfyUI 服务被诱导请求内网地址，或将 API Key 发送到恶意服务器。API 设置、模型获取和即时提示词优化路由也只接受运行 ComfyUI 的本机访问。
+
 开发时可自行维护本机的同步配置；本仓库不会提交本机路径、API Key、上传媒体或输出元数据。
 
 在“图生或首尾帧”模式下，只使用九宫格前两个图片槽：一张图按高级选项作为首帧或尾帧，两张图作为首尾帧。切换模式不会删除已选的其他参考素材，返回参考模式后可继续使用。
