@@ -21,6 +21,8 @@
 
 ## 节点
 
+标准版新增实验功能：[制作包分镜加载器使用说明](docs/production-packs.md)。可读取文件夹 / ZIP 内的 Shotlist，按镜应用提示词、歌曲截取和引用图，并通过原生队列递增依次生成。
+
 - `加载LoRA（旁路，仅模型）（用于调试）`：完全沿用 `FeiHou LoRA Stack (Merge/Extract)` 的原生画布堆栈样式，可动态添加、启停、排序多个 LoRA；
 - `FeiHou Easy H3 Loader`：从左侧接收 LoRA 堆栈，并在内部加载 FL2VA/REF2VA 模型和应用 LoRA，同时加载文本编码器、视频 VAE 和音频 VAE；
 - `ComfyUI-FeiHou-Easy-H3`：主生成节点及内嵌媒体面板；

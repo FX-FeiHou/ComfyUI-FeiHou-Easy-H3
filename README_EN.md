@@ -1,5 +1,7 @@
 # ComfyUI-FeiHou-Easy-H3
 
+Standard-edition experimental feature: [Production Pack Loader](docs/production-packs.md#english-quick-start). Read a folder/ZIP Shotlist, apply per-shot prompts, audio ranges and referenced images, and advance with native queue increment.
+
 **English** | [中文](README.md)
 
 A MiniMax H3 custom-node package with all reference-media loading embedded directly in the main node.

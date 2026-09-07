@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.4.3
+
+- Isolates standard-edition frontend installation markers and matches exact node class IDs, preventing cross-plugin media parameter interference.
+- Stops reference generation explicitly when visual media is missing or prompt references are unresolved.
+- Adds the experimental Production Pack Loader: folder/ZIP Shotlist import, ordered referenced assets, per-shot prompts/audio ranges, and native queue index increment.
+- Preserves existing main-node widget/output ordering and isolates preview settings between queued shots. Includes Chinese/English UI and usage documentation.
+- Validation: CPU regression tests, frontend syntax and transport-order simulations, and the 36-shot sample import. Full GPU/cloud generation was not performed for this release.
+
 ## v1.4.2
 
 - Adds a local custom-API host allow-list, validates every outbound prompt-API request, and blocks redirects to unvalidated destinations.

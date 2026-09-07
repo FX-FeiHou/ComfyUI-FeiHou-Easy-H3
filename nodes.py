@@ -44,6 +44,7 @@ import nodes
 from comfy_extras import nodes_minimax_h3 as h3
 from comfy_extras import nodes_audio as comfy_audio_nodes
 from comfy_api.latest import InputImpl
+from .production_pack import SHOT_TYPE, register_routes as register_production_pack_routes
 
 
 MODE_IMAGE = "image"
@@ -1805,6 +1806,8 @@ def _register_prompt_optimizer_route() -> bool:
     if routes is None or getattr(_register_prompt_optimizer_route, "_registered", False):
         return bool(getattr(_register_prompt_optimizer_route, "_registered", False))
 
+    register_production_pack_routes(routes, _is_loopback_web_request)
+
     @routes.get("/feihou_easy_h3/prompt_optimizer_settings")
     async def _prompt_optimizer_settings_get(request):
         if not _is_loopback_web_request(request):
@@ -3078,6 +3081,22 @@ def _reference_conditioning(bundle, prompt, width, height, length, ref_image_siz
     return conditioning, latent, resolved_prompt
 
 
+def _validate_reference_media_transport(prompt, items):
+    """Fail closed instead of silently sampling without the selected references."""
+    if not any(item.media_type in {"image", "video"} for item in items):
+        raise ValueError(
+            "Easy H3: Reference-to-video received no image/video references. "
+            "Check uploaded media and frontend plugin conflicts, then reload the browser. "
+            "For text-only generation use image/first-last-frame mode with no media. "
+            "参考生视频未收到图片或视频，请检查素材及插件冲突并刷新浏览器；纯文生请使用图生/首尾帧模式且不接素材。"
+        )
+    if "__MINIMAX_H3_UNRESOLVED_REF_" in str(prompt):
+        raise ValueError(
+            "Easy H3: Unresolved media references in the prompt; reselect the references before sampling. "
+            "提示词中的媒体引用未解析，请重新选择引用素材，已停止采样。"
+        )
+
+
 class FeiHouEasyH3:
     CATEGORY = "FeiHou Easy H3"
     FUNCTION = "generate"
@@ -3104,6 +3123,8 @@ class FeiHouEasyH3:
             optional[f"media_trim_{index}"] = ("STRING", {"default": "", "hidden": True})
         optional["prompt_optimizer_applied"] = ("BOOLEAN", {"default": False, "hidden": True})
         optional["second_sampling_output_connected"] = ("BOOLEAN", {"default": False, "hidden": True})
+        # Socket only: never insert a widget into the legacy widgets_values order.
+        optional["production_shot"] = (SHOT_TYPE, {"forceInput": True})
         return {
             "required": {
                 "h3_bundle": ("MINIMAX_H3_BUNDLE",),
@@ -3180,6 +3201,31 @@ class FeiHouEasyH3:
     def generate(cls, h3_bundle, mode, prompt, resolution, aspect_ratio, width, height, audio_duration_auto, seconds, advanced, fps, keyframe_role, ref_image_size, reference_mention_mode, prompt_optimizer_enabled=False, prompt_optimizer_provider="", prompt_optimizer_scene_guide="none", force_offload=False, low_vram_streamed_attention=False, prompt_optimizer_applied=False, **kwargs):
         if not isinstance(h3_bundle, MiniMaxH3Bundle):
             raise ValueError("Connect a FeiHou Easy H3 Loader bundle")
+        production_shot = kwargs.get("production_shot")
+        if production_shot is not None:
+            if not isinstance(production_shot, dict) or production_shot.get("schema") != 1:
+                raise ValueError("Connect a FeiHou Easy H3 Production Pack Loader")
+            # Execution data is authoritative, not the asynchronously updated UI.
+            # Clearing the full gallery prevents a previous shot/manual selection
+            # from leaking unreferenced images into this shot's conditioning.
+            for index in range(1, MAX_MEDIA + 1):
+                for prefix in ("media_", "media_type_", "media_trim_"):
+                    kwargs.pop(f"{prefix}{index}", None)
+            for index, item in enumerate(production_shot["media"], 1):
+                kwargs[f"media_{index}"] = f"{item['subfolder']}/{item['filename']}"
+                kwargs[f"media_type_{index}"] = item["media_type"]
+                kwargs[f"media_trim_{index}"] = item.get("audio_trim", "")
+            params = production_shot["params"]
+            prompt, mode = production_shot["prompt"], MODE_REFERENCE
+            seconds, audio_duration_auto = params["seconds"], True
+            aspect_ratio = params.get("aspect_ratio", aspect_ratio)
+            resolution = params.get("resolution", resolution)
+            fps = params.get("fps", fps)
+            reference_mention_mode = REFERENCE_MENTION_INDEX
+            prompt_optimizer_enabled = False
+            logging.info("Easy H3 production shot %s/%s: %s (%ss, %s)",
+                         production_shot["index"], production_shot["total"],
+                         production_shot["id"], seconds, production_shot["range"])
         # ``advanced`` may itself come from an external input. Keep the backend
         # as the source of truth for this UI-only visibility gate.
         h3_bundle.force_offload_enabled = _as_bool(advanced) and _as_bool(force_offload)
@@ -3190,6 +3236,8 @@ class FeiHouEasyH3:
         keyframe_role = KEYFRAME_LAST if str(keyframe_role) == KEYFRAME_LAST else KEYFRAME_FIRST
         width, height = _canvas_dimensions(resolution, aspect_ratio, width, height)
         items = cls._collect_media(kwargs)
+        if mode == MODE_REFERENCE:
+            _validate_reference_media_transport(prompt, items)
         audio_duration_enabled = _as_bool(audio_duration_auto)
         requested_audio_seconds = 0.0
         if audio_duration_enabled:

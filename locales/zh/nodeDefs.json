@@ -1,4 +1,17 @@
 {
+  "FeiHouEasyH3ProductionPackLoader": {
+    "display_name": "FeiHou Easy H3 制作包分镜加载器",
+    "description": "载入文件夹或 ZIP，读取最终分镜页，每次任务输出一镜。将生成后操作设为 increment 可按序号推进。",
+    "inputs": {
+      "source": { "name": "制作包文件夹 / ZIP 路径" },
+      "shotlist_file": { "name": "分镜 HTML 相对路径（可留空）" },
+      "audio_file": { "name": "歌曲相对路径（可留空）" },
+      "shot_index": { "name": "分镜序号" },
+      "prompt_language": { "name": "提示词语言" },
+      "package_id": { "name": "已准备制作包 ID" }
+    },
+    "outputs": { "0": { "name": "制作包分镜" } }
+  },
   "FeiHouEasyH3LoraStack": {
     "display_name": "加载LoRA（旁路，仅模型）（用于调试）",
     "description": "供 FeiHou Easy H3 加载器使用的动态 LoRA 堆栈。",
@@ -63,6 +76,7 @@
     "description": "内嵌 9 张图片、3 个视频、3 个音频媒体栏的 MiniMax H3 生成节点。",
     "inputs": {
       "h3_bundle": { "name": "H3 模型组合" },
+      "production_shot": { "name": "制作包分镜" },
       "mode": {
         "name": "模式",
         "options": {

@@ -3,4 +3,5 @@ __pycache__/
 prompt_optimizer.json
 .prompt_optimizer.*
 SYNC_TARGETS.json
+AGENTS.md
 .DS_Store

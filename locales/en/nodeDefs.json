@@ -1,4 +1,17 @@
 {
+  "FeiHouEasyH3ProductionPackLoader": {
+    "display_name": "FeiHou Easy H3 Production Pack Loader",
+    "description": "Import a folder or ZIP, read the final Shotlist, and supply one shot per queued task. Enable increment after generation to advance the shot index.",
+    "inputs": {
+      "source": { "name": "Package folder / ZIP path" },
+      "shotlist_file": { "name": "Shotlist path (optional)" },
+      "audio_file": { "name": "Soundtrack path (optional)" },
+      "shot_index": { "name": "Shot index" },
+      "prompt_language": { "name": "Prompt language" },
+      "package_id": { "name": "Prepared package ID" }
+    },
+    "outputs": { "0": { "name": "Production shot" } }
+  },
   "FeiHouEasyH3LoraStack": {
     "display_name": "Load LoRA (Bypass, Model Only) (Debug)",
     "description": "Dynamic LoRA stack used by the FeiHou Easy H3 Loader.",
@@ -63,6 +76,7 @@
     "description": "MiniMax H3 generation with an embedded 9-image, 3-video, and 3-audio media gallery.",
     "inputs": {
       "h3_bundle": { "name": "H3 model bundle" },
+      "production_shot": { "name": "Production shot" },
       "mode": {
         "name": "Mode",
         "options": {

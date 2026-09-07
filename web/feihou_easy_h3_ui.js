@@ -295,37 +295,37 @@ let lastVueNodesMode = null;
 
 function nodeMatchesClass(node, className, displayName, installedMarker) {
     if (!node) return false;
-    if (node.constructor?.prototype?.[installedMarker]) return true;
+    // Class identity owns a node. Titles are user-editable; prototype flags
+    // only prevent duplicate installation and must never claim foreign nodes.
     const candidates = [
         node.comfyClass,
         node.type,
         node.constructor?.comfyClass,
         node.constructor?.type,
         node.constructor?.nodeData?.name,
-        node.constructor?.nodeData?.display_name,
-        node.title,
     ];
-    return candidates.some((value) => value != null && [className, displayName].includes(String(value)));
+    const identity = candidates.find((value) => typeof value === "string" && value.length > 0);
+    return identity === className;
 }
 
 function isTarget(node) {
-    return nodeMatchesClass(node, NODE_CLASS, TEXT.mainTitle, "__h3EasyNodeInstalled");
+    return nodeMatchesClass(node, NODE_CLASS, TEXT.mainTitle, "__feihouStandardH3EasyNodeInstalled");
 }
 
 function isLoader(node) {
-    return nodeMatchesClass(node, LOADER_CLASS, TEXT.loaderTitle, "__h3EasyLoaderInstalled");
+    return nodeMatchesClass(node, LOADER_CLASS, TEXT.loaderTitle, "__feihouStandardH3EasyLoaderInstalled");
 }
 
 function isRemixLoader(node) {
-    return nodeMatchesClass(node, REMIX_LOADER_CLASS, TEXT.remixLoaderTitle, "__h3EasyRemixLoaderInstalled");
+    return nodeMatchesClass(node, REMIX_LOADER_CLASS, TEXT.remixLoaderTitle, "__feihouStandardH3EasyRemixLoaderInstalled");
 }
 
 function isAdapter(node) {
-    return nodeMatchesClass(node, ADAPTER_CLASS, TEXT.adapterTitle, "__h3EasyAdapterInstalled");
+    return nodeMatchesClass(node, ADAPTER_CLASS, TEXT.adapterTitle, "__feihouStandardH3EasyAdapterInstalled");
 }
 
 function isOutput(node) {
-    return nodeMatchesClass(node, OUTPUT_CLASS, TEXT.outputTitle, "__h3EasyOutputInstalled");
+    return nodeMatchesClass(node, OUTPUT_CLASS, TEXT.outputTitle, "__feihouStandardH3EasyOutputInstalled");
 }
 
 function canonicalOption(name, value) {
@@ -477,6 +477,11 @@ function localizeNodeInstance(node) {
         return;
     }
     if (!isTarget(node)) return;
+    // Upgrade old saved nodes by appending a socket, never by inserting a
+    // serialized widget or shifting any existing input/link index.
+    if (!(node.inputs || []).some((input) => input.name === "production_shot")) {
+        node.addInput?.("production_shot", "FEIHOU_H3_PRODUCTION_SHOT");
+    }
     node.title = TEXT.mainTitle;
     const labels = { mode: TEXT.mode, prompt: TEXT.prompt, resolution: TEXT.resolution, aspect_ratio: TEXT.aspectRatio, width: TEXT.width, height: TEXT.height, audio_duration_auto: TEXT.audioDurationAuto, seconds: TEXT.seconds, advanced: TEXT.advanced, force_offload: TEXT.forceOffload, low_vram_streamed_attention: TEXT.lowVramStreamedAttention, prompt_optimizer_enabled: TEXT.promptOptimizerEnabled, prompt_optimizer_provider: TEXT.promptOptimizerProvider, prompt_optimizer_scene_guide: TEXT.promptOptimizerSceneGuide, fps: TEXT.fps, keyframe_role: TEXT.keyframeRole, ref_image_size: TEXT.refImageSize, reference_mention_mode: TEXT.referenceMentionMode };
     for (const widget of node.widgets || []) {
@@ -485,6 +490,7 @@ function localizeNodeInstance(node) {
     }
     for (const input of node.inputs || []) {
         if (input.name === "h3_bundle") setLocalizedSlotLabel(input, TEXT.bundle);
+        if (input.name === "production_shot") setLocalizedSlotLabel(input, isChineseComfyLocale() ? "制作包分镜" : "Production shot");
         if (input.name === "media") setLocalizedSlotLabel(input, TEXT.inputMedia);
     }
     const outputLabels = { model: TEXT.outputModel, second_sampling_model: TEXT.outputSecondSamplingModel, h3_context: TEXT.outputContext };
@@ -1546,7 +1552,7 @@ function scheduleDeferredInputCreateMenu(canvas, event, pending, allowed) {
 
 function installQuickCreateCapture(canvas) {
     if (!canvas?.canvas || !canvas?.linkConnector?.events) return false;
-    if (canvas === quickCreateCaptureCanvas && canvas.__h3EasyQuickCreateCaptureInstalled) return true;
+    if (canvas === quickCreateCaptureCanvas && canvas.__feihouStandardH3EasyQuickCreateCaptureInstalled) return true;
 
     // Nodes 2.0 can replace app.canvas while the page is starting. A module-global
     // "installed" flag leaves the handlers attached to the discarded canvas and
@@ -1555,7 +1561,7 @@ function installQuickCreateCapture(canvas) {
     quickCreateCaptureCleanup?.();
     quickCreateCaptureCleanup = null;
     quickCreateCaptureCanvas = canvas;
-    canvas.__h3EasyQuickCreateCaptureInstalled = true;
+    canvas.__feihouStandardH3EasyQuickCreateCaptureInstalled = true;
     const handler = (event) => {
         // A ContextMenu item click also bubbles through the global pointer-up
         // listeners while the temporary connector is still being held. Without
@@ -1637,7 +1643,7 @@ function installQuickCreateCapture(canvas) {
         events.removeEventListener?.("dropped-on-canvas", droppedOnCanvasHandler, { capture: true });
         if (wrappedDispatch && events.dispatch === wrappedDispatch) events.dispatch = originalDispatch;
         if (events.dispatchEvent === wrappedDispatchEvent) events.dispatchEvent = originalDispatchEvent;
-        canvas.__h3EasyQuickCreateCaptureInstalled = false;
+        canvas.__feihouStandardH3EasyQuickCreateCaptureInstalled = false;
         if (quickCreateCaptureCanvas === canvas) quickCreateCaptureCanvas = null;
     };
     return true;
@@ -1885,6 +1891,11 @@ function patchGraphToPrompt() {
             setWidgetInput("keyframe_role", canonicalOption("keyframe_role", getWidgetValue(node, "keyframe_role", KEYFRAME_FIRST)));
             setWidgetInput("ref_image_size", canonicalOption("ref_image_size", getWidgetValue(node, "ref_image_size", REF_IMAGE_DEFAULT)));
             setWidgetInput("reference_mention_mode", canonicalOption("reference_mention_mode", getWidgetValue(node, "reference_mention_mode", "index")));
+            if (Array.isArray(promptNode.inputs.production_shot)) {
+                // UI previews must not change the fallback settings of a later
+                // queued shot which omits FPS/resolution/aspect metadata.
+                for (const [name, value] of Object.entries(productionFallbackValues(node))) setWidgetInput(name, value);
+            }
         }
         return promptData;
     };
@@ -2138,10 +2149,10 @@ function requestMentionPreviewRefresh() {
 
 function watchMediaSourceNode(node) {
     if (!node) return;
-    node.__h3MediaSourceWatchInstalled = true;
+    node.__feihouStandardH3MediaSourceWatchInstalled = true;
     for (const widget of node.widgets || []) {
-        if (!widget || widget.__h3MediaSourceWatchInstalled) continue;
-        widget.__h3MediaSourceWatchInstalled = true;
+        if (!widget || widget.__feihouStandardH3MediaSourceWatchInstalled) continue;
+        widget.__feihouStandardH3MediaSourceWatchInstalled = true;
         const originalCallback = widget.callback;
         widget.callback = function onMediaSourceWidgetChange(value) {
             const result = originalCallback?.apply(this, arguments);
@@ -2157,8 +2168,8 @@ function watchMediaSourceNode(node) {
 function installMediaSourceNode(nodeType, nodeData) {
     const name = String(nodeData?.name || "").toLowerCase();
     if (!name.includes("loadimage") && !name.includes("loadvideo") && !name.includes("loadaudio")) return;
-    if (nodeType.prototype.__h3MediaSourceInstalled) return;
-    nodeType.prototype.__h3MediaSourceInstalled = true;
+    if (nodeType.prototype.__feihouStandardH3MediaSourceInstalled) return;
+    nodeType.prototype.__feihouStandardH3MediaSourceInstalled = true;
     const originalCreated = nodeType.prototype.onNodeCreated;
     nodeType.prototype.onNodeCreated = function onNodeCreatedH3MediaSource() {
         const result = originalCreated?.apply(this, arguments);
@@ -4867,6 +4878,43 @@ function ensurePromptEditor(node) {
     repairNodeLayout(node);
 }
 
+// Used only for a connected production-pack preview. Backend execution also
+// applies the socket payload, so queueing multiple shots cannot race this UI.
+function productionFallbackValues(node) {
+    node.properties ||= {};
+    const state = node.properties.feihou_h3_production_preview ||= { fallback: {}, shown: {} };
+    for (const name of ["fps", "resolution", "aspect_ratio"]) {
+        const current = getWidgetValue(node, name);
+        // A manual edit after a preview deliberately becomes the new fallback.
+        if (!Object.hasOwn(state.fallback, name) || (Object.hasOwn(state.shown, name) && current !== state.shown[name])) {
+            state.fallback[name] = current;
+        }
+    }
+    return state.fallback;
+}
+
+export function applyProductionShotPreview(node, shot) {
+    if (!isTarget(node) || !shot?.media || !shot?.params) return;
+    node.properties ||= {};
+    node.properties[EMBEDDED_MEDIA_PROP] = shot.media.map((item) => ({ ...item }));
+    const params = { ...productionFallbackValues(node), ...shot.params };
+    for (const [name, value] of Object.entries(params)) {
+        const widget = getWidget(node, name);
+        if (!widget) continue;
+        widget.value = value;
+        if (widget._state) widget._state.value = value;
+    }
+    node.properties.feihou_h3_production_preview.shown = Object.fromEntries(
+        ["fps", "resolution", "aspect_ratio"].map((name) => [name, getWidgetValue(node, name)]));
+    ensureEmbeddedMedia(node);
+    setPromptFromOptimizedText(node, shot.prompt);
+    syncModeWidgets(node, { adjustHeight: false });
+    renderEmbeddedMediaGallery(node);
+    renderEditorFromNode(node, true);
+    refreshVueNodeWidgets(node);
+    node.setDirtyCanvas?.(true, true);
+}
+
 function installPromptEditorSoon(node) {
     if (!node || node.__h3PromptInstallPending || node.__h3PromptInstallRetry || node.__h3Editor) return;
     const now = typeof performance !== "undefined" ? performance.now() : Date.now();
@@ -5729,8 +5777,8 @@ function installNode(nodeType, nodeData) {
     if (nodeType?.prototype?.constructor?.nodeData && nodeType.prototype.constructor.nodeData !== nodeData) {
         pruneTransportInputs(nodeType.prototype.constructor.nodeData);
     }
-    if (nodeType.prototype.__h3EasyNodeInstalled) return;
-    nodeType.prototype.__h3EasyNodeInstalled = true;
+    if (nodeType.prototype.__feihouStandardH3EasyNodeInstalled) return;
+    nodeType.prototype.__feihouStandardH3EasyNodeInstalled = true;
     const originalCreated = nodeType.prototype.onNodeCreated;
     nodeType.prototype.onNodeCreated = function onNodeCreatedH3Easy() {
         const result = originalCreated?.apply(this, arguments);
@@ -5814,6 +5862,9 @@ function installNode(nodeType, nodeData) {
         const result = originalConnectionsChange?.apply(this, arguments);
         const inputIndex = Number(index);
         const input = this.inputs?.[Number.isFinite(inputIndex) ? inputIndex : -1];
+        if (String(input?.name || "") === "production_shot" && !connected) {
+            delete this.properties?.feihou_h3_production_preview;
+        }
         if (String(input?.name || "") === "prompt") {
             syncPromptExternalConnectionState(this);
             globalThis.requestAnimationFrame?.(() => syncPromptExternalConnectionState(this));
@@ -5881,8 +5932,8 @@ function installNode(nodeType, nodeData) {
 
 function installLoaderNode(nodeType, nodeData) {
     if (nodeData?.name !== LOADER_CLASS) return;
-    if (nodeType.prototype.__h3EasyLoaderInstalled) return;
-    nodeType.prototype.__h3EasyLoaderInstalled = true;
+    if (nodeType.prototype.__feihouStandardH3EasyLoaderInstalled) return;
+    nodeType.prototype.__feihouStandardH3EasyLoaderInstalled = true;
     const originalCreated = nodeType.prototype.onNodeCreated;
     nodeType.prototype.onNodeCreated = function onNodeCreatedH3Loader() {
         const result = originalCreated?.apply(this, arguments);
@@ -5910,8 +5961,8 @@ function installLoaderNode(nodeType, nodeData) {
 
 function installRemixLoaderNode(nodeType, nodeData) {
     if (nodeData?.name !== REMIX_LOADER_CLASS) return;
-    if (nodeType.prototype.__h3EasyRemixLoaderInstalled) return;
-    nodeType.prototype.__h3EasyRemixLoaderInstalled = true;
+    if (nodeType.prototype.__feihouStandardH3EasyRemixLoaderInstalled) return;
+    nodeType.prototype.__feihouStandardH3EasyRemixLoaderInstalled = true;
     const originalCreated = nodeType.prototype.onNodeCreated;
     nodeType.prototype.onNodeCreated = function onNodeCreatedH3RemixLoader() {
         const result = originalCreated?.apply(this, arguments);
@@ -5928,8 +5979,8 @@ function installRemixLoaderNode(nodeType, nodeData) {
 
 function installAdapterNode(nodeType, nodeData) {
     if (nodeData?.name !== ADAPTER_CLASS) return;
-    if (nodeType.prototype.__h3EasyAdapterInstalled) return;
-    nodeType.prototype.__h3EasyAdapterInstalled = true;
+    if (nodeType.prototype.__feihouStandardH3EasyAdapterInstalled) return;
+    nodeType.prototype.__feihouStandardH3EasyAdapterInstalled = true;
     const originalCreated = nodeType.prototype.onNodeCreated;
     nodeType.prototype.onNodeCreated = function onNodeCreatedH3Adapter() {
         const result = originalCreated?.apply(this, arguments);
@@ -5946,8 +5997,8 @@ function installAdapterNode(nodeType, nodeData) {
 
 function installOutputNode(nodeType, nodeData) {
     if (nodeData?.name !== OUTPUT_CLASS) return;
-    if (nodeType.prototype.__h3EasyOutputInstalled) return;
-    nodeType.prototype.__h3EasyOutputInstalled = true;
+    if (nodeType.prototype.__feihouStandardH3EasyOutputInstalled) return;
+    nodeType.prototype.__feihouStandardH3EasyOutputInstalled = true;
     const originalCreated = nodeType.prototype.onNodeCreated;
     nodeType.prototype.onNodeCreated = function onNodeCreatedH3Output() {
         const result = originalCreated?.apply(this, arguments);

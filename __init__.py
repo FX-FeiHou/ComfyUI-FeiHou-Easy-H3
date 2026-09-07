@@ -9,7 +9,10 @@ from .nodes import (
     FeiHouEasyH3PromptPreview,
 )
 
+from .production_pack import FeiHouEasyH3ProductionPackLoader
+
 NODE_CLASS_MAPPINGS = {
+    "FeiHouEasyH3ProductionPackLoader": FeiHouEasyH3ProductionPackLoader,
     "FeiHouEasyH3LoraStack": FeiHouEasyH3LoraStack,
     "FeiHouEasyH3Loader": FeiHouEasyH3Loader,
     "FeiHouEasyH3RemixLoader": FeiHouEasyH3RemixLoader,
@@ -21,6 +24,7 @@ NODE_CLASS_MAPPINGS = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
+    "FeiHouEasyH3ProductionPackLoader": "FeiHou Easy H3 Production Pack Loader",
     "FeiHouEasyH3LoraStack": "Load LoRA (Bypass, Model Only) (Debug)",
     "FeiHouEasyH3Loader": "FeiHou Easy H3 Loader",
     "FeiHouEasyH3RemixLoader": "FeiHou Easy H3 Remix Loader",
