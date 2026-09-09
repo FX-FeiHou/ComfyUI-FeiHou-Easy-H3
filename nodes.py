@@ -2972,7 +2972,7 @@ def _empty_image_conditioning(bundle, prompt, width, height, length, first_frame
     return conditioning, latent
 
 
-def _reference_conditioning(bundle, prompt, width, height, length, ref_image_size, items: list[_MediaInput]):
+def _reference_conditioning(bundle, prompt, width, height, length, ref_image_size, items: list[_MediaInput], *, text_only: bool = False):
     latent, frame_count = h3._empty_av_latent(width, height, length)
     ref_items = []
     ref_blocks = []
@@ -3007,7 +3007,8 @@ def _reference_conditioning(bundle, prompt, width, height, length, ref_image_siz
         target_h = max(h3.CANVAS_MULTIPLE, round(image_h * scale / h3.CANVAS_MULTIPLE) * h3.CANVAS_MULTIPLE)
         resized = h3._resize(image[:1], target_w, target_h, "disabled")
         ref_items.append({"type": "image", "data": resized})
-        ref_blocks.append({"kind": "image", "latent_h": target_h // 16, "latent_w": target_w // 16, "latent": bundle.video_vae.encode(resized)})
+        if not text_only:
+            ref_blocks.append({"kind": "image", "latent_h": target_h // 16, "latent_w": target_w // 16, "latent": bundle.video_vae.encode(resized)})
         tag_by_input[item.input_index] = f"<Picture {picture_ordinal}>"
 
     for video_ordinal, item in enumerate(videos, start=1):
@@ -3027,11 +3028,12 @@ def _reference_conditioning(bundle, prompt, width, height, length, ref_image_siz
         while count % 17 != 5:
             count -= 1
         frames = frames[:count]
-        video_latent = bundle.video_vae.encode(frames)
+        video_latent = None if text_only else bundle.video_vae.encode(frames)
         audio_latent = None
         audio_t = 0
         if soundtrack is not None:
-            audio_latent, audio_t = _encode_reference_audio(bundle.audio_vae, soundtrack)
+            if not text_only:
+                audio_latent, audio_t = _encode_reference_audio(bundle.audio_vae, soundtrack)
             audio_ordinal += 1
             soundtrack_pairs.append((audio_ordinal, video_ordinal))
             ref_items.append({"type": "audio"})
@@ -3041,27 +3043,30 @@ def _reference_conditioning(bundle, prompt, width, height, length, ref_image_siz
             "data": frames[sample_indexes],
             "timestamps": [i / 2.0 for i in range(len(sample_indexes))],
         })
-        ref_blocks.append({
-            "kind": "video_audio" if audio_t else "video",
-            "latent_t": video_latent.shape[2],
-            "latent_h": canvas_h // 16,
-            "latent_w": canvas_w // 16,
-            "ref_audio_t": audio_t,
-            "latent": video_latent,
-            "audio_latent": audio_latent,
-        })
+        if not text_only:
+            ref_blocks.append({
+                "kind": "video_audio" if audio_t else "video",
+                "latent_t": video_latent.shape[2],
+                "latent_h": canvas_h // 16,
+                "latent_w": canvas_w // 16,
+                "ref_audio_t": audio_t,
+                "latent": video_latent,
+                "audio_latent": audio_latent,
+            })
         tag_by_input[item.input_index] = f"<Video {video_ordinal}>"
 
     for item in audios:
         if not isinstance(item.value, Mapping) or "waveform" not in item.value:
             raise ValueError("Audio references must be AUDIO payloads")
-        audio_latent, audio_t = _encode_reference_audio(
-            bundle.audio_vae,
-            _trim_reference_audio(item.value, item.audio_trim),
-        )
+        if not text_only:
+            audio_latent, audio_t = _encode_reference_audio(
+                bundle.audio_vae,
+                _trim_reference_audio(item.value, item.audio_trim),
+            )
         audio_ordinal += 1
         ref_items.append({"type": "audio"})
-        ref_blocks.append({"kind": "audio", "ref_audio_t": audio_t, "audio_latent": audio_latent})
+        if not text_only:
+            ref_blocks.append({"kind": "audio", "ref_audio_t": audio_t, "audio_latent": audio_latent})
         tag_by_input[item.input_index] = f"<Audio {audio_ordinal}>"
 
     if not ref_items or all(item.get("type") == "audio" for item in ref_items):
@@ -3146,6 +3151,8 @@ class FeiHouEasyH3:
                 "prompt_optimizer_scene_guide": (prompt_schemes, {"default": default_prompt_scheme}),
                 "force_offload": ("BOOLEAN", {"default": False}),
                 "low_vram_streamed_attention": ("BOOLEAN", {"default": False}),
+                # Append only: UI display order must not change saved slots.
+                "reference_text_only": ("BOOLEAN", {"default": False, "tooltip": "Reference conditioning only: keep multimodal text encoding but skip all reference VAE latents. Changes fidelity; reference audio waveform conditioning is lost. Does not change one-pass image/first-last-frame conditioning."}),
             },
             "optional": optional,
         }
@@ -3217,7 +3224,8 @@ class FeiHouEasyH3:
                 kwargs[f"media_trim_{index}"] = item.get("audio_trim", "")
             params = production_shot["params"]
             prompt, mode = production_shot["prompt"], MODE_REFERENCE
-            seconds, audio_duration_auto = params["seconds"], True
+            seconds = params["seconds"]
+            audio_duration_auto = params.get("audio_duration_auto", any(item["media_type"] == "audio" for item in production_shot["media"]))
             aspect_ratio = params.get("aspect_ratio", aspect_ratio)
             resolution = params.get("resolution", resolution)
             fps = params.get("fps", fps)
@@ -3228,6 +3236,7 @@ class FeiHouEasyH3:
                          production_shot["id"], seconds, production_shot["range"])
         # ``advanced`` may itself come from an external input. Keep the backend
         # as the source of truth for this UI-only visibility gate.
+        reference_text_only = _as_bool(advanced) and _as_bool(kwargs.get("reference_text_only", False))
         h3_bundle.force_offload_enabled = _as_bool(advanced) and _as_bool(force_offload)
         if h3_bundle.force_offload_enabled:
             h3_bundle.release_residual_second_sampling_model()
@@ -3290,7 +3299,7 @@ class FeiHouEasyH3:
             if counts["image"] == 0 and counts["video"] == 0:
                 raise ValueError("Reference mode needs an image or video in addition to audio")
             model = h3_bundle.model_for("ref2va")
-            conditioning, latent, prompt_preview = _reference_conditioning(h3_bundle, prompt, width, height, length, ref_image_size, items)
+            conditioning, latent, prompt_preview = _reference_conditioning(h3_bundle, prompt, width, height, length, ref_image_size, items, text_only=reference_text_only)
         else:
             first_frame, last_frame = cls._keyframes(items, keyframe_role)
             model = h3_bundle.model_for("fl2va")
@@ -3301,7 +3310,7 @@ class FeiHouEasyH3:
             # has no extra UI switch and leaves one-pass I2V/FL2V untouched.
             if second_sampling_active and items:
                 conditioning, latent, prompt_preview = _reference_conditioning(
-                    h3_bundle, prompt, width, height, length, ref_image_size, items
+                    h3_bundle, prompt, width, height, length, ref_image_size, items, text_only=reference_text_only
                 )
             else:
                 conditioning, latent = _empty_image_conditioning(h3_bundle, prompt, width, height, length, first_frame, last_frame)

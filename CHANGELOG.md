@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.4.4
+
+- Fixes the streamed final-layer wrapper for the updated ComfyUI 0.35 H3 calling convention, retaining compatibility fallbacks.
+- Improves Production Pack Loader folder/HTML discovery, referenced-asset selection, optional voice-reference handling, generation order, preview, ZIP/path selection and responsive diagnostics.
+- Adds an opt-in advanced text-encoder-only reference mode, without reference VAE latents. The built-in sparse-attention experiment is not included; use the official node for configurable sparse attention.
+- Preserves saved widget positions, including migration from the brief two-switch experimental build, and adds a stable gap beneath the prompt editor.
+- Preserves frontend cross-plugin isolation. Removes development test directories from the distributed package.
+- Validation: targeted CPU/frontend regression checks and user-reported local testing; no new GPU benchmark claims.
+
 ## v1.4.3
 
 - Isolates standard-edition frontend installation markers and matches exact node class IDs, preventing cross-plugin media parameter interference.

@@ -921,9 +921,18 @@ class H3StreamedBlocks:
         if final_layer_chunk and fl is not None and hasattr(fl, "video_out") and hasattr(fl, "audio_out"):
             _exact = str(final_layer_gemm).startswith("exact")
 
-            def _fl_forward(x, t_emb, video_seg, audio_seg, _fl=fl, _c=int(final_layer_chunk), _e=_exact):
+            # Capture the bound original before patching. New ComfyUI versions
+            # pass sigma/schedule/shifts positionally; never bind them to our
+            # closure defaults (which previously replaced _fl with a Tensor).
+            _original_forward = fl.forward
+            def _fl_forward(x, t_emb, video_seg, audio_seg, *extra, _fl=fl, _c=int(final_layer_chunk), _e=_exact, _original=_original_forward, **kwargs):
+                # PDD head banks require the native sigma-dependent blending.
+                # Unknown future inputs also stay on the native implementation.
+                pdd = any(head.weight.shape[0] != head.out_features for head in (_fl.video_out, _fl.audio_out))
+                if pdd or len(extra) > 3 or any(k not in {"sigma", "sample_sigmas", "shifts"} for k in kwargs):
+                    return _original(x, t_emb, video_seg, audio_seg, *extra, **kwargs)
                 if x.shape[0] < cfg["min_tokens"]:
-                    return type(_fl).forward(_fl, x, t_emb, video_seg, audio_seg)
+                    return _original(x, t_emb, video_seg, audio_seg, *extra, **kwargs)
                 return streamed_final_layer_forward(_fl, x, t_emb, video_seg, audio_seg, chunk=_c,
                                                     probe=getattr(dm, "_h3_memprobe", None), exact_gemm=_e)
             m.add_object_patch("diffusion_model.final_layer.forward", _fl_forward)

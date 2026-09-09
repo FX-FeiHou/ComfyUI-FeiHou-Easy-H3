@@ -1,6 +1,27 @@
 // No ComfyUI imports: independently testable against a final rendered Shotlist.
 // Package scripts run in an opaque-origin sandbox, never in ComfyUI's window.
 export function extractShotlist(doc) {
+    const projectData = doc.querySelector('script#dh-project-data[type="application/json"], script#mv-project-data[type="application/json"]');
+    if (projectData) {
+        const project = JSON.parse(projectData.textContent);
+        return (project.shots || []).map((shot) => {
+            const resolution = shot.resolution || project.resolution || "";
+            return {
+                ...shot,
+                package_mode: project.package_mode || "",
+                refs: shot.references || shot.refs || [],
+                video_refs: shot.video_refs || shot.video_references || [],
+                voice_reference: shot.voice_reference || project.audio_references?.[0]?.file || "",
+                audio_file: shot.audio_file || project.master_audio || "",
+                aspect_ratio: shot.aspect_ratio || project.aspect_ratio || "",
+                fps: shot.fps ?? project.fps,
+                // Production delivery dimensions (e.g. 4K) are not H3 presets.
+                resolution: /^(360|416|480|540|640|720|768|832|928|1024|1080)p$/i.test(resolution) ? resolution : "",
+                import_warnings: resolution && !/^(360|416|480|540|640|720|768|832|928|1024|1080)p$/i.test(resolution)
+                    ? [`制作包分辨率 ${resolution} 不是 H3 预设，保留主节点分辨率。`] : [],
+            };
+        });
+    }
     const structured = doc.querySelector('script#feihou-shotlist[type="application/json"]');
     if (structured) return JSON.parse(structured.textContent).shots;
     return [...doc.querySelectorAll("article.unit")].map((unit) => {
@@ -11,7 +32,9 @@ export function extractShotlist(doc) {
             id: title.match(/H3-\d+/i)?.[0] || title,
             title,
             range: text(".time-pill"),
-            refs: [...unit.querySelectorAll(".ref-chip")].map((el) => el.textContent.trim()),
+            refs: [...unit.querySelectorAll('.ref-chip:not([data-media-type="video"]):not([data-media-type="audio"])')].map((el) => el.textContent.trim()),
+            video_refs: [...unit.querySelectorAll('[data-media-type="video"]')].map((el) => el.dataset.file || el.textContent.trim()),
+            audio_file: unit.dataset.audioFile || "",
             aspect_ratio: meta.match(/\b(?:16:9|9:16|1:1|2:3|3:2|4:3|3:4|21:9)\b/)?.[0] || "",
         };
         const seconds = text(".duration-pill").match(/([\d.]+)\s*(?:s|秒)/i);

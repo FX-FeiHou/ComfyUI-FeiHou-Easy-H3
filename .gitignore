@@ -5,3 +5,5 @@ prompt_optimizer.json
 SYNC_TARGETS.json
 AGENTS.md
 .DS_Store
+/test/
+/tests/

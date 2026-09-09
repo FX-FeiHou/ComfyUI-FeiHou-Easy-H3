@@ -20,6 +20,7 @@ import zipfile
 SHOT_TYPE = "FEIHOU_H3_PRODUCTION_SHOT"
 IMAGE_EXT = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
 AUDIO_EXT = {".mp3", ".wav", ".flac", ".ogg", ".m4a", ".aac"}
+VIDEO_EXT = {".mp4", ".mov", ".webm", ".mkv", ".avi"}
 MAX_FILES = 5000
 MAX_BYTES = 4 * 1024**3
 MAX_HTML = 16 * 1024**2
@@ -73,7 +74,7 @@ def unpack_zip(archive, destination):
             seen.add(key)
             if item.flag_bits & 1:
                 raise ValueError("Encrypted ZIP files are not supported")
-            if not item.is_dir() and path.suffix.lower() in IMAGE_EXT | AUDIO_EXT | {".html", ".htm"}:
+            if not item.is_dir() and path.suffix.lower() in IMAGE_EXT | AUDIO_EXT | VIDEO_EXT | {".html", ".htm"}:
                 selected.append((item, path))
         for item, path in selected:
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -87,7 +88,7 @@ def inventory(root):
         dirs[:] = [d for d in dirs if not d.startswith(".") and not (Path(base) / d).is_symlink()]
         for name in names:
             path = Path(base) / name
-            if path.suffix.lower() not in IMAGE_EXT | AUDIO_EXT | {".html", ".htm"}:
+            if path.suffix.lower() not in IMAGE_EXT | AUDIO_EXT | VIDEO_EXT | {".html", ".htm"}:
                 continue
             rel = path.relative_to(root).as_posix()
             contained(root, rel)
@@ -122,7 +123,7 @@ def inspect_pack(source, shotlist_file=""):
     elif len(candidates) == 1:
         selected = candidates[0]
     else:
-        raise ValueError(f"Specify a Shotlist HTML relative path; found {len(candidates)}: {candidates}")
+        raise ValueError(f"Expected one Shotlist HTML; found {len(candidates)}. Keep one Shotlist in the selected package folder: {candidates}")
     page = contained(root, selected)
     if page.stat().st_size > MAX_HTML:
         raise ValueError("Shotlist HTML exceeds 16 MiB")
@@ -168,10 +169,6 @@ def validate_shots(data, shots, audio_file=""):
         raise ValueError("No supported shots found, or more than 1000 shots")
     files = data["files"]
     audio_files = [f for f in files if Path(f).suffix.lower() in AUDIO_EXT]
-    if not audio_file and len(audio_files) == 1:
-        audio_file = audio_files[0]
-    if audio_file not in audio_files:
-        raise ValueError("Specify the soundtrack's relative path; the package must contain exactly one selected audio file")
     assets = {}
     for filename in files:
         if Path(filename).suffix.lower() in IMAGE_EXT:
@@ -183,16 +180,41 @@ def validate_shots(data, shots, audio_file=""):
         if not shot_id or shot_id in ids:
             raise ValueError(f"Shot {index}: missing / duplicate ID")
         ids.add(shot_id)
+        digital_human = raw.get("package_mode") == "digital_human"
+        selected_audio = str((raw.get("voice_reference") or "") if digital_human else raw.get("audio_file") or audio_file or "").strip()
+        audio_role = "voice reference" if digital_human else "soundtrack"
+        if selected_audio:
+            matches = [f for f in audio_files if f.casefold() == selected_audio.replace("\\", "/").casefold()]
+            if not matches:
+                matches = [f for f in audio_files if Path(f).name.casefold() == Path(selected_audio.replace("\\", "/")).name.casefold()]
+            if len(matches) != 1:
+                raise ValueError(f"{shot_id}: {audio_role} is missing or ambiguous: {selected_audio}")
+            selected_audio = matches[0]
+        elif not digital_human and len(audio_files) == 1:
+            selected_audio = audio_files[0]
+        elif not digital_human and len(audio_files) > 1:
+            raise ValueError(f"{shot_id}: multiple audio files; declare master_audio or audio_file in the Shotlist")
+        if selected_audio and not contained(data["root"], selected_audio).is_file():
+            raise ValueError(f"{shot_id}: missing {audio_role}: {selected_audio}")
         times = re.split(r"\s*[-–—~～至]\s*", str(raw.get("range", "")))
-        if len(times) != 2:
-            raise ValueError(f"{shot_id}: missing or invalid audio range")
-        start, end = map(time_seconds, times)
+        if digital_human:
+            if raw.get("range") != "00:00:000–00:00:000":
+                raise ValueError(f"{shot_id}: digital-human range must be 00:00:000–00:00:000")
+            if raw.get("seconds") is None:
+                raise ValueError(f"{shot_id}: digital-human shots require seconds")
+            start, end = 0, time_seconds(raw["seconds"])
+        elif len(times) != 2 and raw.get("seconds") is not None:
+            start, end = 0, time_seconds(raw["seconds"])
+        elif len(times) != 2:
+            raise ValueError(f"{shot_id}: missing or invalid range")
+        else:
+            start, end = map(time_seconds, times)
         duration = round(end - start, 1)
         if not 0.2 <= duration <= 30:
             raise ValueError(f"{shot_id}: duration {duration}s is outside Easy H3's 0.2–30s range")
         declared = raw.get("seconds")
         if declared is not None and (not math.isfinite(float(declared)) or abs(float(declared) - duration) > 0.11):
-            raise ValueError(f"{shot_id}: shot duration disagrees with its audio range")
+            raise ValueError(f"{shot_id}: shot duration disagrees with its range")
         refs = raw.get("refs", [])
         if not isinstance(refs, list) or not 1 <= len(refs) <= 9:
             raise ValueError(f"{shot_id}: expected 1–9 ordered image references, got {len(refs)}")
@@ -201,8 +223,19 @@ def validate_shots(data, shots, audio_file=""):
             matches = assets.get(str(ref).strip().casefold(), [])
             if len(matches) != 1:
                 raise ValueError(f"{shot_id}: asset {ref} is missing or ambiguous: {matches}")
-            contained(data["root"], matches[0])
+            if not contained(data["root"], matches[0]).is_file():
+                raise ValueError(f"{shot_id}: missing image: {matches[0]}")
             images.append(matches[0])
+        video_refs = raw.get("video_refs", [])
+        if not isinstance(video_refs, list) or len(video_refs) > 3:
+            raise ValueError(f"{shot_id}: expected at most 3 ordered video references")
+        videos = []
+        for ref in video_refs:
+            matches = [f for f in files if Path(f).suffix.lower() in VIDEO_EXT
+                       and (f.casefold() == str(ref).casefold() or Path(f).stem.casefold() == str(ref).casefold())]
+            if len(matches) != 1 or not contained(data["root"], matches[0]).is_file():
+                raise ValueError(f"{shot_id}: video {ref} is missing or ambiguous: {matches}")
+            videos.append(matches[0])
         prompts = {lang: str(raw.get(f"prompt_{lang}", "")).strip() for lang in ("zh", "en")}
         if not any(prompts.values()) or any(len(p) > 100000 for p in prompts.values()):
             raise ValueError(f"{shot_id}: missing or oversized prompt")
@@ -210,9 +243,13 @@ def validate_shots(data, shots, audio_file=""):
             used = [int(n) for n in re.findall(r"<(?:Picture|Image)\s+(\d+)>", prompt, re.I)]
             if any(n < 1 or n > len(images) for n in used):
                 raise ValueError(f"{shot_id}: prompt references an unavailable Picture slot")
-            if re.search(r"<Video\s+\d+>|<Audio\s+(?!1>)[0-9]+>", prompt, re.I):
-                raise ValueError(f"{shot_id}: this importer supports images and Audio 1 only")
-        params = {"mode": "reference", "seconds": duration, "audio_duration_auto": True,
+            if any(int(n) < 1 or int(n) > len(videos) for n in re.findall(r"<Video\s+(\d+)>", prompt, re.I)):
+                raise ValueError(f"{shot_id}: prompt references an unavailable Video slot")
+            if re.search(r"<Audio\s+(?!1>)[0-9]+>", prompt, re.I):
+                raise ValueError(f"{shot_id}: only the selected soundtrack (Audio 1) is supported")
+            if not selected_audio and re.search(r"<Audio\s+\d+>", prompt, re.I):
+                raise ValueError(f"{shot_id}: prompt references Audio but no reference audio exists")
+        params = {"mode": "reference", "seconds": duration, "audio_duration_auto": False if digital_human else bool(selected_audio),
                   "reference_mention_mode": "index", "prompt_optimizer_enabled": False}
         aspect = str(raw.get("aspect_ratio", "")).strip()
         if aspect:
@@ -230,18 +267,39 @@ def validate_shots(data, shots, audio_file=""):
                 raise ValueError(f"{shot_id}: unsupported resolution")
             params["resolution"] = resolution
         result.append({"id": shot_id, "title": str(raw.get("title", shot_id)), "params": params,
-                       "prompts": prompts, "refs": list(refs), "images": images, "audio": audio_file,
-                       "range": f"{time_text(start)}–{time_text(end)}"})
+                       "prompts": prompts, "refs": list(refs), "images": images, "videos": videos, "audio": selected_audio,
+                       "range": "00:00:000–00:00:000" if digital_human else f"{time_text(start)}–{time_text(end)}"})
     return result
 
 
-def commit_shots(package_id, shots, audio_file=""):
+def commit_shots(package_id, shots, audio_file="", diagnose=False, prompt_language=""):
     data = read_pack(package_id)
+    report = []
+    errors = []
+    if diagnose:
+        if not isinstance(shots, list) or not 1 <= len(shots) <= 1000:
+            raise ValueError("No supported shots found, or more than 1000 shots")
+        ids = set()
+        for index, shot in enumerate(shots, 1):
+            try:
+                validated = validate_shots(data, [shot], audio_file)[0]
+                if prompt_language and not validated["prompts"].get(prompt_language):
+                    raise ValueError(f"{validated['id']}: missing {prompt_language} prompt")
+                if validated["id"] in ids:
+                    raise ValueError(f"Duplicate shot ID: {validated['id']}")
+                ids.add(validated["id"])
+                report.append(f"OK {index}: {validated['id']} | {validated['params']['seconds']}s | images={len(validated['images'])}, videos={len(validated['videos'])}, audio={int(bool(validated['audio']))}")
+                report.extend(str(w) for w in shot.get("import_warnings", []))
+            except (ValueError, TypeError, OSError) as exc:
+                errors.append(f"Shot {index}: {exc}")
+        if errors:
+            return {"package_id": "", "total": len(shots), "errors": errors, "report": report}
     data["shots"] = validate_shots(data, shots, audio_file)
     # A prepared manifest is an immutable snapshot, including already queued work.
     ready_id = uuid.uuid4().hex
     atomic_json(cache_root() / f"{ready_id}.json", data)
-    return {"package_id": ready_id, "total": len(data["shots"])}
+    return {"package_id": ready_id, "total": len(data["shots"]), "errors": [], "report": report,
+            "html_file": data["html_file"], "audio_file": data["shots"][0]["audio"]}
 
 
 def materialize(root, relative, input_root):
@@ -285,8 +343,12 @@ def load_shot(source, package_id, shot_index, prompt_language, shotlist_file="",
     for ordinal, filename in enumerate(shot["images"], 1):
         media.append({**materialize(data["root"], filename, folder_paths.get_input_directory()),
                       "media_type": "image", "ordinal": ordinal})
-    media.append({**materialize(data["root"], shot["audio"], folder_paths.get_input_directory()),
-                  "media_type": "audio", "ordinal": 1, "audio_trim": shot["range"]})
+    for ordinal, filename in enumerate(shot.get("videos", []), 1):
+        media.append({**materialize(data["root"], filename, folder_paths.get_input_directory()),
+                      "media_type": "video", "ordinal": ordinal})
+    if shot["audio"]:
+        media.append({**materialize(data["root"], shot["audio"], folder_paths.get_input_directory()),
+                      "media_type": "audio", "ordinal": 1, "audio_trim": shot["range"]})
     return {"schema": 1, "id": shot["id"], "title": shot["title"], "index": index,
             "total": len(shots), "prompt": prompt, "params": shot["params"], "media": media,
             "refs": shot["refs"], "range": shot["range"]}
@@ -304,7 +366,7 @@ class FeiHouEasyH3ProductionPackLoader:
         return {"required": {
             "source": ("STRING", {"default": ""}),
             "shotlist_file": ("STRING", {"default": "", "tooltip": "Optional relative HTML path when multiple Shotlists exist"}),
-            "audio_file": ("STRING", {"default": "", "tooltip": "Optional relative soundtrack path when multiple audio files exist"}),
+            "audio_file": ("STRING", {"default": "", "tooltip": "Optional MV soundtrack path. Digital-human packs use voice_reference from the Shotlist."}),
             "shot_index": ("INT", {"default": 1, "min": 1, "max": 1000000, "control_after_generate": True}),
             "prompt_language": (["zh", "en"], {"default": "zh"}),
             "package_id": ("STRING", {"default": ""}),
@@ -315,8 +377,8 @@ class FeiHouEasyH3ProductionPackLoader:
         return float("nan")
 
     def load(self, source, shot_index, prompt_language, package_id, **kwargs):
-        shot = load_shot(source, package_id, shot_index, prompt_language,
-                         kwargs.get("shotlist_file", ""), kwargs.get("audio_file", ""))
+        # Legacy path slots remain serializable but no longer override detection.
+        shot = load_shot(source, package_id, shot_index, prompt_language)
         return {"ui": {"production_shot": [shot]}, "result": (shot,)}
 
 
@@ -360,7 +422,7 @@ def register_routes(routes, is_local):
                 if action == "inspect":
                     result = await asyncio.to_thread(inspect_pack, payload["source"], payload.get("shotlist_file", ""))
                 elif action == "prepare":
-                    result = await asyncio.to_thread(commit_shots, payload["package_id"], payload["shots"], payload.get("audio_file", ""))
+                    result = await asyncio.to_thread(commit_shots, payload["package_id"], payload["shots"], payload.get("audio_file", ""), bool(payload.get("diagnose")), payload.get("prompt_language", ""))
                 elif action == "preview":
                     result = await asyncio.to_thread(load_shot, payload["source"], payload["package_id"], payload["shot_index"], payload["prompt_language"], payload.get("shotlist_file", ""), payload.get("audio_file", ""))
                 else:

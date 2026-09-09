@@ -122,6 +122,7 @@ const TEXT = {
     advanced: ZH_BROWSER ? "\u9ad8\u7ea7\u9009\u9879" : "Advanced options",
     forceOffload: ZH_BROWSER ? "\u5f3a\u5236\u5378\u8f7d\uff08\u542b\u91c7\u6837\u540e\u7f13\u5b58\u56de\u6536\uff09" : "Force offload (with post-sampling cache release)",
     lowVramStreamedAttention: ZH_BROWSER ? "\u5b8c\u6574\u4f4e\u663e\u5b58\u5206\u5757\uff08\u5b9e\u9a8c\uff09" : "Complete low-VRAM streamed blocks (experimental)",
+    referenceTextOnly: ZH_BROWSER ? "参考素材仅文本编码（不生成参考 latent）" : "Text-encoder-only references (no reference latents)",
     promptOptimizerEnabled: ZH_BROWSER ? "\u63d0\u793a\u8bcd\u4f18\u5316" : "Prompt optimization",
     promptOptimizerSettings: ZH_BROWSER ? "\u6253\u5f00\u63d0\u793a\u8bcd\u4f18\u5316 API \u8bbe\u7f6e" : "Optimizer settings",
     promptOptimizerSceneGuide: ZH_BROWSER ? "\u63d0\u793a\u8bcd\u65b9\u6848" : "Prompt Guide",
@@ -483,7 +484,7 @@ function localizeNodeInstance(node) {
         node.addInput?.("production_shot", "FEIHOU_H3_PRODUCTION_SHOT");
     }
     node.title = TEXT.mainTitle;
-    const labels = { mode: TEXT.mode, prompt: TEXT.prompt, resolution: TEXT.resolution, aspect_ratio: TEXT.aspectRatio, width: TEXT.width, height: TEXT.height, audio_duration_auto: TEXT.audioDurationAuto, seconds: TEXT.seconds, advanced: TEXT.advanced, force_offload: TEXT.forceOffload, low_vram_streamed_attention: TEXT.lowVramStreamedAttention, prompt_optimizer_enabled: TEXT.promptOptimizerEnabled, prompt_optimizer_provider: TEXT.promptOptimizerProvider, prompt_optimizer_scene_guide: TEXT.promptOptimizerSceneGuide, fps: TEXT.fps, keyframe_role: TEXT.keyframeRole, ref_image_size: TEXT.refImageSize, reference_mention_mode: TEXT.referenceMentionMode };
+    const labels = { mode: TEXT.mode, prompt: TEXT.prompt, resolution: TEXT.resolution, aspect_ratio: TEXT.aspectRatio, width: TEXT.width, height: TEXT.height, audio_duration_auto: TEXT.audioDurationAuto, seconds: TEXT.seconds, advanced: TEXT.advanced, force_offload: TEXT.forceOffload, low_vram_streamed_attention: TEXT.lowVramStreamedAttention, reference_text_only: TEXT.referenceTextOnly, prompt_optimizer_enabled: TEXT.promptOptimizerEnabled, prompt_optimizer_provider: TEXT.promptOptimizerProvider, prompt_optimizer_scene_guide: TEXT.promptOptimizerSceneGuide, fps: TEXT.fps, keyframe_role: TEXT.keyframeRole, ref_image_size: TEXT.refImageSize, reference_mention_mode: TEXT.referenceMentionMode };
     for (const widget of node.widgets || []) {
         if (labels[widget.name]) widget.label = labels[widget.name];
         localizeComboWidget(widget);
@@ -565,6 +566,8 @@ const EMBEDDED_MEDIA_LAYOUT = Object.freeze({
     promptBase: 96,
     promptMin: 50,
     galleryPromptGap: 8,
+    workbenchPaddingTop: 2,
+    promptBottomGap: 12,
     // Fixed rows/gaps inside the gallery. Keep this in sync with the CSS below:
     // headings (16px), section/grid gaps (4px), grid gaps (4px), gallery
     // gaps (8px), gallery padding (2px top/bottom), and the fixed 54px audio row.
@@ -1874,6 +1877,7 @@ function patchGraphToPrompt() {
             setWidgetInput("advanced", advanced);
             setWidgetInput("force_offload", asBoolean(getWidgetValue(node, "force_offload", false)));
             setWidgetInput("low_vram_streamed_attention", asBoolean(getWidgetValue(node, "low_vram_streamed_attention", false)));
+            setWidgetInput("reference_text_only", asBoolean(getWidgetValue(node, "reference_text_only", false)));
             delete promptNode.inputs.prompt_optimizer_settings;
             setWidgetInput("prompt_optimizer_enabled", asBoolean(getWidgetValue(node, "prompt_optimizer_enabled", false)));
             setWidgetInput("prompt_optimizer_provider", providerId);
@@ -3605,6 +3609,15 @@ function setConditionalWidgetVisible(node, widget, visible, { adjustHeight = tru
 }
 
 function syncModeWidgets(node, { adjustHeight = true } = {}) {
+    // Display only: persistence uses the backend order, not this array order.
+    for (const name of ["reference_text_only"]) {
+        const widget = getWidget(node, name);
+        const anchor = getWidget(node, "low_vram_streamed_attention");
+        if (widget && anchor && node.widgets.indexOf(widget) > node.widgets.indexOf(anchor)) {
+            node.widgets.splice(node.widgets.indexOf(widget), 1);
+            node.widgets.splice(node.widgets.indexOf(anchor), 0, widget);
+        }
+    }
     const advanced = isAdvancedEnabled(node);
     const optimizerEnabled = advanced && asBoolean(getWidgetValue(node, "prompt_optimizer_enabled", false));
     const changed = [
@@ -3615,6 +3628,7 @@ function syncModeWidgets(node, { adjustHeight = true } = {}) {
         setConditionalWidgetVisible(node, getWidget(node, "reference_mention_mode"), advanced && isReferenceMode(node), { adjustHeight }),
         setConditionalWidgetVisible(node, getWidget(node, "force_offload"), advanced, { adjustHeight }),
         setConditionalWidgetVisible(node, getWidget(node, "low_vram_streamed_attention"), advanced, { adjustHeight }),
+        setConditionalWidgetVisible(node, getWidget(node, "reference_text_only"), advanced, { adjustHeight }),
         setConditionalWidgetVisible(node, getWidget(node, "prompt_optimizer_enabled"), advanced, { adjustHeight }),
         setConditionalWidgetVisible(node, getWidget(node, "prompt_optimizer_provider"), optimizerEnabled, { adjustHeight }),
         setConditionalWidgetVisible(node, getWidget(node, "prompt_optimizer_scene_guide"), optimizerEnabled, { adjustHeight }),
@@ -5107,6 +5121,7 @@ function repairConfiguredWidgetValues(node, info) {
         advanced: false,
         force_offload: false,
         low_vram_streamed_attention: false,
+        reference_text_only: false,
         fps: 24,
         keyframe_role: KEYFRAME_FIRST,
         ref_image_size: REF_IMAGE_DEFAULT,
@@ -5125,6 +5140,7 @@ function repairConfiguredWidgetValues(node, info) {
         "ref_image_size", "reference_mention_mode", "prompt_optimizer_enabled",
         "prompt_optimizer_provider", "prompt_optimizer_scene_guide",
         "force_offload", "low_vram_streamed_attention",
+        "reference_text_only",
     ];
     const values = raw;
     // Embedded gallery and rich prompt editor DOM widgets serialize null
@@ -5176,6 +5192,9 @@ function repairConfiguredWidgetValues(node, info) {
         );
     }
 
+    // Migrate the brief two-switch build without enabling text-only by mistake.
+    if (typeof values[19] === "boolean") values.splice(18, 1);
+
     const normalized = {
         mode: Object.prototype.hasOwnProperty.call(OPTION_DEFS.mode, canonicalOption("mode", values[0]))
             ? canonicalOption("mode", values[0]) : defaults.mode,
@@ -5193,6 +5212,7 @@ function repairConfiguredWidgetValues(node, info) {
         advanced: asBoolean(values[8], defaults.advanced),
         force_offload: asBoolean(values[16], defaults.force_offload),
         low_vram_streamed_attention: asBoolean(values[17], defaults.low_vram_streamed_attention),
+        reference_text_only: asBoolean(values[18], defaults.reference_text_only),
         fps: Number.isFinite(Number(values[9])) ? Number(values[9]) : defaults.fps,
         keyframe_role: Object.prototype.hasOwnProperty.call(OPTION_DEFS.keyframe_role, canonicalOption("keyframe_role", values[10]))
             ? canonicalOption("keyframe_role", values[10]) : defaults.keyframe_role,
@@ -5472,7 +5492,8 @@ function syncEmbeddedMediaResponsiveLayout(node, { resetBaseline = false } = {})
     const layout = EMBEDDED_MEDIA_LAYOUT;
     const modeKey = reference ? "reference" : "image";
     const minGalleryHeight = embeddedGalleryHeight(reference, layout.imageSlotMin);
-    const hostMinHeight = minGalleryHeight + layout.promptMin + layout.galleryPromptGap;
+    const padding = layout.workbenchPaddingTop + layout.promptBottomGap;
+    const hostMinHeight = minGalleryHeight + layout.promptMin + layout.galleryPromptGap + padding;
     const nodeHeight = Number(node?.size?.[1]);
     const modernNodes = isVueNodesMode();
     let state = node.__h3EmbeddedResponsiveLayout;
@@ -5501,14 +5522,14 @@ function syncEmbeddedMediaResponsiveLayout(node, { resetBaseline = false } = {})
     const maximumScale = layout.imageSlotMax / layout.imageSlotBase;
     const galleryVariableHeight = (reference ? 3 + layout.videoToImageRatio : 3) * layout.imageSlotBase;
     const galleryChromeHeight = reference ? layout.referenceModeChrome : layout.imageModeChrome;
-    const rawScale = (hostHeight - layout.galleryPromptGap - galleryChromeHeight) / (galleryVariableHeight + layout.promptBase);
+    const rawScale = (hostHeight - padding - layout.galleryPromptGap - galleryChromeHeight - layout.widgetRowOffset) / (galleryVariableHeight + layout.promptBase);
     const proportionalScale = Math.max(minimumScale, Math.min(maximumScale, rawScale));
     const imageSlotHeight = layout.imageSlotBase * proportionalScale;
     const galleryHeight = embeddedGalleryHeight(reference, imageSlotHeight);
     const previewAtMax = proportionalScale >= maximumScale;
-    const promptHeight = previewAtMax
-        ? Math.max(layout.promptMin, hostHeight - galleryHeight - layout.galleryPromptGap)
-        : Math.max(layout.promptMin, layout.promptBase * proportionalScale);
+    // Reserve the footer inside the allocated host, not as an external margin.
+    // Use the exact remainder after rounded preview rows to avoid overflow.
+    const promptHeight = Math.max(layout.promptMin, hostHeight - galleryHeight - layout.galleryPromptGap - padding);
     const videoSlotHeight = Math.round(imageSlotHeight * layout.videoToImageRatio);
     gallery.style.setProperty("--fh-h3-image-slot-height", `${Math.round(imageSlotHeight)}px`);
     gallery.style.setProperty("--fh-h3-video-slot-height", `${videoSlotHeight}px`);
@@ -5651,7 +5672,8 @@ function ensureEmbeddedMediaGallery(node) {
         // every extra pixel is then partitioned inside the workbench.
         getMinHeight: () => embeddedGalleryHeight(
             isReferenceMode(node), EMBEDDED_MEDIA_LAYOUT.imageSlotMin,
-        ) + EMBEDDED_MEDIA_LAYOUT.promptMin + EMBEDDED_MEDIA_LAYOUT.galleryPromptGap,
+        ) + EMBEDDED_MEDIA_LAYOUT.promptMin + EMBEDDED_MEDIA_LAYOUT.galleryPromptGap
+            + EMBEDDED_MEDIA_LAYOUT.workbenchPaddingTop + EMBEDDED_MEDIA_LAYOUT.promptBottomGap,
         afterResize: () => {
             // Vue Nodes already runs its own DOM measurement after a resize.
             // Calling our layout twice (including once on the next animation
@@ -5890,6 +5912,18 @@ function installNode(nodeType, nodeData) {
         if (info) {
             info.properties ||= {};
             info.properties[EMBEDDED_MEDIA_PROP] = ensureEmbeddedMedia(this);
+            // Keep all original slots unchanged, regardless of display order
+            // or non-serializable gallery/editor DOM widgets.
+            const names = [
+                "mode", "prompt", "resolution", "aspect_ratio", "width", "height",
+                "audio_duration_auto", "seconds", "advanced", "fps", "keyframe_role",
+                "ref_image_size", "reference_mention_mode", "prompt_optimizer_enabled",
+                "prompt_optimizer_provider", "prompt_optimizer_scene_guide",
+                "force_offload", "low_vram_streamed_attention",
+                "reference_text_only",
+            ];
+            info.widgets_values = names.map((name) => getWidget(this, name)?.value ?? null);
+            info.widgets_values_named = Object.fromEntries(names.map((name, i) => [name, info.widgets_values[i]]));
         }
         return result;
     };
@@ -6035,7 +6069,7 @@ function install() {
     const style = document.createElement("style");
     style.textContent = `
       .fh-h3-embedded-workbench {
-        display: flex; flex-direction: column; gap: 8px; width: auto; height: 100%; min-width: 0; min-height: 0; box-sizing: border-box; margin: 0 10px; padding: 2px 0;
+        display: flex; flex-direction: column; gap: 8px; width: auto; height: 100%; min-width: 0; min-height: 0; box-sizing: border-box; margin: 0 10px; padding: ${EMBEDDED_MEDIA_LAYOUT.workbenchPaddingTop}px 0 ${EMBEDDED_MEDIA_LAYOUT.promptBottomGap}px;
       }
       .fh-h3-media-gallery {
         --fh-h3-image-slot-height: 72px; --fh-h3-video-slot-height: 68px;
