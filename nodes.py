@@ -3227,7 +3227,7 @@ class FeiHouEasyH3:
             seconds = params["seconds"]
             audio_duration_auto = params.get("audio_duration_auto", any(item["media_type"] == "audio" for item in production_shot["media"]))
             aspect_ratio = params.get("aspect_ratio", aspect_ratio)
-            resolution = params.get("resolution", resolution)
+            # Package resolution never overrides the user's generation settings.
             fps = params.get("fps", fps)
             reference_mention_mode = REFERENCE_MENTION_INDEX
             prompt_optimizer_enabled = False

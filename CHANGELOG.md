@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.4.5
+
+- Supports production-pack ZIP upload, inspection and preview from same-origin cloud ComfyUI browsers, including gateways that strip Origin while preserving same-origin Fetch Metadata. Adds credential-free access diagnostics.
+- Resolves relative folder/ZIP paths under ComfyUI/input; retains absolute paths with remote directory restrictions and a server-local remote_roots configuration. Cloud deployments still require platform authentication.
+- Leaves generation resolution and pixel dimensions under manual control: package inspection no longer validates or applies them, and old cached previews cannot override them. Aspect-ratio and FPS handling are retained.
+- Documents cloud setup and folder permissions without a fixed domain allow-list. Local configuration and development tests are excluded from publication.
+- Validation: seven local route/regression tests, syntax checks and user-confirmed cloud access. No GPU performance claims.
+
 ## v1.4.4
 
 - Fixes the streamed final-layer wrapper for the updated ComfyUI 0.35 H3 calling convention, retaining compatibility fallbacks.

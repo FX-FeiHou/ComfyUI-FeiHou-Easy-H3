@@ -5,7 +5,6 @@ export function extractShotlist(doc) {
     if (projectData) {
         const project = JSON.parse(projectData.textContent);
         return (project.shots || []).map((shot) => {
-            const resolution = shot.resolution || project.resolution || "";
             return {
                 ...shot,
                 package_mode: project.package_mode || "",
@@ -15,10 +14,7 @@ export function extractShotlist(doc) {
                 audio_file: shot.audio_file || project.master_audio || "",
                 aspect_ratio: shot.aspect_ratio || project.aspect_ratio || "",
                 fps: shot.fps ?? project.fps,
-                // Production delivery dimensions (e.g. 4K) are not H3 presets.
-                resolution: /^(360|416|480|540|640|720|768|832|928|1024|1080)p$/i.test(resolution) ? resolution : "",
-                import_warnings: resolution && !/^(360|416|480|540|640|720|768|832|928|1024|1080)p$/i.test(resolution)
-                    ? [`制作包分辨率 ${resolution} 不是 H3 预设，保留主节点分辨率。`] : [],
+                // Resolution belongs to the user's main node, not the package.
             };
         });
     }

@@ -7,3 +7,4 @@ AGENTS.md
 .DS_Store
 /test/
 /tests/
+/production_pack_access.json

@@ -20,6 +20,7 @@ function set(node, name, data) {
 async function request(action, data, file) {
     const response = await api.fetchApi(`/feihou_easy_h3/production_pack/${action}`, {
         method: "POST",
+        credentials: "same-origin",
         headers: { "X-FeiHou-Pack": "1", "Content-Type": file ? "application/octet-stream" : "application/json" },
         body: file || JSON.stringify(data),
     });

@@ -1,4 +1,4 @@
-"""Local production-pack import. HTML is rendered only in an isolated browser frame.
+"""Production-pack import. HTML is rendered only in an isolated browser frame.
 
 No package Python/JS is executed by the server. Only a validated shot manifest
 and referenced media cross the loader socket; model/sampler settings stay local.
@@ -6,6 +6,7 @@ and referenced media cross the loader socket; model/sampler settings stay local.
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
 import math
 import os
@@ -16,6 +17,7 @@ import stat
 import tempfile
 import uuid
 import zipfile
+from urllib.parse import urlsplit
 
 SHOT_TYPE = "FEIHOU_H3_PRODUCTION_SHOT"
 IMAGE_EXT = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
@@ -24,6 +26,132 @@ VIDEO_EXT = {".mp4", ".mov", ".webm", ".mkv", ".avi"}
 MAX_FILES = 5000
 MAX_BYTES = 4 * 1024**3
 MAX_HTML = 16 * 1024**2
+
+
+def _pack_request_allowed(request, is_local):
+    """CSRF protection, not authentication; cloud deployments need a login gateway.
+
+    Browser-controlled Fetch Metadata handles reverse proxies that rewrite Host.
+    Never use a forwarded client IP to grant unrestricted local filesystem access.
+    """
+    if request.headers.get("X-FeiHou-Pack") != "1":
+        return False
+    site = request.headers.get("Sec-Fetch-Site", "")
+    if site and site != "same-origin":
+        return False
+    origin = request.headers.get("Origin", "")
+    if not origin:
+        # Some cloud gateways strip Origin but preserve browser Fetch Metadata.
+        # The custom header was checked above; explicit cross-site values still fail.
+        return site == "same-origin" or (is_local(request) and not site)
+    try:
+        parsed = urlsplit(origin)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
+            return False
+        return site == "same-origin" or parsed.netloc.casefold() == request.host.casefold()
+    except ValueError:
+        return False
+
+
+def _pack_request_diagnostic(request, is_local):
+    """Report only guard facts; never expose cookies, tokens, URLs or headers wholesale."""
+    marker = request.headers.get("X-FeiHou-Pack")
+    origin = request.headers.get("Origin", "")
+    site = request.headers.get("Sec-Fetch-Site", "")
+    valid_origin = False
+    host_match = False
+    try:
+        parsed = urlsplit(origin)
+        valid_origin = bool(parsed.scheme in {"http", "https"} and parsed.hostname
+                            and not parsed.username and not parsed.password)
+        host_match = valid_origin and parsed.netloc.casefold() == request.host.casefold()
+    except ValueError:
+        pass
+    peer_local = bool(is_local(request))
+    if marker != "1":
+        reason = "pack-header-missing" if marker is None else "pack-header-invalid"
+    elif site and site != "same-origin":
+        reason = "fetch-site-rejected"
+    elif not origin:
+        reason = "allowed" if site == "same-origin" or (peer_local and not site) else "origin-missing"
+    elif not valid_origin:
+        reason = "origin-invalid"
+    elif site != "same-origin" and not host_match:
+        reason = "origin-host-mismatch"
+    else:
+        reason = "allowed"
+    return {
+        "build": "pack-access-20260911c", "reason": reason,
+        "pack_header": "1" if marker == "1" else ("missing" if marker is None else "invalid"),
+        "fetch_site": site if site in {"same-origin", "same-site", "cross-site", "none"} else ("missing" if not site else "invalid"),
+        "origin_present": bool(origin), "origin_valid": valid_origin,
+        "origin_host_match": host_match, "peer_loopback": peer_local,
+    }
+
+
+def _pack_request_is_local(request, is_local):
+    """A loopback proxy must not make an external browser a local path reader."""
+    if not is_local(request):
+        return False
+    if not request.headers.get("Origin") and request.headers.get("Sec-Fetch-Site"):
+        # Without the browser origin, a loopback gateway does not prove locality.
+        return False
+    try:
+        host = urlsplit(request.headers.get("Origin") or f"http://{request.host}").hostname
+        return host == "localhost" or ipaddress.ip_address(host or "").is_loopback
+    except ValueError:
+        return False
+
+
+def _remote_pack_roots():
+    import folder_paths
+    roots = [Path(folder_paths.get_input_directory()).resolve()]
+    config = Path(__file__).with_name("production_pack_access.json")
+    if config.exists():
+        if config.stat().st_size > 65536:
+            raise ValueError("production_pack_access.json exceeds 64 KiB")
+        data = json.loads(config.read_text(encoding="utf-8-sig"))
+        extra = data.get("remote_roots", []) if isinstance(data, dict) else None
+        if not isinstance(extra, list) or any(not isinstance(p, str) for p in extra):
+            raise ValueError("production_pack_access.json: remote_roots must be an array of absolute folder paths")
+        for name in extra:
+            path = Path(name).expanduser()
+            if not path.is_absolute() or path.resolve() == Path(path.anchor):
+                raise ValueError("remote_roots must contain specific absolute folders, not filesystem roots")
+            roots.append(path.resolve())
+    return roots
+
+
+def _resolve_pack_source(source):
+    """Relative package names always belong to ComfyUI/input, never process CWD."""
+    import folder_paths
+    name = str(source).strip().strip('"')
+    if not name:
+        raise ValueError("Enter a production-pack folder or ZIP path first")
+    candidate = Path(name.replace("\\", "/")).expanduser()
+    if candidate.is_absolute():
+        return candidate.resolve()
+    return contained(folder_paths.get_input_directory(), name)
+
+
+def _authorize_pack_source(source, local):
+    if local:
+        return
+    name = str(source).strip().strip('"')
+    if name.replace("\\", "/").startswith("//"):
+        raise ValueError("Remote package paths cannot use UNC/network shares; upload a ZIP instead")
+    path = _resolve_pack_source(name)
+    # Only server-created upload names, never arbitrary paths in the user/cache directory.
+    if (path.parent == cache_root().resolve()
+            and re.fullmatch(r"upload_[a-f0-9]{32}\.zip", path.name) and path.is_file()):
+        return
+    if any(path.is_relative_to(root) for root in _remote_pack_roots()):
+        return
+    raise ValueError(
+        "Remote package path is outside allowed folders. Upload a ZIP, put the package under ComfyUI/input, "
+        "or add its server folder to remote_roots in production_pack_access.json. "
+        "远程路径须位于云端 ComfyUI/input 内；其他目录请在服务器 production_pack_access.json 的 remote_roots 中添加。"
+    )
 
 
 def cache_root():
@@ -99,10 +227,8 @@ def inventory(root):
 
 
 def inspect_pack(source, shotlist_file=""):
-    source = str(source).strip().strip('"')
-    if not source:
-        raise ValueError("Enter a production-pack folder or ZIP path first")
-    root = Path(source).expanduser().resolve()
+    root = _resolve_pack_source(source)
+    source = str(root)
     if root.is_file() and root.suffix.lower() == ".zip":
         dest = Path(tempfile.mkdtemp(prefix="zip_", dir=cache_root()))
         try:
@@ -261,11 +387,7 @@ def validate_shots(data, shots, audio_file=""):
             if not math.isfinite(fps) or not 1 <= fps <= 120:
                 raise ValueError(f"{shot_id}: invalid FPS")
             params["fps"] = fps
-        if raw.get("resolution"):
-            resolution = str(raw["resolution"]).upper()
-            if resolution not in {f"{p}P" for p in [360, 416, 480, 540, 640, 720, 768, 832, 928, 1024, 1080]}:
-                raise ValueError(f"{shot_id}: unsupported resolution")
-            params["resolution"] = resolution
+        # Ignore all package resolution declarations; generation uses manual settings.
         result.append({"id": shot_id, "title": str(raw.get("title", shot_id)), "params": params,
                        "prompts": prompts, "refs": list(refs), "images": images, "videos": videos, "audio": selected_audio,
                        "range": "00:00:000–00:00:000" if digital_human else f"{time_text(start)}–{time_text(end)}"})
@@ -322,7 +444,7 @@ def materialize(root, relative, input_root):
 def load_shot(source, package_id, shot_index, prompt_language, shotlist_file="", audio_file=""):
     import folder_paths
     data = read_pack(package_id)
-    if str(source).strip().strip('"') != data["source"]:
+    if _resolve_pack_source(source) != _resolve_pack_source(data["source"]):
         raise ValueError("Source changed: load / refresh the production pack before queuing")
     if shotlist_file and contained(data["root"], shotlist_file) != contained(data["root"], data["html_file"]):
         raise ValueError("Shotlist selection changed: load / refresh the production pack")
@@ -334,6 +456,9 @@ def load_shot(source, package_id, shot_index, prompt_language, shotlist_file="",
     if index < 1 or index > len(shots):
         raise ValueError(f"Shot {index} is outside 1–{len(shots)}; batch count must not exceed the remaining shots")
     shot = shots[index - 1]
+    # Old prepared manifests may still contain resolution overrides.
+    shot = {**shot, "params": {k: v for k, v in shot["params"].items()
+                               if k not in {"resolution", "width", "height"}}}
     if audio_file and contained(data["root"], audio_file) != contained(data["root"], shot["audio"]):
         raise ValueError("Soundtrack selection changed: load / refresh the production pack")
     prompt = shot["prompts"].get(prompt_language)
@@ -386,19 +511,17 @@ def register_routes(routes, is_local):
     from aiohttp import web
     import asyncio
 
-    def guard(request):
-        # A custom header plus same-origin check prevents cross-site form/fetch
-        # requests from turning this local path picker into a file-read endpoint.
-        from urllib.parse import urlsplit
-        origin = request.headers.get("Origin")
-        return (is_local(request) and request.headers.get("X-FeiHou-Pack") == "1"
-                and (not origin or urlsplit(origin).netloc == request.host))
-
     @routes.post("/feihou_easy_h3/production_pack/{action}")
     async def production_pack_route(request):
-        if not guard(request):
-            return web.json_response({"error": "Production packs are available only to the local ComfyUI browser"}, status=403)
+        if not _pack_request_allowed(request, is_local):
+            diagnostic = _pack_request_diagnostic(request, is_local)
+            detail = json.dumps(diagnostic, ensure_ascii=False)
+            return web.json_response({
+                "error": "制作包来源检查未通过。后端实际收到的检查信息（不含凭据）： " + detail,
+                "diagnostic": diagnostic,
+            }, status=403)
         try:
+            local = _pack_request_is_local(request, is_local)
             action = request.match_info["action"]
             if action == "upload":
                 path = cache_root() / f"upload_{uuid.uuid4().hex}.zip"
@@ -419,11 +542,16 @@ def register_routes(routes, is_local):
                 if request.content_length and request.content_length > MAX_HTML:
                     raise ValueError("Request exceeds 16 MiB")
                 payload = json.loads((await request.read()).decode("utf-8"))
+                if not isinstance(payload, dict):
+                    raise ValueError("Expected a production-pack JSON object")
                 if action == "inspect":
+                    _authorize_pack_source(payload["source"], local)
                     result = await asyncio.to_thread(inspect_pack, payload["source"], payload.get("shotlist_file", ""))
                 elif action == "prepare":
+                    _authorize_pack_source(read_pack(payload["package_id"])["source"], local)
                     result = await asyncio.to_thread(commit_shots, payload["package_id"], payload["shots"], payload.get("audio_file", ""), bool(payload.get("diagnose")), payload.get("prompt_language", ""))
                 elif action == "preview":
+                    _authorize_pack_source(read_pack(payload["package_id"])["source"], local)
                     result = await asyncio.to_thread(load_shot, payload["source"], payload["package_id"], payload["shot_index"], payload["prompt_language"], payload.get("shotlist_file", ""), payload.get("audio_file", ""))
                 else:
                     raise ValueError("Unknown package operation")

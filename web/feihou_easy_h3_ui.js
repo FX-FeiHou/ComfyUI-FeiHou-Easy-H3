@@ -4897,7 +4897,10 @@ function ensurePromptEditor(node) {
 function productionFallbackValues(node) {
     node.properties ||= {};
     const state = node.properties.feihou_h3_production_preview ||= { fallback: {}, shown: {} };
-    for (const name of ["fps", "resolution", "aspect_ratio"]) {
+    delete state.fallback.resolution;
+    delete state.fallback.width;
+    delete state.fallback.height;
+    for (const name of ["fps", "aspect_ratio"]) {
         const current = getWidgetValue(node, name);
         // A manual edit after a preview deliberately becomes the new fallback.
         if (!Object.hasOwn(state.fallback, name) || (Object.hasOwn(state.shown, name) && current !== state.shown[name])) {
@@ -4912,6 +4915,9 @@ export function applyProductionShotPreview(node, shot) {
     node.properties ||= {};
     node.properties[EMBEDDED_MEDIA_PROP] = shot.media.map((item) => ({ ...item }));
     const params = { ...productionFallbackValues(node), ...shot.params };
+    delete params.resolution;
+    delete params.width;
+    delete params.height;
     for (const [name, value] of Object.entries(params)) {
         const widget = getWidget(node, name);
         if (!widget) continue;
