@@ -33,7 +33,7 @@ function t(zh, en) {
 }
 
 function stackTitle() {
-    return t("加载LoRA（旁路，仅模型）（用于调试）", "Load LoRA (Bypass, Model Only) (Debug)");
+    return t("加载LoRA（仅模型）", "Load LoRA (Model Only)");
 }
 
 function localizeLoraSlots(node) {
@@ -95,6 +95,7 @@ class FeiHouEasyH3LoraStackNode extends RgthreeBaseServerNode {
         this.widgetButtonSpacer = null;
         this.loraWidgetsCounter = 0;
         if (info?.id != null) super.configure({...info, widgets_values: []});
+        this.title = stackTitle();
         for (const value of values) {
             const row = this.addNewLoraWidget();
             row.value = value;
@@ -122,6 +123,7 @@ class FeiHouEasyH3LoraStackNode extends RgthreeBaseServerNode {
     addNewLoraWidget(lora) {
         this.loraWidgetsCounter++;
         const row = this.addCustomWidget(new FeiHouEasyH3LoraWidget(`lora_${this.loraWidgetsCounter}`));
+        row.bypassMode = () => this.properties?.feihou_lora_bypass !== false;
         if (lora) row.setLora(lora);
         if (this.widgetButtonSpacer) {
             moveArrayItem(this.widgets, row, this.widgets.indexOf(this.widgetButtonSpacer));
@@ -130,6 +132,8 @@ class FeiHouEasyH3LoraStackNode extends RgthreeBaseServerNode {
     }
 
     addNonLoraWidgets() {
+        this.properties ||= {};
+        if (typeof this.properties.feihou_lora_bypass !== "boolean") this.properties.feihou_lora_bypass = true;
         moveArrayItem(
             this.widgets,
             this.addCustomWidget(new RgthreeDividerWidget({marginTop: 4, marginBottom: 0, thickness: 0})),
@@ -270,17 +274,24 @@ class FeiHouEasyH3LoraHeaderWidget extends RgthreeBaseWidget {
         super("FeiHouEasyH3LoraHeaderWidget");
         this.value = {type: "FeiHouEasyH3LoraHeaderWidget"};
         this.options = {serialize: false};
-        this.hitAreas = {toggle: {bounds: [0, 0], onDown: this.onToggleDown}};
+        this.hitAreas = {
+            toggle: {bounds: [0, 0], onDown: this.onToggleDown},
+            bypass: {bounds: [0, 0], onDown: this.onBypassDown},
+        };
     }
 
     draw(ctx, node, width, posY, height) {
-        if (!node.hasLoraWidgets()) return;
         const margin = 10;
         const innerMargin = margin * 0.33;
         const midY = posY + height * 0.5;
         let posX = margin;
         ctx.save();
         this.hitAreas.toggle.bounds = drawTogglePart(ctx, {posX, posY, height, value: node.allLorasState()});
+        const bypassX = Math.max(132, margin + this.hitAreas.toggle.bounds[1] + innerMargin
+            + ctx.measureText(t("全部开关", "Toggle All")).width + 18);
+        this.hitAreas.bypass.bounds = drawTogglePart(ctx, {
+            posX: bypassX, posY, height, value: node.properties?.feihou_lora_bypass !== false,
+        });
         if (!isLowQuality()) {
             posX += this.hitAreas.toggle.bounds[1] + innerMargin;
             ctx.globalAlpha = app.canvas.editor_alpha * 0.55;
@@ -288,11 +299,20 @@ class FeiHouEasyH3LoraHeaderWidget extends RgthreeBaseWidget {
             ctx.textAlign = "left";
             ctx.textBaseline = "middle";
             ctx.fillText(t("全部开关", "Toggle All"), posX, midY);
+            ctx.fillText(t("旁路", "Bypass"), bypassX + this.hitAreas.bypass.bounds[1] + innerMargin, midY);
             ctx.textAlign = "center";
             const right = node.size[0] - margin - innerMargin * 2;
             ctx.fillText(t("强度", "Strength"), right - drawNumberWidgetPart.WIDTH_TOTAL / 2, midY);
         }
         ctx.restore();
+    }
+
+    onBypassDown(event, pos, node) {
+        node.properties ||= {};
+        node.properties.feihou_lora_bypass = node.properties.feihou_lora_bypass === false;
+        node.setDirtyCanvas(true, true);
+        this.cancelMouseDown();
+        return true;
     }
 
     onToggleDown(event, pos, node) {
@@ -365,7 +385,7 @@ class FeiHouEasyH3LoraWidget extends RgthreeBaseWidget {
     }
 
     serializeValue() {
-        return {...this.value};
+        return {...this.value, bypass: this.bypassMode ? this.bypassMode() : true};
     }
 
     onToggleDown() {

@@ -18,6 +18,7 @@ import re
 import sys
 import threading
 import uuid
+import hashlib
 import base64
 import asyncio
 import gc
@@ -2026,14 +2027,14 @@ class MiniMaxH3Bundle:
     clip: Any
     video_vae: Any
     audio_vae: Any
-    lora_stack: tuple[tuple[str, float], ...] = ()
+    lora_stack: tuple[tuple[str, float, bool], ...] = ()
     fl2va_model_obj: Any = None
     ref2va_model_obj: Any = None
     second_sampling_enabled: bool = False
     second_fl2va_model_name: str = NONE_MODEL
     second_ref2va_model_name: str = NONE_MODEL
     second_sampling_use_lora: bool = True
-    second_lora_stack: tuple[tuple[str, float], ...] = ()
+    second_lora_stack: tuple[tuple[str, float, bool], ...] = ()
     remix_loader: bool = False
 
     def __post_init__(self) -> None:
@@ -2089,17 +2090,23 @@ class MiniMaxH3Bundle:
         self._loaded_loras[path] = (*signature, lora)
         return lora
 
-    def _apply_loras(self, model, lora_stack: tuple[tuple[str, float], ...] | None = None):
+    def _apply_loras(self, model, lora_stack: tuple[tuple[str, float, bool], ...] | None = None):
         stack = self.lora_stack if lora_stack is None else lora_stack
         if not stack:
             return model
-        loader = getattr(comfy.sd, "load_bypass_lora_for_models", None)
-        if not callable(loader):
-            raise RuntimeError("This ComfyUI version does not support bypass LoRA loading. Update ComfyUI and try again.")
         result = model
-        for name, strength in stack:
+        for name, strength, bypass in _normalize_lora_stack(stack):
+            loader = getattr(comfy.sd, "load_bypass_lora_for_models" if bypass else "load_lora_for_models", None)
+            if not callable(loader):
+                raise RuntimeError("This ComfyUI version does not support the selected LoRA loading mode.")
+            previous = list(result.get_injections("bypass_lora") or []) if bypass else []
             lora = self._load_lora(name)
             result, _clip = loader(result, None, lora, float(strength), 0.0)
+            if bypass:
+                current = list(result.get_injections("bypass_lora") or [])
+                if previous and current and (len(current) != len(previous) or any(a is not b for a, b in zip(previous, current))):
+                    result.set_injections("bypass_lora", [_FeiHouLoraInjections(previous + current)])
+            logging.info("Easy H3: LoRA %s strength=%s mode=%s", name, strength, "bypass" if bypass else "regular")
         return result
 
     def release_lora_cache(self) -> None:
@@ -2204,76 +2211,62 @@ class MiniMaxH3Bundle:
                     base_model = _load_gguf_unet(model_name)
                 else:
                     base_model, = nodes.UNETLoader().load_unet(model_name, "default")
+                # Keep a pre-LoRA patcher, sharing weights without a second load.
+                clean_base = base_model.clone()
                 model = self._apply_loras(base_model, self.second_lora_stack) if self.second_lora_stack else base_model
+                model.set_attachments("feihou_h3_clean_second_base", clean_base)
                 self._second_model = model
                 self._second_model_kind = kind
                 self._second_model_name = model_name
                 self._second_model_cache_key = cache_key
 
-            # The marker is consumed immediately before the second sampler
-            # prepares this model on GPU.  It unloads only the first-pass
+            # Clone-safe metadata is read immediately before the second sampler
+            # prepares this model on GPU. It unloads only the first-pass
             # transformer, never the shared CLIP or VAEs.
             first_model = self._model
             if first_model is not None and first_model is not model:
-                setattr(model, "_feihou_h3_unload_before_second_sampling", first_model)
+                model.set_attachments("feihou_h3_first_pass", first_model)
             # The intermediate decode/encode branch between the two samplers
             # can load both VAEs again.  Mark the second model so they are
             # released a second time at the exact hand-off to sampling.
             if getattr(self, "force_offload_enabled", False):
-                setattr(model, "_feihou_h3_release_auxiliary_before_second_sampling", self)
+                model.set_attachments("feihou_h3_auxiliary_owner", self)
+            else:
+                model.remove_attachments("feihou_h3_auxiliary_owner")
             if self.second_lora_stack:
-                setattr(model, "_feihou_h3_release_lora_cache_before_second_sampling", self)
+                model.set_attachments("feihou_h3_lora_owner", self)
+            from comfy import patcher_extension
+            model.remove_wrappers_with_key(patcher_extension.WrappersMP.PREPARE_SAMPLING, "feihou_h3_handoff")
+            model.add_wrapper_with_key(patcher_extension.WrappersMP.PREPARE_SAMPLING, "feihou_h3_handoff", _prepare_h3_handoff)
             return model
 
 
-def _install_second_sampling_memory_hook() -> None:
-    """Release the first H3 transformer immediately before second-pass load."""
-    try:
-        import comfy.sampler_helpers as sampler_helpers
-    except Exception:
-        return
-    original = getattr(sampler_helpers, "prepare_sampling", None)
-    if not callable(original) or getattr(original, "_feihou_h3_second_sampling_hook", False):
-        return
-
-    def prepare_sampling_with_h3_second_pass_release(model, *args, **kwargs):
-        first_model = getattr(model, "_feihou_h3_unload_before_second_sampling", None)
-        if first_model is not None:
-            try:
-                delattr(model, "_feihou_h3_unload_before_second_sampling")
-            except AttributeError:
-                pass
-            if first_model is not model:
-                try:
-                    comfy.model_management.unload_model_and_clones(first_model, unload_additional_models=False)
-                    logging.info("Easy H3: released first-pass transformer before loading the second-pass model")
-                except Exception as exc:
-                    logging.warning("Easy H3: unable to release first-pass transformer before second sampling: %s", exc)
-        auxiliary_owner = getattr(model, "_feihou_h3_release_auxiliary_before_second_sampling", None)
-        if auxiliary_owner is not None:
-            try:
-                delattr(model, "_feihou_h3_release_auxiliary_before_second_sampling")
-            except AttributeError:
-                pass
-            _release_auxiliary_models_for_sampling(auxiliary_owner, phase="second-pass sampling")
-        lora_owner = getattr(model, "_feihou_h3_release_lora_cache_before_second_sampling", None)
-        if lora_owner is not None:
-            try:
-                delattr(model, "_feihou_h3_release_lora_cache_before_second_sampling")
-            except AttributeError:
-                pass
-            try:
-                lora_owner.release_lora_cache()
-                logging.info("Easy H3: released LoRA cache before second-pass sampling")
-            except Exception as exc:
-                logging.warning("Easy H3: unable to release LoRA cache before second sampling: %s", exc)
-        return original(model, *args, **kwargs)
-
-    prepare_sampling_with_h3_second_pass_release._feihou_h3_second_sampling_hook = True
-    sampler_helpers.prepare_sampling = prepare_sampling_with_h3_second_pass_release
 
 
-_install_second_sampling_memory_hook()
+def _h3_memory_log(phase):
+    if torch.cuda.is_available():
+        logging.info("Easy H3: %s; CUDA allocated=%.0f MiB reserved=%.0f MiB", phase,
+                     torch.cuda.memory_allocated() / 1048576, torch.cuda.memory_reserved() / 1048576)
+
+
+def _prepare_h3_handoff(executor, model, *args, **kwargs):
+    # Attachments and wrappers survive normal ModelPatcher.clone(), including
+    # external attention/LoRA nodes. Do not consume them: cached models can run again.
+    first = model.get_attachment("feihou_h3_first_pass")
+    if first is not None and first is not model:
+        _h3_memory_log("before second-pass handoff")
+        comfy.model_management.unload_model_and_clones(first, unload_additional_models=False)
+        logging.info("Easy H3: released first-pass transformer before second-pass sampling")
+    owner = model.get_attachment("feihou_h3_auxiliary_owner")
+    if owner is not None:
+        _release_auxiliary_models_for_sampling(owner, phase="second-pass sampling")
+        gc.collect()
+        comfy.model_management.soft_empty_cache()
+    lora_owner = model.get_attachment("feihou_h3_lora_owner")
+    if lora_owner is not None:
+        lora_owner.release_lora_cache()
+    _h3_memory_log("after second-pass handoff")
+    return executor(model, *args, **kwargs)
 
 
 def _release_auxiliary_models_for_sampling(bundle: MiniMaxH3Bundle, phase: str = "sampling") -> None:
@@ -2323,8 +2316,14 @@ def _release_sampling_cache_afterwards(executor, *args, **kwargs):
     causes needless synchronisation and makes H3 substantially slower.
     """
     result = executor(*args, **kwargs)
+    patcher = getattr(getattr(executor, "class_obj", None), "model_patcher", None)
+    if patcher is not None and patcher.get_attachment("feihou_h3_release_after_first"):
+        _h3_memory_log("before first-pass release")
+        comfy.model_management.unload_model_and_clones(patcher, unload_additional_models=False)
+        logging.info("Easy H3: released first-pass transformer after sampling, before intermediate decode/encode")
     gc.collect()
     comfy.model_management.soft_empty_cache()
+    _h3_memory_log("after sampling cleanup")
     logging.info("Easy H3: released unused CUDA cache after sampling")
     return result
 
@@ -2476,6 +2475,8 @@ class MiniMaxH3Context:
     prompt_preview: str
     audio_1: Any = None
     duration_control: Any = None
+    # Original first IMAGE, before reference-size adaptation. CPU only, no VAE inversion.
+    reference_image_1: Any = None
 
 
 @dataclass(frozen=True)
@@ -2517,23 +2518,46 @@ class _FlexibleOptionalInputType(dict):
 _ANY_TYPE = _AnyType("*")
 
 
-def _normalize_lora_stack(value: Any) -> tuple[tuple[str, float], ...]:
-    result: list[tuple[str, float]] = []
+class _FeiHouLoraInjections:
+    """Compose forward hooks in order and restore them in reverse order."""
+    def __init__(self, injections):
+        self.injections = tuple(injections)
+
+    def inject(self, patcher):
+        done = []
+        try:
+            for injection in self.injections:
+                injection.inject(patcher)
+                done.append(injection)
+        except Exception:
+            for injection in reversed(done):
+                injection.eject(patcher)
+            raise
+
+    def eject(self, patcher):
+        for injection in reversed(self.injections):
+            injection.eject(patcher)
+
+
+def _normalize_lora_stack(value: Any) -> tuple[tuple[str, float, bool], ...]:
+    result: list[tuple[str, float, bool]] = []
     for item in list(value or [])[:50]:
         if isinstance(item, Mapping):
             name = str(item.get("lora") or item.get("name") or "").strip()
             enabled = item.get("on", item.get("enabled", True))
             strength = float(item.get("strength", 1.0))
+            bypass = _as_bool(item.get("bypass", True))
         elif isinstance(item, (list, tuple)) and len(item) >= 2:
             name = str(item[0] or "").strip()
             enabled = True
             strength = float(item[1])
+            bypass = _as_bool(item[2]) if len(item) > 2 else True
         else:
             continue
         if isinstance(enabled, str):
             enabled = enabled.strip().lower() in {"1", "true", "yes", "on"}
         if enabled and name and name.lower() != "none" and strength != 0.0:
-            result.append((name, strength))
+            result.append((name, strength, bypass))
     return tuple(result)
 
 
@@ -2707,7 +2731,9 @@ class FeiHouEasyH3ModelAdapter:
 
     @classmethod
     def IS_CHANGED(cls, **kwargs):
-        return float("nan")
+        # Upstream MODEL/CLIP/VAE changes are already included in ComfyUI's
+        # ancestry cache key; the assembler has no external files of its own.
+        return "feihou-h3-assembler-v2"
 
     @staticmethod
     def assemble(text_encoder, video_vae, audio_vae, fl2va_model=None, ref2va_model=None):
@@ -2871,6 +2897,46 @@ def _trim_reference_audio(audio: Mapping, trim_range: Any) -> Mapping:
     trimmed["waveform"] = waveform[..., start_sample:end_sample]
     return trimmed
 
+
+
+def _duration_alignment(value: Any) -> str:
+    """Keep the legacy Boolean input compatible without changing its slot."""
+    if value is True or str(value).strip().lower() in {"true", "1", "audio", "参考音频对齐"}:
+        return "audio"
+    if str(value).strip().lower() in {"video", "参考视频对齐"}:
+        return "video"
+    return "off"
+
+
+def _trim_reference_video(value: Any, trim_range: Any) -> Mapping:
+    """Crop source frames and their soundtrack together, before H3 resampling."""
+    frames, audio, fps = _video_parts(value)
+    if not math.isfinite(fps) or fps <= 0 or frames.shape[0] <= 0:
+        raise ValueError("参考视频为空或帧率无效 / Invalid reference video")
+    total = int(frames.shape[0])
+    start, end = _audio_trim_range(trim_range)
+    duration = total / fps
+    start = min(start, duration)
+    end = duration if end <= 0 else min(end, duration)
+    if end <= start:
+        raise ValueError("参考视频截取终点必须晚于起点 / Invalid video trim range")
+    first = min(total - 1, max(0, round(start * fps)))
+    last = min(total, max(first + 1, round(end * fps)))
+    if audio is not None:
+        rate = _audio_sample_rate(audio)
+        audio = dict(audio)
+        audio["waveform"] = audio["waveform"][..., round(first / fps * rate):round(last / fps * rate)]
+        if audio["waveform"].shape[-1] == 0:
+            audio = None
+    return {"images": frames[first:last], "audio": audio, "fps": fps}
+
+
+def _reference_video_duration(items: list[_MediaInput]) -> float:
+    for item in items:
+        if item.media_type == "video":
+            frames, _, fps = _video_parts(item.value)
+            return int(frames.shape[0]) / fps
+    raise ValueError("已选择参考视频对齐，但未加载参考视频 1 / Reference video 1 is missing")
 
 def _reference_audio_duration(items: list[_MediaInput]) -> float:
     """Return the trimmed duration of Audio 1 for digital-human/MV timing."""
@@ -3139,7 +3205,7 @@ class FeiHouEasyH3:
                 "aspect_ratio": (list(ASPECT_RATIOS), {"default": ASPECT_WIDESCREEN}),
                 "width": ("INT", {"default": 1344, "min": 32, "max": nodes.MAX_RESOLUTION, "step": 32}),
                 "height": ("INT", {"default": 768, "min": 32, "max": nodes.MAX_RESOLUTION, "step": 32}),
-                "audio_duration_auto": ("BOOLEAN", {"default": False}),
+                "audio_duration_auto": (["off", "audio", "video"], {"default": "off", "tooltip": "自动时长对齐：使用参考音频 1 或参考视频 1 截取后的实际时长。"}),
                 "seconds": ("FLOAT", {"default": 10.0, "min": MIN_SECONDS, "max": MAX_SECONDS, "step": 0.1}),
                 "advanced": ("BOOLEAN", {"default": False}),
                 "fps": ("FLOAT", {"default": 24.0, "min": 1.0, "max": 120.0, "step": 1.0}),
@@ -3171,12 +3237,33 @@ class FeiHouEasyH3:
 
     @classmethod
     def IS_CHANGED(cls, **kwargs):
-        return float("nan")
+        # Ordinary values and connected inputs are tracked by ComfyUI. Include
+        # file content so replacing media under the same name invalidates cache.
+        if (_as_bool(kwargs.get("advanced", False))
+                and _as_bool(kwargs.get("prompt_optimizer_enabled", False))
+                and not _as_bool(kwargs.get("prompt_optimizer_applied", False))):
+            # The backend optimizer reads mutable external service configuration.
+            return float("nan")
+        digest = hashlib.sha256(b"feihou-h3-media-v2")
+        for index in range(1, MAX_MEDIA + 1):
+            value = kwargs.get(f"media_{index}")
+            if not isinstance(value, str) or not value.strip():
+                continue
+            digest.update(str(index).encode())
+            digest.update(value.encode("utf-8"))
+            try:
+                with open(_embedded_media_path(value), "rb") as media:
+                    for chunk in iter(lambda: media.read(1024 * 1024), b""):
+                        digest.update(chunk)
+            except (OSError, ValueError):
+                # Force execution to report a missing/unreadable file normally.
+                return float("nan")
+        return digest.hexdigest()
 
     @staticmethod
-    def _collect_media(kwargs: dict) -> list[_MediaInput]:
+    def _collect_media(kwargs: dict, media_count=MAX_MEDIA) -> list[_MediaInput]:
         items = []
-        for index in range(1, MAX_MEDIA + 1):
+        for index in range(1, media_count + 1):
             value = kwargs.get(f"media_{index}")
             if value is None or (isinstance(value, str) and not value.strip()):
                 continue
@@ -3225,7 +3312,8 @@ class FeiHouEasyH3:
             params = production_shot["params"]
             prompt, mode = production_shot["prompt"], MODE_REFERENCE
             seconds = params["seconds"]
-            audio_duration_auto = params.get("audio_duration_auto", any(item["media_type"] == "audio" for item in production_shot["media"]))
+            # The main node's alignment menu stays authoritative after preview.
+            # Production-pack preview migrates its legacy Boolean to the menu.
             aspect_ratio = params.get("aspect_ratio", aspect_ratio)
             # Package resolution never overrides the user's generation settings.
             fps = params.get("fps", fps)
@@ -3244,13 +3332,19 @@ class FeiHouEasyH3:
         mode = str(mode)
         keyframe_role = KEYFRAME_LAST if str(keyframe_role) == KEYFRAME_LAST else KEYFRAME_FIRST
         width, height = _canvas_dimensions(resolution, aspect_ratio, width, height)
-        items = cls._collect_media(kwargs)
+        items = cls._collect_media(kwargs, len(production_shot["media"]) if production_shot is not None else MAX_MEDIA)
+        # Decode/crop each video once; duration and conditioning share these frames.
+        items = [_MediaInput(item.input_index, item.media_type,
+                             _trim_reference_video(item.value, item.audio_trim), "")
+                 if item.media_type == "video" else item for item in items]
         if mode == MODE_REFERENCE:
             _validate_reference_media_transport(prompt, items)
-        audio_duration_enabled = _as_bool(audio_duration_auto)
+        alignment = _duration_alignment(audio_duration_auto)
+        audio_duration_enabled = alignment != "off"
         requested_audio_seconds = 0.0
         if audio_duration_enabled:
-            requested_audio_seconds = _reference_audio_duration(items)
+            requested_audio_seconds = (_reference_video_duration(items) if alignment == "video"
+                                       else _reference_audio_duration(items))
             seconds = requested_audio_seconds
         seconds = min(MAX_SECONDS, max(MIN_SECONDS, float(seconds)))
         # MiniMax H3 accepts only 5 + 17N frames.  Automatic audio timing
@@ -3287,14 +3381,14 @@ class FeiHouEasyH3:
             second_sampling_active = True
 
         if mode == MODE_REFERENCE and items:
-            if len(items) > MAX_MEDIA:
+            if production_shot is None and len(items) > MAX_MEDIA:
                 raise ValueError("Reference mode accepts at most fifteen media resources")
             counts = {"image": 0, "video": 0, "audio": 0}
             for item in items:
                 if item.media_type not in counts:
                     raise ValueError("Unsupported media resource")
                 counts[item.media_type] += 1
-            if counts["image"] > MAX_IMAGES or counts["video"] > MAX_VIDEOS or counts["audio"] > MAX_AUDIOS:
+            if counts["image"] > MAX_IMAGES or counts["video"] > MAX_VIDEOS or (production_shot is None and counts["audio"] > MAX_AUDIOS):
                 raise ValueError("Reference mode media limits are 9 images, 3 videos and 3 audio clips")
             if counts["image"] == 0 and counts["video"] == 0:
                 raise ValueError("Reference mode needs an image or video in addition to audio")
@@ -3329,6 +3423,8 @@ class FeiHouEasyH3:
                 force_offload=h3_bundle.force_offload_enabled,
                 streamed_attention=_as_bool(advanced) and _as_bool(low_vram_streamed_attention),
             )
+            if h3_bundle.force_offload_enabled:
+                model.set_attachments("feihou_h3_release_after_first", True)
         context = MiniMaxH3Context(
             conditioning=conditioning,
             latent=latent,
@@ -3338,6 +3434,10 @@ class FeiHouEasyH3:
             fps=float(fps),
             prompt_preview=prompt_preview,
             audio_1=_first_reference_audio(items),
+            reference_image_1=next((item.value[:1, ..., :3].detach().cpu().clone()
+                                    for item in items if item.media_type == "image"
+                                    and isinstance(item.value, torch.Tensor) and item.value.ndim == 4
+                                    and len(item.value) > 0), None),
             duration_control=H3DurationControl(
                 enabled=audio_duration_enabled,
                 target_seconds=requested_audio_seconds,
@@ -3455,7 +3555,27 @@ class FeiHouEasyH3PromptPreview:
 _register_prompt_optimizer_route_when_ready()
 
 
+class FeiHouEasyH3Resolution:
+    CATEGORY = "FeiHou Easy H3"
+    FUNCTION = "resolve"
+    RETURN_TYPES = ("INT", "INT")
+    RETURN_NAMES = ("width", "height")
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {
+            "resolution": (list(RESOLUTIONS), {"default": RESOLUTION_720}),
+            "aspect_ratio": (list(ASPECT_RATIOS), {"default": ASPECT_WIDESCREEN}),
+            "width": ("INT", {"default": 1344, "min": 32, "max": nodes.MAX_RESOLUTION, "step": 32}),
+            "height": ("INT", {"default": 768, "min": 32, "max": nodes.MAX_RESOLUTION, "step": 32}),
+        }}
+
+    def resolve(self, resolution, aspect_ratio, width=1344, height=768):
+        return _canvas_dimensions(resolution, aspect_ratio, width, height)
+
+
 NODE_CLASS_MAPPINGS = {
+    "FeiHouEasyH3Resolution": FeiHouEasyH3Resolution,
     "FeiHouEasyH3LoraStack": FeiHouEasyH3LoraStack,
     "FeiHouEasyH3Loader": FeiHouEasyH3Loader,
     "FeiHouEasyH3ModelAdapter": FeiHouEasyH3ModelAdapter,

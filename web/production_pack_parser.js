@@ -10,6 +10,15 @@ export function extractShotlist(doc) {
                 package_mode: project.package_mode || "",
                 refs: shot.references || shot.refs || [],
                 video_refs: shot.video_refs || shot.video_references || [],
+                // The project list is an asset catalogue, not an instruction to load all assets.
+                audio_references: shot.audio_references?.map((entry) => {
+                    const id = typeof entry === "string" ? entry : entry.id;
+                    const matches = id == null ? [] : (project.audio_references || []).filter((a) => a.id === id);
+                    if (matches.length > 1) throw new Error(`Duplicate audio asset ID: ${id}`);
+                    const asset = matches[0];
+                    if (typeof entry === "string") return asset ? { ...asset } : { file: entry };
+                    return { ...asset, ...entry };
+                }),
                 voice_reference: shot.voice_reference || project.audio_references?.[0]?.file || "",
                 audio_file: shot.audio_file || project.master_audio || "",
                 aspect_ratio: shot.aspect_ratio || project.aspect_ratio || "",
@@ -33,6 +42,11 @@ export function extractShotlist(doc) {
             audio_file: unit.dataset.audioFile || "",
             aspect_ratio: meta.match(/\b(?:16:9|9:16|1:1|2:3|3:2|4:3|3:4|21:9)\b/)?.[0] || "",
         };
+        const audioRefs = [...unit.querySelectorAll('[data-media-type="audio"]')];
+        if (audioRefs.length) shots.audio_references = audioRefs.map((el) => ({
+            file: el.dataset.file || el.textContent.trim(),
+            range: el.dataset.range || "00:00:000–00:00:000",
+        }));
         const seconds = text(".duration-pill").match(/([\d.]+)\s*(?:s|秒)/i);
         if (seconds) shots.seconds = Number(seconds[1]);
         const fps = meta.match(/([\d.]+)\s*(?:fps|帧\/秒)/i);

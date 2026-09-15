@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.4.6
+
+- Adds reference-video time ranges and play/stop previews; video frames and source audio are cropped together with 100 ms input normalization.
+- Replaces the automatic-duration toggle with Off / Reference audio / Reference video alignment. Uses the first reference of the selected type, preserves legacy enabled toggles as audio alignment, and retains frame rounding and output-duration cropping.
+- Includes clone-safe sampling handoff/cache fixes, multi-LoRA regular/bypass selection, and the standalone resolution selector with conditional custom dimensions.
+- Improves production-pack multi-audio reference handling and documents the HTML integration contract.
+- Adds experimental face refinement with optional original-audio conditioning, clean second-pass model selection, and automatic cropped reference-face input. Optional dependencies and limitations are documented in FACE_REFINE.md.
+- Validation: Python/JavaScript syntax, JSON parsing, crop/playback simulations and saved-widget migration tests. No new GPU quality or live-cloud compatibility guarantees.
+
 ## v1.4.5
 
 - Supports production-pack ZIP upload, inspection and preview from same-origin cloud ComfyUI browsers, including gateways that strip Origin while preserving same-origin Fetch Metadata. Adds credential-free access diagnostics.

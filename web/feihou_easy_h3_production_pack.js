@@ -69,6 +69,9 @@ function display(node, shot) {
     };
     visit(node);
     status(node, `${shot.index}/${shot.total} · ${shot.id} · ${shot.params.seconds}s\n${shot.range}\n${shot.refs.join(" → ")}\n`
+        + shot.media.filter((m) => m.media_type === "audio").map((m) => `Audio ${m.ordinal}: ${m.filename} | ${m.audio_trim || "full"}\n`).join("")
+        + (shot.media.filter((m) => m.media_type === "audio").length > 3
+            ? tr("The gallery shows 3 audio slots; all package audio is supplied through the connected production-shot input.\n", "上传区仅显示 3 个音频格；全部制作包音频通过已连接的制作包分镜接口参与执行。\n") : "")
         + (applied ? tr(`Applied to ${applied} Easy H3 node(s).`, `已载入 ${applied} 个 Easy H3 节点的提示词、参数和参考媒体。`)
             : tr("Connect the production-shot output to Easy H3 first.", "未找到连接的 Easy H3 节点，请连接制作包分镜接口。")));
 }

@@ -1,4 +1,76 @@
 {
+  "FeiHouEasyH3FaceRefine": {
+    "display_name": "FeiHou Easy H3 人脸精修（实验）",
+    "inputs": {
+      "images": {
+        "name": "视频帧"
+      },
+      "model": {
+        "name": "精修模型"
+      },
+      "h3_context": {
+        "name": "H3 上下文"
+      },
+      "enabled": {
+        "name": "启用"
+      },
+      "detector": {
+        "name": "人脸检测模型"
+      },
+      "target": {
+        "name": "目标人物"
+      },
+      "denoise": {
+        "name": "精修强度"
+      },
+      "steps": {
+        "name": "采样步数"
+      },
+      "seed": {
+        "name": "种子"
+      },
+      "advanced": {
+        "name": "高级选项"
+      },
+      "canvas_size": {
+        "name": "精修画布"
+      },
+      "confidence": {
+        "name": "检测阈值"
+      },
+      "crop_factor": {
+        "name": "裁剪范围"
+      },
+      "chunk_frames": {
+        "name": "分段帧数"
+      },
+      "sampler_name": {
+        "name": "采样器"
+      },
+      "scheduler": {
+        "name": "调度器"
+      },
+      "prompt": {
+        "name": "面部精修提示词"
+      },
+      "force_offload": {
+        "name": "强制卸载"
+      },
+      "audio_lock": {
+        "name": "原音频约束（实验）"
+      },
+      "clean_second_model": {
+        "name": "使用纯净二采模型"
+      },
+      "reference_face": {
+        "name": "参考人脸"
+      },
+      "audio": {
+        "name": "原音频"
+      }
+    }
+  },
+  "FeiHouEasyH3Resolution": {"display_name":"FeiHou Easy H3 分辨率","description":"与 Easy H3 主节点使用相同的尺寸计算规则。自定义分辨率时使用宽度、高度。","inputs":{"resolution":{"name":"分辨率"},"aspect_ratio":{"name":"宽高比"},"width":{"name":"自定义宽度"},"height":{"name":"自定义高度"}},"outputs":{"0":{"name":"宽度"},"1":{"name":"高度"}}},
   "FeiHouEasyH3ProductionPackLoader": {
     "display_name": "FeiHou Easy H3 制作包分镜加载器",
     "description": "载入文件夹或 ZIP，读取最终分镜页，每次任务输出一镜。将生成后操作设为 increment 可按序号推进。",
@@ -13,7 +85,7 @@
     "outputs": { "0": { "name": "制作包分镜" } }
   },
   "FeiHouEasyH3LoraStack": {
-    "display_name": "加载LoRA（旁路，仅模型）（用于调试）",
+    "display_name": "加载LoRA（仅模型）",
     "description": "供 FeiHou Easy H3 加载器使用的动态 LoRA 堆栈。",
     "inputs": {
       "optional_lora_stack": { "name": "可选 LoRA 堆栈" }
@@ -89,7 +161,11 @@
       "aspect_ratio": { "name": "宽高比" },
       "width": { "name": "宽度" },
       "height": { "name": "高度" },
-      "seconds": { "name": "秒数" },
+      "audio_duration_auto": {
+      "name": "自动时长对齐",
+      "options": {"off": "关闭", "audio": "参考音频对齐", "video": "参考视频对齐"}
+    },
+    "seconds": { "name": "秒数" },
       "advanced": { "name": "高级选项" },
       "fps": { "name": "帧率（FPS）" },
       "keyframe_role": {

@@ -1,4 +1,76 @@
 {
+  "FeiHouEasyH3FaceRefine": {
+    "display_name": "FeiHou Easy H3 Face Refine (Experimental)",
+    "inputs": {
+      "images": {
+        "name": "Images"
+      },
+      "model": {
+        "name": "Model"
+      },
+      "h3_context": {
+        "name": "H3 context"
+      },
+      "enabled": {
+        "name": "Enabled"
+      },
+      "detector": {
+        "name": "Face detector"
+      },
+      "target": {
+        "name": "Target"
+      },
+      "denoise": {
+        "name": "Denoise"
+      },
+      "steps": {
+        "name": "Steps"
+      },
+      "seed": {
+        "name": "Seed"
+      },
+      "advanced": {
+        "name": "Advanced"
+      },
+      "canvas_size": {
+        "name": "Canvas"
+      },
+      "confidence": {
+        "name": "Confidence"
+      },
+      "crop_factor": {
+        "name": "Crop factor"
+      },
+      "chunk_frames": {
+        "name": "Chunk frames"
+      },
+      "sampler_name": {
+        "name": "Sampler"
+      },
+      "scheduler": {
+        "name": "Scheduler"
+      },
+      "prompt": {
+        "name": "Refinement prompt"
+      },
+      "force_offload": {
+        "name": "Force offload"
+      },
+      "audio_lock": {
+        "name": "Original audio conditioning (experimental)"
+      },
+      "clean_second_model": {
+        "name": "Use clean second-pass model"
+      },
+      "reference_face": {
+        "name": "Reference face"
+      },
+      "audio": {
+        "name": "Original audio"
+      }
+    }
+  },
+  "FeiHouEasyH3Resolution": {"display_name":"FeiHou Easy H3 Resolution","inputs":{"resolution":{"name":"Resolution"},"aspect_ratio":{"name":"Aspect ratio"},"width":{"name":"Custom width"},"height":{"name":"Custom height"}}},
   "FeiHouEasyH3ProductionPackLoader": {
     "display_name": "FeiHou Easy H3 Production Pack Loader",
     "description": "Import a folder or ZIP, read the final Shotlist, and supply one shot per queued task. Enable increment after generation to advance the shot index.",
@@ -13,7 +85,7 @@
     "outputs": { "0": { "name": "Production shot" } }
   },
   "FeiHouEasyH3LoraStack": {
-    "display_name": "Load LoRA (Bypass, Model Only) (Debug)",
+    "display_name": "Load LoRA (Model Only)",
     "description": "Dynamic LoRA stack used by the FeiHou Easy H3 Loader.",
     "inputs": {
       "optional_lora_stack": { "name": "Optional LoRA stack" }
@@ -89,7 +161,11 @@
       "aspect_ratio": { "name": "Aspect ratio" },
       "width": { "name": "Width" },
       "height": { "name": "Height" },
-      "seconds": { "name": "Seconds" },
+      "audio_duration_auto": {
+      "name": "Automatic duration alignment",
+      "options": {"off": "Off", "audio": "Reference audio", "video": "Reference video"}
+    },
+    "seconds": { "name": "Seconds" },
       "advanced": { "name": "Advanced options" },
       "fps": { "name": "Frame rate (FPS)" },
       "keyframe_role": {

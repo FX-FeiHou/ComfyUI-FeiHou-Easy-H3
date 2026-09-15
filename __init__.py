@@ -1,4 +1,5 @@
 from .nodes import (
+    FeiHouEasyH3Resolution,
     FeiHouEasyH3,
     FeiHouEasyH3Loader,
     FeiHouEasyH3RemixLoader,
@@ -10,8 +11,11 @@ from .nodes import (
 )
 
 from .production_pack import FeiHouEasyH3ProductionPackLoader
+from .face_refine import FeiHouEasyH3FaceRefine
 
 NODE_CLASS_MAPPINGS = {
+    "FeiHouEasyH3FaceRefine": FeiHouEasyH3FaceRefine,
+    "FeiHouEasyH3Resolution": FeiHouEasyH3Resolution,
     "FeiHouEasyH3ProductionPackLoader": FeiHouEasyH3ProductionPackLoader,
     "FeiHouEasyH3LoraStack": FeiHouEasyH3LoraStack,
     "FeiHouEasyH3Loader": FeiHouEasyH3Loader,
@@ -24,8 +28,10 @@ NODE_CLASS_MAPPINGS = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
+    "FeiHouEasyH3FaceRefine": "FeiHou Easy H3 Face Refine (Experimental)",
+    "FeiHouEasyH3Resolution": "FeiHou Easy H3 Resolution",
     "FeiHouEasyH3ProductionPackLoader": "FeiHou Easy H3 Production Pack Loader",
-    "FeiHouEasyH3LoraStack": "Load LoRA (Bypass, Model Only) (Debug)",
+    "FeiHouEasyH3LoraStack": "Load LoRA (Model Only)",
     "FeiHouEasyH3Loader": "FeiHou Easy H3 Loader",
     "FeiHouEasyH3RemixLoader": "FeiHou Easy H3 Remix Loader",
     "FeiHouEasyH3ModelAdapter": "FeiHou Easy H3 Model Adapter",

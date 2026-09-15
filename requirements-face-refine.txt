@@ -1,0 +1,5 @@
+# Optional: not required for the existing Easy H3 nodes.
+ultralytics
+scipy
+scenedetect>=0.7
+# Optional only for reference_identity: insightface and a suitable onnxruntime provider.

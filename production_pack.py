@@ -290,6 +290,37 @@ def time_text(seconds):
     return f"{ticks // 600:02}:{ticks // 10 % 60:02}:{ticks % 10 * 100:03}"
 
 
+def _resolve_audio_references(data, raw, fallback, default_range):
+    """Ordered per-shot references; no artificial audio-count ceiling."""
+    declared = raw.get("audio_references")
+    if declared is None:
+        declared = [{"file": fallback, "range": default_range}] if fallback else []
+    if not isinstance(declared, list):
+        raise ValueError(f"{raw['id']}: audio_references must be an ordered list")
+    files = [f for f in data["files"] if Path(f).suffix.lower() in AUDIO_EXT]
+    result = []
+    for ordinal, entry in enumerate(declared, 1):
+        if isinstance(entry, str):
+            entry = {"file": entry}
+        if not isinstance(entry, dict) or not isinstance(entry.get("file"), str) or not entry["file"].strip():
+            raise ValueError(f"{raw['id']}: Audio {ordinal} requires a file")
+        name = entry["file"].strip().replace("\\", "/")
+        matches = [f for f in files if f.casefold() == name.casefold()]
+        if not matches:
+            matches = [f for f in files if Path(f).name.casefold() == Path(name).name.casefold()]
+        if len(matches) != 1 or not contained(data["root"], matches[0]).is_file():
+            raise ValueError(f"{raw['id']}: Audio {ordinal} is missing or ambiguous: {name}")
+        trim = entry.get("range", "00:00:000–00:00:000")
+        parts = re.split(r"\s*[-–—~～至]\s*", str(trim))
+        if len(parts) != 2:
+            raise ValueError(f"{raw['id']}: Audio {ordinal} requires a start–end range")
+        start, end = map(time_seconds, parts)
+        if start < 0 or end < 0 or (end != 0 and end <= start):
+            raise ValueError(f"{raw['id']}: Audio {ordinal} range must increase (end=0 means to end)")
+        result.append({"file": matches[0], "range": f"{time_text(start)}–{time_text(end)}"})
+    return result
+
+
 def validate_shots(data, shots, audio_file=""):
     if not isinstance(shots, list) or not 1 <= len(shots) <= 1000:
         raise ValueError("No supported shots found, or more than 1000 shots")
@@ -309,7 +340,9 @@ def validate_shots(data, shots, audio_file=""):
         digital_human = raw.get("package_mode") == "digital_human"
         selected_audio = str((raw.get("voice_reference") or "") if digital_human else raw.get("audio_file") or audio_file or "").strip()
         audio_role = "voice reference" if digital_human else "soundtrack"
-        if selected_audio:
+        if raw.get("audio_references") is not None:
+            selected_audio = ""  # Explicit per-shot list, including [], overrides legacy selection.
+        elif selected_audio:
             matches = [f for f in audio_files if f.casefold() == selected_audio.replace("\\", "/").casefold()]
             if not matches:
                 matches = [f for f in audio_files if Path(f).name.casefold() == Path(selected_audio.replace("\\", "/")).name.casefold()]
@@ -341,6 +374,9 @@ def validate_shots(data, shots, audio_file=""):
         declared = raw.get("seconds")
         if declared is not None and (not math.isfinite(float(declared)) or abs(float(declared) - duration) > 0.11):
             raise ValueError(f"{shot_id}: shot duration disagrees with its range")
+        default_range = "00:00:000–00:00:000" if digital_human else f"{time_text(start)}–{time_text(end)}"
+        audios = _resolve_audio_references(data, raw, selected_audio, default_range)
+        selected_audio = audios[0]["file"] if audios else ""
         refs = raw.get("refs", [])
         if not isinstance(refs, list) or not 1 <= len(refs) <= 9:
             raise ValueError(f"{shot_id}: expected 1–9 ordered image references, got {len(refs)}")
@@ -371,11 +407,11 @@ def validate_shots(data, shots, audio_file=""):
                 raise ValueError(f"{shot_id}: prompt references an unavailable Picture slot")
             if any(int(n) < 1 or int(n) > len(videos) for n in re.findall(r"<Video\s+(\d+)>", prompt, re.I)):
                 raise ValueError(f"{shot_id}: prompt references an unavailable Video slot")
-            if re.search(r"<Audio\s+(?!1>)[0-9]+>", prompt, re.I):
-                raise ValueError(f"{shot_id}: only the selected soundtrack (Audio 1) is supported")
+            if any(int(n) < 1 or int(n) > len(audios) for n in re.findall(r"<Audio\s+(\d+)>", prompt, re.I)):
+                raise ValueError(f"{shot_id}: prompt references an unavailable Audio slot (loaded {len(audios)})")
             if not selected_audio and re.search(r"<Audio\s+\d+>", prompt, re.I):
                 raise ValueError(f"{shot_id}: prompt references Audio but no reference audio exists")
-        params = {"mode": "reference", "seconds": duration, "audio_duration_auto": False if digital_human else bool(selected_audio),
+        params = {"mode": "reference", "seconds": duration, "audio_duration_auto": False if digital_human or raw.get("audio_references") is not None else bool(selected_audio),
                   "reference_mention_mode": "index", "prompt_optimizer_enabled": False}
         aspect = str(raw.get("aspect_ratio", "")).strip()
         if aspect:
@@ -389,7 +425,7 @@ def validate_shots(data, shots, audio_file=""):
             params["fps"] = fps
         # Ignore all package resolution declarations; generation uses manual settings.
         result.append({"id": shot_id, "title": str(raw.get("title", shot_id)), "params": params,
-                       "prompts": prompts, "refs": list(refs), "images": images, "videos": videos, "audio": selected_audio,
+                       "prompts": prompts, "refs": list(refs), "images": images, "videos": videos, "audio": selected_audio, "audios": audios,
                        "range": "00:00:000–00:00:000" if digital_human else f"{time_text(start)}–{time_text(end)}"})
     return result
 
@@ -410,7 +446,8 @@ def commit_shots(package_id, shots, audio_file="", diagnose=False, prompt_langua
                 if validated["id"] in ids:
                     raise ValueError(f"Duplicate shot ID: {validated['id']}")
                 ids.add(validated["id"])
-                report.append(f"OK {index}: {validated['id']} | {validated['params']['seconds']}s | images={len(validated['images'])}, videos={len(validated['videos'])}, audio={int(bool(validated['audio']))}")
+                report.append(f"OK {index}: {validated['id']} | {validated['params']['seconds']}s | images={len(validated['images'])}, videos={len(validated['videos'])}, audio={len(validated['audios'])}")
+                report.extend(f"  Audio {n}: {a['file']} | {a['range']}" for n, a in enumerate(validated['audios'], 1))
                 report.extend(str(w) for w in shot.get("import_warnings", []))
             except (ValueError, TypeError, OSError) as exc:
                 errors.append(f"Shot {index}: {exc}")
@@ -471,9 +508,10 @@ def load_shot(source, package_id, shot_index, prompt_language, shotlist_file="",
     for ordinal, filename in enumerate(shot.get("videos", []), 1):
         media.append({**materialize(data["root"], filename, folder_paths.get_input_directory()),
                       "media_type": "video", "ordinal": ordinal})
-    if shot["audio"]:
-        media.append({**materialize(data["root"], shot["audio"], folder_paths.get_input_directory()),
-                      "media_type": "audio", "ordinal": 1, "audio_trim": shot["range"]})
+    audios = shot.get("audios", [{"file": shot["audio"], "range": shot["range"]}] if shot["audio"] else [])
+    for ordinal, audio in enumerate(audios, 1):
+        media.append({**materialize(data["root"], audio["file"], folder_paths.get_input_directory()),
+                      "media_type": "audio", "ordinal": ordinal, "audio_trim": audio["range"]})
     return {"schema": 1, "id": shot["id"], "title": shot["title"], "index": index,
             "total": len(shots), "prompt": prompt, "params": shot["params"], "media": media,
             "refs": shot["refs"], "range": shot["range"]}
