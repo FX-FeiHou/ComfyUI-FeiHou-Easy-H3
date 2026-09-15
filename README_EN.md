@@ -41,7 +41,7 @@ Prompt configuration is shown directly in the dedicated `🐵Easy H3` page in Co
 
 ### Custom API host allow-list
 
-The built-in Zhipu, xFlow, Alibaba Cloud Bailian, and DeepSeek hosts are already allowed. Ollama is limited to local `localhost`, `127.0.0.1`, or `::1`. Before configuring a new third-party API, start ComfyUI once so the plugin creates this local file:
+The built-in Zhipu, xFlow, Alibaba Cloud Bailian, and DeepSeek hosts are already allowed. Local Ollama at `localhost`, `127.0.0.1`, or `::1` requires no extra authorization. Remote LAN Ollama and compatible APIs can be explicitly authorized using `lan_endpoints` below. Before configuring a new third-party API, start ComfyUI once so the plugin creates this local file:
 
 `ComfyUI/user/default/ComfyUI-FeiHou-Easy-H3/allowed_api_hosts.json`
 
@@ -58,6 +58,22 @@ Add the API **hostname only** to its `hosts` array—do not enter `https://`, a 
 ```
 
 Save the file and restart ComfyUI. You can then enter `https://api.example.com/v1`, its API key, and models in the Custom API panel. The allow-list is intentionally maintained in a local file and cannot be changed from the Settings page: it prevents an exposed ComfyUI server from being induced to request private-network addresses or send API keys to a malicious server. Settings, model discovery, and immediate prompt-optimization routes also accept requests only from the host running ComfyUI.
+
+#### LAN inference endpoints
+
+Keep existing `hosts` entries and add this field to the same server-local file:
+
+```json
+{
+  "version": 1,
+  "hosts": ["api.example.com"],
+  "lan_endpoints": ["http://192.168.1.20:11434", "http://10.0.0.8:8000"]
+}
+```
+
+Only explicit IPv4 addresses in 10/8, 172.16/12 and 192.168/16 are accepted. Authorization matches scheme, IP and port, not an entire subnet. Do not put paths, queries, credentials, wildcards or LAN DNS names in this field. The node URL may include an API path such as `http://10.0.0.8:8000/v1`.
+
+Public APIs still require HTTPS; certificate verification and redirect restrictions remain unchanged. LAN HTTP is unencrypted: authorize only trusted services. Edit the file on the ComfyUI server, then restart ComfyUI. The remote inference service must also listen on its LAN interface with an accessible firewall port. Existing files without this field retain their previous behavior. Remote settings-management routes remain restricted; RH platform APIs are not changed.
 
 The package uses unique `FeiHouEasyH3*` node IDs and dedicated prompt-optimizer routes, so it can be installed alongside the original project.
 

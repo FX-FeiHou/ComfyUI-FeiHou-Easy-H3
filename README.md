@@ -44,7 +44,7 @@
 
 ### 自定义 API 域名白名单
 
-内置的智谱、xFlow、阿里云百炼、DeepSeek 服务域名已自动允许；Ollama 仅允许本机 `localhost`、`127.0.0.1` 或 `::1`。使用新的第三方 API 前，先启动一次 ComfyUI，让插件在用户目录自动创建：
+内置的智谱、xFlow、阿里云百炼、DeepSeek 服务域名已自动允许；本机 Ollama 的 `localhost`、`127.0.0.1` 或 `::1` 无需额外授权。局域网 Ollama 和 OpenAI 兼容服务可通过下方的 `lan_endpoints` 单独授权。使用新的第三方 API 前，先启动一次 ComfyUI，让插件在用户目录自动创建：
 
 `ComfyUI/user/default/ComfyUI-FeiHou-Easy-H3/allowed_api_hosts.json`
 
@@ -60,7 +60,29 @@
 }
 ```
 
-保存文件并重启 ComfyUI 后，即可在“自定义 API”中填写 `https://api.example.com/v1`、API Key 和模型。此白名单由本机文件维护，节点设置页无法改写它；这是为了阻止公开的 ComfyUI 服务被诱导请求内网地址，或将 API Key 发送到恶意服务器。API 设置、模型获取和即时提示词优化路由也只接受运行 ComfyUI 的本机访问。
+保存文件并重启 ComfyUI 后，即可在“自定义 API”中填写 `https://api.example.com/v1`、API Key 和模型。此白名单由本机文件维护，节点设置页无法改写它；这是为了阻止公开的 ComfyUI 服务被诱导请求未授权地址，或将 API Key 发送到恶意服务器。API 设置、模型获取和即时提示词优化路由也只接受运行 ComfyUI 的本机访问。
+
+#### 局域网推理机器（HTTP / Ollama）
+
+在同一文件中保留原有 `hosts`，增加 `lan_endpoints`：
+
+```json
+{
+  "version": 1,
+  "hosts": ["api.example.com"],
+  "lan_endpoints": [
+    "http://192.168.1.20:11434",
+    "http://10.0.0.8:8000",
+    "https://172.16.1.10:8443"
+  ]
+}
+```
+
+- 只接受 `10.0.0.0/8`、`172.16.0.0/12`、`192.168.0.0/16` 内的**具体 IPv4 地址**，按协议、IP 和端口精确匹配；不支持通配符、CIDR 网段或局域网域名。
+- 白名单条目不带路径、查询参数或密钥。在节点里可填 `http://10.0.0.8:8000/v1`；Ollama 服务可填 `http://192.168.1.20:11434`，选择 Ollama 格式。
+- 公网仍须 HTTPS。HTTP 在局域网中也是明文，请仅授权可信服务；HTTPS 证书校验不会关闭，重定向仍被禁止。
+- 修改的是**运行 ComfyUI 的机器**上的文件。还需让目标服务监听局域网网卡并开放对应防火墙端口；白名单不能解决网络不通。
+- 旧白名单无需重建，缺少 `lan_endpoints` 等同于未授权任何远程局域网服务。此改动不开放远程设置管理接口，也不影响 RH 版的平台 API。
 
 开发时可自行维护本机的同步配置；本仓库不会提交本机路径、API Key、上传媒体或输出元数据。
 

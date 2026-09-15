@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.4.7
+
+- Restores explicitly authorized LAN inference APIs, including remote Ollama and HTTP OpenAI-compatible services, through the server-local allowed_api_hosts.json lan_endpoints list.
+- Matches exact scheme, RFC1918 IPv4 address and port; does not automatically allow entire private networks. Existing public-host allow-lists and local Ollama remain compatible.
+- Retains public HTTPS requirements, TLS verification, redirect blocking and local-only settings routes. The web UI cannot modify the allow-list.
+- Documents LAN configuration and deployment requirements in both READMEs and the API Settings panel.
+- Validation: allow-list regression tests, Python/frontend syntax and diff checks. No live LAN server connection was tested. RH is unchanged.
+
 ## v1.4.6
 
 - Adds reference-video time ranges and play/stop previews; video frames and source audio are cropped together with 100 ms input normalization.

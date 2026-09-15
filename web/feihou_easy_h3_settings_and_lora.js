@@ -584,8 +584,12 @@ async function mountInlineSettings(root) {
             "Built-in providers are already allowed. Before using a new third-party API, add its hostname to the hosts array in ComfyUI/user/default/ComfyUI-FeiHou-Easy-H3/allowed_api_hosts.json (hostname only; no https://, path, or port), then restart ComfyUI."
         )),
         el("p", "fh-inline-allowlist-note", t(
-            "这是安全限制：避免公开的 ComfyUI 服务被诱导访问内网地址或将 API Key 发送到恶意服务器。Ollama 仅允许 localhost、127.0.0.1 或 ::1。",
-            "This security restriction prevents an exposed ComfyUI server from being redirected to private-network addresses or leaking an API key to a malicious server. Ollama is limited to localhost, 127.0.0.1, or ::1."
+            "局域网 API / Ollama：在同一白名单文件增加 lan_endpoints 数组，例如 [\"http://192.168.1.20:11434\", \"http://10.0.0.8:8000\"]。只授权 10/8、172.16/12、192.168/16 内的具体 IP，按协议和端口匹配；条目不填 /v1 等路径。节点 API 地址可以带 /v1。本机 Ollama 无需添加，公网仍要求 HTTPS。",
+            "LAN API / Ollama: add lan_endpoints to the same file, e.g. [\"http://192.168.1.20:11434\", \"http://10.0.0.8:8000\"]. Only exact IP origins in 10/8, 172.16/12 and 192.168/16 are accepted, matching scheme and port. Omit paths such as /v1 from this list; the node URL may contain /v1. Local Ollama needs no entry; public APIs still require HTTPS."
+        )),
+        el("p", "fh-inline-allowlist-note", t(
+            "请在运行 ComfyUI 的机器上修改此文件；网页不能改写白名单。HTTP 是明文，仅授权可信服务。不自动放行整段内网；证书校验和禁止重定向保持不变。目标服务仍需开放监听地址和防火墙端口。",
+            "Edit this file on the ComfyUI server; the web UI cannot change it. HTTP is unencrypted: authorize only trusted services. Entire private subnets are not allowed. TLS verification and redirect restrictions remain enabled. The target service still needs a reachable listener and firewall port."
         ))
     );
     const providerContainer = el("div", "fh-inline-provider-container");
