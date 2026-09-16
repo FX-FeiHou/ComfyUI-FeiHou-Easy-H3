@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.4.9
+
+- Checks standard linear LoRA dimensions before bypass loading. Skips incompatible layers with per-layer warnings and a partial-load summary; rejects LoRAs with no usable matched layers.
+- Preserves matching adapters, strength, raw caches and multiple-LoRA composition. Other adapter types remain delegated to ComfyUI with an explicit unvalidated warning.
+- No UI/widget-order changes. CPU compatibility regressions tested; full GPU quality not re-tested.
+
 ## v1.4.8
 
 - Hides the LoRA stack bypass toggle and consistently enables additive bypass loading, including saved regular-mode workflows and legacy API inputs.

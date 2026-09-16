@@ -2153,6 +2153,9 @@ class MiniMaxH3Bundle:
                 raise RuntimeError("This ComfyUI version does not support the selected LoRA loading mode.")
             previous = list(result.get_injections("bypass_lora") or []) if bypass else []
             lora = self._load_lora(name)
+            if bypass:
+                from .lora_compat import compatible_lora
+                lora = compatible_lora(result, lora, name)
             result, _clip = loader(result, None, lora, float(strength), 0.0)
             if bypass:
                 current = list(result.get_injections("bypass_lora") or [])
