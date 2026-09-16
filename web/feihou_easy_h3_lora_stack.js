@@ -123,7 +123,7 @@ class FeiHouEasyH3LoraStackNode extends RgthreeBaseServerNode {
     addNewLoraWidget(lora) {
         this.loraWidgetsCounter++;
         const row = this.addCustomWidget(new FeiHouEasyH3LoraWidget(`lora_${this.loraWidgetsCounter}`));
-        row.bypassMode = () => this.properties?.feihou_lora_bypass !== false;
+        row.bypassMode = () => true;
         if (lora) row.setLora(lora);
         if (this.widgetButtonSpacer) {
             moveArrayItem(this.widgets, row, this.widgets.indexOf(this.widgetButtonSpacer));
@@ -133,7 +133,8 @@ class FeiHouEasyH3LoraStackNode extends RgthreeBaseServerNode {
 
     addNonLoraWidgets() {
         this.properties ||= {};
-        if (typeof this.properties.feihou_lora_bypass !== "boolean") this.properties.feihou_lora_bypass = true;
+        // Migrate saved regular-mode stacks without changing widget positions.
+        this.properties.feihou_lora_bypass = true;
         moveArrayItem(
             this.widgets,
             this.addCustomWidget(new RgthreeDividerWidget({marginTop: 4, marginBottom: 0, thickness: 0})),
@@ -276,7 +277,6 @@ class FeiHouEasyH3LoraHeaderWidget extends RgthreeBaseWidget {
         this.options = {serialize: false};
         this.hitAreas = {
             toggle: {bounds: [0, 0], onDown: this.onToggleDown},
-            bypass: {bounds: [0, 0], onDown: this.onBypassDown},
         };
     }
 
@@ -287,11 +287,6 @@ class FeiHouEasyH3LoraHeaderWidget extends RgthreeBaseWidget {
         let posX = margin;
         ctx.save();
         this.hitAreas.toggle.bounds = drawTogglePart(ctx, {posX, posY, height, value: node.allLorasState()});
-        const bypassX = Math.max(132, margin + this.hitAreas.toggle.bounds[1] + innerMargin
-            + ctx.measureText(t("全部开关", "Toggle All")).width + 18);
-        this.hitAreas.bypass.bounds = drawTogglePart(ctx, {
-            posX: bypassX, posY, height, value: node.properties?.feihou_lora_bypass !== false,
-        });
         if (!isLowQuality()) {
             posX += this.hitAreas.toggle.bounds[1] + innerMargin;
             ctx.globalAlpha = app.canvas.editor_alpha * 0.55;
@@ -299,20 +294,11 @@ class FeiHouEasyH3LoraHeaderWidget extends RgthreeBaseWidget {
             ctx.textAlign = "left";
             ctx.textBaseline = "middle";
             ctx.fillText(t("全部开关", "Toggle All"), posX, midY);
-            ctx.fillText(t("旁路", "Bypass"), bypassX + this.hitAreas.bypass.bounds[1] + innerMargin, midY);
             ctx.textAlign = "center";
             const right = node.size[0] - margin - innerMargin * 2;
             ctx.fillText(t("强度", "Strength"), right - drawNumberWidgetPart.WIDTH_TOTAL / 2, midY);
         }
         ctx.restore();
-    }
-
-    onBypassDown(event, pos, node) {
-        node.properties ||= {};
-        node.properties.feihou_lora_bypass = node.properties.feihou_lora_bypass === false;
-        node.setDirtyCanvas(true, true);
-        this.cancelMouseDown();
-        return true;
     }
 
     onToggleDown(event, pos, node) {

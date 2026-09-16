@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.4.8
+
+- Hides the LoRA stack bypass toggle and consistently enables additive bypass loading, including saved regular-mode workflows and legacy API inputs.
+- Preserves LoRA names, strengths, enable flags, stack chaining and widget order. Does not change external official LoRA loaders or the RH edition.
+- Validates saved-workflow migration, backend stack normalization and syntax. Full GPU quality and memory usage were not re-tested for this release.
+
 ## v1.4.7
 
 - Restores explicitly authorized LAN inference APIs, including remote Ollama and HTTP OpenAI-compatible services, through the server-local allowed_api_hosts.json lan_endpoints list.

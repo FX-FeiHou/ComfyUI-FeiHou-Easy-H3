@@ -2636,7 +2636,10 @@ class FeiHouEasyH3LoraStack:
             if not key.lower().startswith("lora_") or not isinstance(value, Mapping):
                 continue
             result.extend(_normalize_lora_stack([value]))
-        return (result,)
+        # This loader always uses additive bypass, including old API workflows
+        # containing bypass=false and upstream stacks. Keep the general-purpose
+        # normalizer unchanged for other callers.
+        return ([(name, strength, True) for name, strength, _ in result],)
 
 
 class FeiHouEasyH3Loader:
