@@ -160,8 +160,6 @@ class FeiHouEasyH3FaceRefine:
             return images, audio, fps, '已跳过人脸精修；原画面和原音频保持不变。'
         if images.ndim != 4 or len(images) == 0:
             raise ValueError('人脸精修需要非空 IMAGE 视频帧。')
-        if abs(fps - 24) > 0.01:
-            raise ValueError('首版人脸精修仅支持 H3 原生 24 FPS；请在插帧前接入本节点。')
         if reference_face is None:
             reference_face = getattr(h3_context, 'reference_image_1', None)
         if target == 'reference_identity' and reference_face is None:

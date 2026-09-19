@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.4.10
+
+- Removes the face-refinement 24 FPS restriction; uses the frame rate supplied by H3 context for existing timing calculations and output.
+- No new controls, interpolation checks, or widget-order changes. Syntax and file synchronization verified; non-24-FPS GPU quality not re-tested.
+
 ## v1.4.9
 
 - Checks standard linear LoRA dimensions before bypass loading. Skips incompatible layers with per-layer warnings and a partial-load summary; rejects LoRAs with no usable matched layers.
