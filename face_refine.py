@@ -122,7 +122,7 @@ class FeiHouEasyH3FaceRefine:
     FUNCTION = 'refine'
     RETURN_TYPES = ('IMAGE', 'AUDIO', 'FLOAT', 'STRING')
     RETURN_NAMES = ('images', 'audio', 'fps', 'report')
-    DESCRIPTION = 'Experimental H3 face crop/refine/stitch. Adds sampling; does not guarantee lip sync. Original audio passes through.'
+    DESCRIPTION = 'Experimental H3 face crop/refine/stitch. Supports single-face and sequential multi-face refinement; original audio passes through.'
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -147,13 +147,16 @@ class FeiHouEasyH3FaceRefine:
             # Append only: existing workflows serialize widgets by position.
             'audio_lock': ('BOOLEAN', {'default': False, 'tooltip': 'Experimental: condition face sampling on the connected, time-aligned original audio. Not a guaranteed lip-sync correction.'}),
             'clean_second_model': ('BOOLEAN', {'default': True, 'tooltip': 'Use the recorded pre-LoRA second-pass base. Requires an Easy H3 second-pass model; removes external patches as well.'}),
-        }, 'optional': {'reference_face': ('IMAGE',), 'audio': ('AUDIO',)}}
+            'face_mode': (['单人', '多人'], {'default': '单人', 'tooltip': '单人：修复一条人脸轨迹。多人：逐脸采样并按每张脸自己的遮罩合成。'}),
+            'max_faces': ('INT', {'default': 2, 'min': 2, 'max': 8, 'step': 1, 'tooltip': 'Maximum faces in multi mode. Sampling is sequential to keep peak VRAM stable. Without a reference batch, ranked faces are tracked.'}),
+        }, 'optional': {'reference_face': ('IMAGE',), 'reference_faces': ('IMAGE',), 'audio': ('AUDIO',)}}
 
     def refine(self, images, model, h3_context, enabled=True, detector='face_yolov8m.pt',
                target='largest_face', denoise=0.25, steps=8, seed=0, advanced=False,
                canvas_size='768', confidence=0.35, crop_factor=2.5, chunk_frames='不分段',
                sampler_name='euler', scheduler='simple', prompt='', force_offload=True,
-               reference_face=None, audio=None, audio_lock=False, clean_second_model=True):
+               reference_face=None, audio=None, audio_lock=False, clean_second_model=True,
+               face_mode='single', max_faces=2, reference_faces=None):
         # Independent of original-audio reference slicing: only explicitly supplied final audio is passed through.
         fps = float(h3_context.fps)
         if not enabled or denoise <= 0:
@@ -162,7 +165,7 @@ class FeiHouEasyH3FaceRefine:
             raise ValueError('人脸精修需要非空 IMAGE 视频帧。')
         if reference_face is None:
             reference_face = getattr(h3_context, 'reference_image_1', None)
-        if target == 'reference_identity' and reference_face is None:
+        if target == 'reference_identity' and reference_face is None and not isinstance(reference_faces, torch.Tensor):
             raise ValueError('参考图匹配模式需要连接 reference_face。')
         if clean_second_model:
             getter = getattr(model, 'get_attachment', None)
@@ -182,13 +185,68 @@ class FeiHouEasyH3FaceRefine:
                 raise ValueError('音频约束需要连接与视频从第 0 帧对齐的原音频（单条单声道或立体声音频）。')
             if not hasattr(getattr(model, 'model', None), '_denoise_mask_values'):
                 raise ValueError('当前模型/ComfyUI 不支持 H3 原生音频遮罩；请更新 ComfyUI 或关闭音频约束。')
+        multi = str(face_mode).lower() in ('multi', '多人')
+        if multi:
+            try:
+                max_faces = max(2, min(8, int(max_faces)))
+            except (TypeError, ValueError):
+                raise ValueError('多人模式的最大人脸数必须是 2 到 8 之间的整数。')
+
+        # A ComfyUI IMAGE batch is used for identity references in multi mode.
+        # Frame 0 maps to person 1, frame 1 to person 2, and so on. The old
+        # reference_face socket remains valid for a single face and can also
+        # provide the batch for graphs that already send an IMAGE batch there.
+        reference_batch = None
+        if multi:
+            candidate = reference_faces if isinstance(reference_faces, torch.Tensor) else None
+            if candidate is None and isinstance(reference_face, torch.Tensor) and len(reference_face) > 1:
+                candidate = reference_face
+            if candidate is not None:
+                if candidate.ndim != 4 or candidate.shape[-1] < 3 or len(candidate) == 0:
+                    raise ValueError('多人参考图必须是非空 IMAGE 批次，每帧对应一个人物。')
+                reference_batch = candidate
+
         with _LOCK, torch.inference_mode():
             from . import face_refine_tracking as tr
             try:
-                return self._run(tr, images, model, h3_context, detector, target, denoise,
-                                 steps, seed, canvas_size, confidence, crop_factor,
-                                 chunk_frames, sampler_name, scheduler, prompt, force_offload,
-                                 reference_face, audio, fps, audio_lock)
+                if not multi:
+                    return self._run(tr, images, model, h3_context, detector, target, denoise,
+                                     steps, seed, canvas_size, confidence, crop_factor,
+                                     chunk_frames, sampler_name, scheduler, prompt, force_offload,
+                                     reference_face, audio, fps, audio_lock)
+
+                combined = images[..., :3].detach().cpu().clone()
+                reports = []
+                output_audio = audio
+                output_fps = fps
+                refined_count = 0
+                for face_index in range(max_faces):
+                    face_reference = None
+                    if reference_batch is not None and face_index < len(reference_batch):
+                        face_reference = reference_batch[face_index:face_index + 1]
+                    elif face_index == 0 and reference_face is not None:
+                        face_reference = reference_face[:1]
+                    face_target = 'reference_identity' if face_reference is not None else 'largest_face'
+                    refined, output_audio, output_fps, report, paste_mask = self._run(
+                        tr, images, model, h3_context, detector, face_target, denoise,
+                        steps, seed, canvas_size, confidence, crop_factor, chunk_frames,
+                        sampler_name, scheduler, prompt, force_offload, face_reference,
+                        audio, fps, audio_lock, face_index=face_index, return_mask=True)
+                    if refined is None:
+                        # The tracker clamps a rank when the clip contains fewer
+                        # faces. Stop before sampling that same person again.
+                        break
+                    mask = paste_mask.to(combined.device, dtype=combined.dtype).clamp(0, 1)
+                    combined = combined * (1.0 - mask) + refined.to(combined.device) * mask
+                    refined_count += 1
+                    reports.append(f'人脸 {face_index + 1}: {report}')
+
+                if refined_count == 0:
+                    raise ValueError('多人模式没有找到可修复的人脸。请降低检测置信度或检查人脸检测模型。')
+                return combined, output_audio, output_fps, (
+                    f'多人脸精修完成：处理 {refined_count} 张脸，逐脸串行采样并按独立遮罩合成。\n'
+                    + '\n'.join(reports)
+                )
             except ImportError as exc:
                 raise RuntimeError('人脸精修缺少可选依赖。按 FACE_REFINE.md 安装 requirements-face-refine.txt；其他 Easy H3 节点不受影响。') from exc
             finally:
@@ -202,7 +260,8 @@ class FeiHouEasyH3FaceRefine:
 
     def _run(self, tr, images, model, context, detector, target, denoise, steps, seed,
              canvas_size, confidence, crop_factor, chunk_frames, sampler_name, scheduler,
-             prompt, force_offload, reference_face, audio, fps, audio_lock=False):
+             prompt, force_offload, reference_face, audio, fps, audio_lock=False,
+             face_index=None, return_mask=False):
         import comfy.model_management as mm
         import comfy.nested_tensor
         import comfy.samplers
@@ -231,11 +290,22 @@ class FeiHouEasyH3FaceRefine:
                 canvas_mode='manual', smooth_window=21, size_smooth_window=51,
                 smooth_method='gaussian', size_mode='per_frame',
                 select='largest_face', identity_track=target == 'reference_identity',
-                identity_reference=reference_face, cut_detection='auto (pyscenedetect)')
+                identity_reference=reference_face, cut_detection='auto (pyscenedetect)',
+                select_index=int(face_index or 0))
         except ValueError as exc:
             if str(exc).startswith('No face detected in any frame'):
+                if return_mask:
+                    return None, audio, fps, '未检测到可修复人脸；保留原画面。\n' + str(exc), None
                 return images, audio, fps, '未检测到可修复人脸；保留原画面。\n' + str(exc)
             raise
+        selected_index = int(transform.get('selected_index', face_index or 0))
+        if face_index is not None and reference_face is None and selected_index != int(face_index):
+            # H3FaceTrackCrop reports the actual number of ranked faces. A
+            # clamped rank means there is no new subject to sample.
+            return None, audio, fps, (
+                f'多人模式在请求第 {int(face_index) + 1} 张脸时已到达检测上限 '
+                f'（实际最多 {int(transform.get("max_faces", selected_index + 1))} 张）。'
+            ), None
         del preview
         report = reference_report + '\n' + report
         for det in tr._DETECTOR_CACHE.values():
@@ -303,14 +373,20 @@ class FeiHouEasyH3FaceRefine:
                 del frames, encoded, latent, members, conditioning, guider, sampled, decoded
                 if force_offload:
                     _release(working_model, context)
-        result = tr.H3FaceStitch().run(images.cpu(), refined, transform,
+        stitched = tr.H3FaceStitch().run(images.cpu(), refined, transform,
             paste_region='face_ellipse', mask_dilation=16, feather=6,
-            colour_match=1.0, blend=1.0, undetected_frames='fade_out')[0]
+            colour_match=1.0, blend=1.0, undetected_frames='fade_out',
+            return_mask=return_mask)
+        result = stitched[0]
+        paste_mask = stitched[1] if return_mask else None
         if result.shape != images[..., :3].shape:
             raise ValueError('人脸精修输出尺寸或帧数改变，已中止。')
         audio_report = ('已按原视频时间截取并锁定采样音频；网格补齐部分填静音。音频约束不保证逐音素口型准确。'
                         if audio_lock else '未启用音频约束。')
         if audio_lock and audio['waveform'].shape[-1] / audio['sample_rate'] < len(images) / fps:
             audio_report += ' 输入音频短于视频，不足部分仅在采样时补静音。'
-        return result, audio, fps, (f'人脸精修完成：{segment_count} 个采样分段；{len(result)} 帧，{fps:g} FPS。\n'
+        final_report = (f'人脸精修完成：{segment_count} 个采样分段；{len(result)} 帧，{fps:g} FPS。\n'
             + audio_report + ' 原音频原样输出；未启用逐帧降噪补丁。请检查口型、身份及分段接缝。\n' + report)
+        if return_mask:
+            return result, audio, fps, final_report, paste_mask
+        return result, audio, fps, final_report

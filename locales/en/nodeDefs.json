@@ -62,8 +62,17 @@
       "clean_second_model": {
         "name": "Use clean second-pass model"
       },
+      "face_mode": {
+        "name": "Face mode"
+      },
+      "max_faces": {
+        "name": "Maximum faces"
+      },
       "reference_face": {
         "name": "Reference face"
+      },
+      "reference_faces": {
+        "name": "Reference face batch"
       },
       "audio": {
         "name": "Original audio"
@@ -86,7 +95,7 @@
   },
   "FeiHouEasyH3LoraStack": {
     "display_name": "Load LoRA (Model Only)",
-    "description": "Dynamic LoRA stack used by the FeiHou Easy H3 Loader.",
+    "description": "Dynamic LoRA stack used by the FeiHou Easy H3 Loader; each LoRA can independently use bypass or regular loading.",
     "inputs": {
       "optional_lora_stack": { "name": "Optional LoRA stack" }
     },
@@ -115,7 +124,7 @@
   },
   "FeiHouEasyH3RemixLoader": {
     "display_name": "FeiHou Easy H3 Remix Loader",
-    "description": "Load one MiniMax H3 Remix transformer shared by FL2VA and REF2VA, with independent first- and second-pass LoRA stacks.",
+    "description": "Load one MiniMax H3 Remix transformer shared by FL2VA and REF2VA, with independent first- and second-pass LoRA stacks; when no second-pass model is selected, the second-pass output uses the main model with the second-pass LoRA.",
     "inputs": {
       "remix_model": { "name": "Remix main model" },
       "text_encoder": { "name": "Text encoder" },

@@ -4,6 +4,12 @@ import { api } from "../../scripts/api.js";
 // FeiHou Easy H3 frontend: embedded media gallery and prompt references.
 
 const NODE_CLASS = "FeiHouEasyH3";
+// Split edition: media gallery node + setup node (all other behaviour shared).
+const MEDIA_CLASS = "FeiHouEasyH3Media";
+const CORE_CLASS = "FeiHouEasyH3Setup";
+const CORE_MEDIA_INPUT = "h3_media";
+const CORE_TITLE = "FeiHou Easy H3 Setup";
+const MEDIA_TITLE = "FeiHou Easy H3 Media";
 const LOADER_CLASS = "FeiHouEasyH3Loader";
 const REMIX_LOADER_CLASS = "FeiHouEasyH3RemixLoader";
 const ADAPTER_CLASS = "FeiHouEasyH3ModelAdapter";
@@ -314,8 +320,63 @@ function nodeMatchesClass(node, className, displayName, installedMarker) {
     return identity === className;
 }
 
+// Serialized workflow data must be plain JSON. node.properties is reactive in
+// the new frontend, so values read from it can be Vue Proxies, which break
+// structuredClone (e.g. when a workflow is loaded from a saved video).
+function plainCopy(value) {
+    if (value === undefined) return undefined;
+    try {
+        return JSON.parse(JSON.stringify(value));
+    } catch {
+        return value;
+    }
+}
+
 function isTarget(node) {
-    return nodeMatchesClass(node, NODE_CLASS, TEXT.mainTitle, "__feihouStandardH3EasyNodeInstalled");
+    return nodeMatchesClass(node, NODE_CLASS, TEXT.mainTitle, "__feihouStandardH3EasyNodeInstalled")
+        || nodeMatchesClass(node, CORE_CLASS, CORE_TITLE, "__feihouStandardH3EasyNodeInstalled");
+}
+
+function isCoreNode(node) {
+    return nodeMatchesClass(node, CORE_CLASS, CORE_TITLE, "__feihouStandardH3EasyNodeInstalled");
+}
+
+function isMediaNode(node) {
+    return nodeMatchesClass(node, MEDIA_CLASS, MEDIA_TITLE, "__feihouStandardH3MediaNodeInstalled");
+}
+
+// The Media node that feeds a Core node (direct link, Reroute, or KJ Set/Get).
+function mediaHostNode(node, depth = 0) {
+    if (!node || depth > 8) return null;
+    if (isMediaNode(node)) return node;
+    const graph = node.graph || app.graph;
+    let input = null;
+    if (isCoreNode(node)) input = (node.inputs || []).find((item) => String(item?.name || "") === CORE_MEDIA_INPUT);
+    else if (String(node.type || "") === "Reroute") input = node.inputs?.[0];
+    else if (String(node.type || "") === "GetNode") {
+        const name = node.widgets?.[0]?.value;
+        const setter = (graph?._nodes || []).find((item) => String(item?.type || "") === "SetNode" && item.widgets?.[0]?.value === name);
+        return setter ? mediaHostNode(setter, depth + 1) : null;
+    } else if (String(node.type || "") === "SetNode") input = node.inputs?.[0];
+    if (!input || input.link == null) return null;
+    const link = getNativeGraphLink(graph, input.link);
+    const originId = link?.origin_id ?? link?.originId;
+    const origin = originId == null ? null : graph?.getNodeById?.(originId);
+    return origin ? mediaHostNode(origin, depth + 1) : null;
+}
+
+// Where media edits for this node are stored (Core -> its Media node).
+function mediaStoreNode(node) {
+    return isCoreNode(node) ? mediaHostNode(node) : node;
+}
+
+function notifyMediaConsumers(mediaNode) {
+    for (const node of app.graph?._nodes || []) {
+        if (!isCoreNode(node) || mediaHostNode(node) !== mediaNode) continue;
+        syncAudioDurationAuto(node);
+        renderEditorFromNode(node);
+    }
+    requestMentionPreviewRefresh();
 }
 
 function isLoader(node) {
@@ -492,7 +553,7 @@ function localizeNodeInstance(node) {
     if (!(node.inputs || []).some((input) => input.name === "prompt")) {
         node.addInput?.("prompt", "STRING", { widget: { name: "prompt" } });
     }
-    node.title = TEXT.mainTitle;
+    node.title = isCoreNode(node) ? CORE_TITLE : TEXT.mainTitle;
     const labels = { mode: TEXT.mode, prompt: TEXT.prompt, resolution: TEXT.resolution, aspect_ratio: TEXT.aspectRatio, width: TEXT.width, height: TEXT.height, audio_duration_auto: TEXT.audioDurationAuto, seconds: TEXT.seconds, advanced: TEXT.advanced, force_offload: TEXT.forceOffload, low_vram_streamed_attention: TEXT.lowVramStreamedAttention, reference_text_only: TEXT.referenceTextOnly, prompt_optimizer_enabled: TEXT.promptOptimizerEnabled, prompt_optimizer_provider: TEXT.promptOptimizerProvider, prompt_optimizer_scene_guide: TEXT.promptOptimizerSceneGuide, fps: TEXT.fps, keyframe_role: TEXT.keyframeRole, ref_image_size: TEXT.refImageSize, reference_mention_mode: TEXT.referenceMentionMode };
     for (const widget of node.widgets || []) {
         if (labels[widget.name]) widget.label = labels[widget.name];
@@ -545,6 +606,7 @@ function asBoolean(value, fallback = false) {
 }
 
 function isReferenceMode(node) {
+    if (isMediaNode(node)) return true;
     return canonicalOption("mode", getWidgetValue(node, "mode", MODE_IMAGE)) === MODE_REFERENCE;
 }
 
@@ -657,6 +719,10 @@ function embeddedSyntheticSourceId(mediaType, ordinal) {
 }
 
 function ensureEmbeddedMedia(node) {
+    if (isCoreNode(node)) {
+        const host = mediaHostNode(node);
+        return host ? ensureEmbeddedMedia(host) : [];
+    }
     node.properties ||= {};
     const source = Array.isArray(node.properties[EMBEDDED_MEDIA_PROP])
         ? node.properties[EMBEDDED_MEDIA_PROP]
@@ -715,6 +781,11 @@ function embeddedMediaFilename(item) {
 }
 
 function setEmbeddedMedia(node, mediaType, ordinal, value) {
+    if (isCoreNode(node)) {
+        const host = mediaHostNode(node);
+        if (host) setEmbeddedMedia(host, mediaType, ordinal, value);
+        return;
+    }
     stopEmbeddedAudioPreview(node);
     const key = embeddedMediaKey(mediaType, ordinal);
     const current = ensureEmbeddedMedia(node);
@@ -754,6 +825,10 @@ function audioTrimParts(value) {
 }
 
 function setEmbeddedAudioTrim(node, ordinal, value, mediaType = "audio") {
+    if (isCoreNode(node)) {
+        const host = mediaHostNode(node);
+        return host ? setEmbeddedAudioTrim(host, ordinal, value, mediaType) : normalizeAudioTrimRange(value);
+    }
     stopEmbeddedAudioPreview(node);
     const normalized = normalizeAudioTrimRange(value);
     const records = ensureEmbeddedMedia(node);
@@ -782,6 +857,10 @@ function embeddedMediaDragPayload(event) {
 }
 
 function reorderEmbeddedMedia(node, mediaType, sourceOrdinal, targetOrdinal) {
+    if (isCoreNode(node)) {
+        const host = mediaHostNode(node);
+        return host ? reorderEmbeddedMedia(host, mediaType, sourceOrdinal, targetOrdinal) : false;
+    }
     if (mediaType !== "image" && mediaType !== "video" && mediaType !== "audio") return false;
     if (sourceOrdinal === targetOrdinal) return false;
     const allRecords = ensureEmbeddedMedia(node);
@@ -4956,7 +5035,9 @@ function productionFallbackValues(node) {
 export function applyProductionShotPreview(node, shot) {
     if (!isTarget(node) || !shot?.media || !shot?.params) return;
     node.properties ||= {};
-    node.properties[EMBEDDED_MEDIA_PROP] = shot.media.map((item) => ({ ...item }));
+    // A Core node's media live on its Media node; the backend applies the
+    // pack media at execution, so the preview never overwrites that gallery.
+    if (!isCoreNode(node)) node.properties[EMBEDDED_MEDIA_PROP] = shot.media.map((item) => ({ ...item }));
     const params = { ...productionFallbackValues(node), ...shot.params };
     delete params.resolution;
     delete params.width;
@@ -5524,9 +5605,30 @@ function syncEmbeddedMediaResponsiveLayout(node, { resetBaseline = false } = {})
     const workbench = node?.__feihouMediaWorkbench;
     const galleryWidget = node?.__feihouMediaGalleryWidget;
     const promptWrap = node?.__h3EditorWrap;
-    if (!gallery || !workbench || !galleryWidget || !promptWrap) return false;
+    if (isCoreNode(node)) {
+        if (!workbench || !galleryWidget || !promptWrap) return false;
+        const base = EMBEDDED_MEDIA_LAYOUT;
+        const pad = base.workbenchPaddingTop + base.promptBottomGap;
+        const nodeH = Number(node?.size?.[1]);
+        let st = node.__h3EmbeddedResponsiveLayout;
+        if (resetBaseline || !st || st.mode !== "prompt") {
+            st = { mode: "prompt", nodeHeight: Number.isFinite(nodeH) && nodeH > 0 ? nodeH : 0,
+                   hostHeight: Math.max(base.promptBase + pad, Number(galleryWidget.computedHeight) || base.promptBase + pad) };
+            node.__h3EmbeddedResponsiveLayout = st;
+        }
+        // Prompt-only host: CSS lets the editor fill whatever height ComfyUI
+        // gives the widget, so a tab switch can never leave it half-sized.
+        workbench.style.removeProperty("--fh-h3-prompt-height");
+        workbench.style.setProperty("--fh-h3-gallery-height", "0px");
+        node._widgetSlotsDirty = true;
+        return true;
+    }
+    const promptless = isMediaNode(node);
+    if (!gallery || !workbench || !galleryWidget || (!promptWrap && !promptless)) return false;
     const reference = isReferenceMode(node);
-    const layout = EMBEDDED_MEDIA_LAYOUT;
+    const layout = promptless
+        ? { ...EMBEDDED_MEDIA_LAYOUT, promptMin: 0, promptBase: 0, galleryPromptGap: 0 }
+        : EMBEDDED_MEDIA_LAYOUT;
     const modeKey = reference ? "reference" : "image";
     const minGalleryHeight = embeddedGalleryHeight(reference, layout.imageSlotMin);
     const padding = layout.workbenchPaddingTop + layout.promptBottomGap;
@@ -5673,6 +5775,7 @@ function renderEmbeddedMediaGallery(node) {
     syncEmbeddedMediaResponsiveLayout(node);
     node._widgetSlotsDirty = true;
     repairNodeLayout(node);
+    if (isMediaNode(node)) notifyMediaConsumers(node);
 }
 
 function removeEmbeddedMediaGalleryWidgets(node) {
@@ -5685,12 +5788,49 @@ function removeEmbeddedMediaGalleryWidgets(node) {
     }
 }
 
+function ensureCorePromptHost(node) {
+    if (node.__feihouMediaWorkbench || typeof document === "undefined" || typeof node.addDOMWidget !== "function") return;
+    const workbench = document.createElement("div");
+    workbench.className = "fh-h3-embedded-workbench is-prompt-only";
+    const domWidget = node.addDOMWidget("feihou_h3_prompt_host", "feihou_h3_prompt_host", workbench, {
+        serialize: false,
+        margin: 0,
+        getMinHeight: () => EMBEDDED_MEDIA_LAYOUT.promptMin
+            + EMBEDDED_MEDIA_LAYOUT.workbenchPaddingTop + EMBEDDED_MEDIA_LAYOUT.promptBottomGap,
+        afterResize: () => {
+            if (isVueNodesMode()) return;
+            syncEmbeddedMediaResponsiveLayout(node);
+            applyNativeEditorTheme(node.__h3EditorWrap);
+        },
+    });
+    if (!domWidget) {
+        workbench.remove();
+        return;
+    }
+    domWidget.serialize = false;
+    setWidgetOption(domWidget, "serialize", false);
+    setWidgetOption(domWidget, "canvasOnly", false);
+    node.__feihouMediaWorkbench = workbench;
+    node.__feihouMediaGalleryWidget = domWidget;
+    const domIndex = node.widgets?.indexOf(domWidget) ?? -1;
+    const modeIndex = node.widgets?.indexOf(getWidget(node, "mode")) ?? -1;
+    if (domIndex >= 0 && modeIndex >= 0 && domIndex !== modeIndex + 1) {
+        node.widgets.splice(domIndex, 1);
+        node.widgets.splice(node.widgets.indexOf(getWidget(node, "mode")) + 1, 0, domWidget);
+    }
+    if (Array.isArray(node.size) && node.size[0] < 420) node.setSize?.([420, node.size[1]]);
+}
+
 function ensureEmbeddedMediaGallery(node) {
+    if (isCoreNode(node)) {
+        ensureCorePromptHost(node);
+        return;
+    }
     if (node.__feihouMediaGallery || typeof document === "undefined" || typeof node.addDOMWidget !== "function") return;
     removeEmbeddedMediaGalleryWidgets(node);
     ensureEmbeddedMedia(node);
     const workbench = document.createElement("div");
-    workbench.className = "fh-h3-embedded-workbench";
+    workbench.className = isMediaNode(node) ? "fh-h3-embedded-workbench is-media-only" : "fh-h3-embedded-workbench";
     const gallery = document.createElement("div");
     gallery.className = "fh-h3-media-gallery";
     gallery.addEventListener("pointerdown", (event) => event.stopPropagation());
@@ -5708,7 +5848,7 @@ function ensureEmbeddedMediaGallery(node) {
         // every extra pixel is then partitioned inside the workbench.
         getMinHeight: () => embeddedGalleryHeight(
             isReferenceMode(node), EMBEDDED_MEDIA_LAYOUT.imageSlotMin,
-        ) + EMBEDDED_MEDIA_LAYOUT.promptMin + EMBEDDED_MEDIA_LAYOUT.galleryPromptGap
+        ) + (isMediaNode(node) ? 0 : EMBEDDED_MEDIA_LAYOUT.promptMin + EMBEDDED_MEDIA_LAYOUT.galleryPromptGap)
             + EMBEDDED_MEDIA_LAYOUT.workbenchPaddingTop + EMBEDDED_MEDIA_LAYOUT.promptBottomGap,
         afterResize: () => {
             // Vue Nodes already runs its own DOM measurement after a resize.
@@ -5826,7 +5966,7 @@ function applyFreshNodeDefaults(node) {
 }
 
 function installNode(nodeType, nodeData) {
-    if (nodeData?.name !== NODE_CLASS) return;
+    if (nodeData?.name !== NODE_CLASS && nodeData?.name !== CORE_CLASS) return;
     // Strip the virtual-wire transport fields from every frontend definition
     // before a node instance can be constructed. Execution still receives
     // them through the prompt patch and the Python INPUT_TYPES declaration.
@@ -5905,6 +6045,16 @@ function installNode(nodeType, nodeData) {
         if (mediaInputIndex >= 0 && this.inputs?.[mediaInputIndex]?.link != null) {
             scheduleNativeMediaConnectionConversion(this, mediaInputIndex);
         }
+        if (isCoreNode(this)) {
+            // Links to the Media node may be restored after this node.
+            for (const delay of [0, 120, 500]) {
+                setTimeout(() => {
+                    syncAudioDurationAuto(this);
+                    renderEditorFromNode(this);
+                    requestMentionPreviewRefresh();
+                }, delay);
+            }
+        }
         return result;
     };
 
@@ -5927,6 +6077,13 @@ function installNode(nodeType, nodeData) {
             syncPromptExternalConnectionState(this);
             globalThis.requestAnimationFrame?.(() => syncPromptExternalConnectionState(this));
         }
+        if (String(input?.name || "") === CORE_MEDIA_INPUT) {
+            setTimeout(() => {
+                syncAudioDurationAuto(this);
+                renderEditorFromNode(this);
+                requestMentionPreviewRefresh();
+            }, 0);
+        }
         if (connected && !this.__h3VirtualWireClearing && /^media(?:_\d+)?$/i.test(String(input?.name || ""))) {
             scheduleNativeMediaConnectionConversion(this, inputIndex, linkInfo);
         }
@@ -5939,15 +6096,16 @@ function installNode(nodeType, nodeData) {
         const result = originalSerialize?.apply(this, arguments);
         if (info && this.properties?.[PROMPT_DOC_PROP]) {
             info.properties ||= {};
-            info.properties[PROMPT_DOC_PROP] = this.properties[PROMPT_DOC_PROP];
+            info.properties[PROMPT_DOC_PROP] = plainCopy(this.properties[PROMPT_DOC_PROP]);
         }
         if (info && this.properties?.[PROMPT_VIEW_PROP]) {
             info.properties ||= {};
-            info.properties[PROMPT_VIEW_PROP] = this.properties[PROMPT_VIEW_PROP];
+            info.properties[PROMPT_VIEW_PROP] = plainCopy(this.properties[PROMPT_VIEW_PROP]);
         }
         if (info) {
             info.properties ||= {};
-            info.properties[EMBEDDED_MEDIA_PROP] = ensureEmbeddedMedia(this);
+            if (isCoreNode(this)) delete info.properties[EMBEDDED_MEDIA_PROP];
+            else info.properties[EMBEDDED_MEDIA_PROP] = plainCopy(ensureEmbeddedMedia(this));
             // Keep all original slots unchanged, regardless of display order
             // or non-serializable gallery/editor DOM widgets.
             const names = [
@@ -6108,6 +6266,9 @@ function install() {
       .fh-h3-embedded-workbench {
         display: flex; flex-direction: column; gap: 8px; width: auto; height: 100%; min-width: 0; min-height: 0; box-sizing: border-box; margin: 0 10px; padding: ${EMBEDDED_MEDIA_LAYOUT.workbenchPaddingTop}px 0 ${EMBEDDED_MEDIA_LAYOUT.promptBottomGap}px;
       }
+      .fh-h3-embedded-workbench.is-media-only { pointer-events: none; }
+      .fh-h3-embedded-workbench.is-prompt-only .h3-prompt-editor-wrap { height: auto; flex: 1 1 0; min-height: ${EMBEDDED_MEDIA_LAYOUT.promptMin}px; }
+      .fh-h3-embedded-workbench.is-media-only .fh-h3-media-gallery { pointer-events: auto; }
       .fh-h3-media-gallery {
         --fh-h3-image-slot-height: 72px; --fh-h3-video-slot-height: 68px;
         display: grid; grid-auto-rows: max-content; align-content: start; gap: 8px; width: 100%; height: var(--fh-h3-gallery-height, auto); flex: 0 0 var(--fh-h3-gallery-height, auto); min-width: 0; box-sizing: border-box; margin: 0; padding: 0;
@@ -6371,6 +6532,8 @@ function installFaceRefineNode(nodeType, nodeData) {
     const sync = node => {
         const advanced = Boolean(getWidget(node, "advanced")?.value);
         const chunk = getWidget(node, "chunk_frames");
+        const faceMode = getWidget(node, "face_mode");
+        const multi = ["multi", "多人"].includes(String(faceMode?.value || "single").toLowerCase());
         if (chunk && !["不分段", "240", "192", "120", "72"].includes(String(chunk.value))) {
             const n = Number(chunk.value);
             chunk.value = String([72, 120, 192, 240].find(v => v >= n) || "不分段");
@@ -6378,6 +6541,9 @@ function installFaceRefineNode(nodeType, nodeData) {
         for (const name of ["canvas_size", "confidence", "crop_factor", "chunk_frames", "sampler_name", "scheduler", "audio_lock", "clean_second_model", "force_offload"]) {
             setConditionalWidgetVisible(node, getWidget(node, name), advanced, {adjustHeight: false});
         }
+        setConditionalWidgetVisible(node, faceMode, true, {adjustHeight: false});
+        setConditionalWidgetVisible(node, getWidget(node, "target"), !multi, {adjustHeight: false});
+        setConditionalWidgetVisible(node, getWidget(node, "max_faces"), multi, {adjustHeight: false});
         setConditionalWidgetVisible(node, getWidget(node, "prompt"), false, {adjustHeight: false});
         node.setSize?.([node.size[0], node.computeSize()[1]]);
         node.setDirtyCanvas?.(true, true);
@@ -6392,9 +6558,14 @@ function installFaceRefineNode(nodeType, nodeData) {
         const offload = getWidget(this, "force_offload");
         if (offload) this.widgets = [...this.widgets.filter(w => w !== offload), offload];
         const toggle = getWidget(this, "advanced");
+        const faceMode = getWidget(this, "face_mode");
         if (toggle) {
             const cb = toggle.callback;
             toggle.callback = function () { const r = cb?.apply(this, arguments); sync(node); return r; };
+        }
+        if (faceMode) {
+            const cb = faceMode.callback;
+            faceMode.callback = function () { const r = cb?.apply(this, arguments); sync(node); return r; };
         }
         sync(this);
         return result;
@@ -6420,6 +6591,77 @@ function installFaceRefineNode(nodeType, nodeData) {
     };
 }
 
+function installMediaNode(nodeType, nodeData) {
+    if (nodeData?.name !== MEDIA_CLASS) return;
+    if (nodeType.prototype.__feihouStandardH3MediaNodeInstalled) return;
+    nodeType.prototype.__feihouStandardH3MediaNodeInstalled = true;
+    const setup = (node) => {
+        node.properties ||= {};
+        ensureEmbeddedMedia(node);
+        ensureEmbeddedMediaGallery(node);
+        // The gallery is the only widget, so its DOM would cover the node's
+        // bottom corners. A small empty canvas row keeps the resize grips free.
+        if (!getWidget(node, "feihou_h3_media_resize_spacer") && typeof node.addCustomWidget === "function") {
+            node.addCustomWidget({
+                name: "feihou_h3_media_resize_spacer",
+                type: "feihou_h3_spacer",
+                value: null,
+                serialize: false,
+                options: { serialize: false },
+                draw() {},
+                computeSize: () => [0, 16],
+            });
+        }
+        applyNativeEditorTheme(node.__feihouMediaWorkbench);
+        renderEmbeddedMediaGallery(node);
+        syncEmbeddedMediaResponsiveLayout(node, { resetBaseline: true });
+    };
+    const created = nodeType.prototype.onNodeCreated;
+    nodeType.prototype.onNodeCreated = function onNodeCreatedH3Media() {
+        const result = created?.apply(this, arguments);
+        this.title = MEDIA_TITLE;
+        setup(this);
+        return result;
+    };
+    const configured = nodeType.prototype.onConfigure;
+    nodeType.prototype.onConfigure = function onConfigureH3Media(info) {
+        const result = configured?.apply(this, arguments);
+        if (Array.isArray(info?.properties?.[EMBEDDED_MEDIA_PROP])) {
+            this.properties ||= {};
+            this.properties[EMBEDDED_MEDIA_PROP] = info.properties[EMBEDDED_MEDIA_PROP];
+        }
+        setup(this);
+        return result;
+    };
+    const resized = nodeType.prototype.onResize;
+    nodeType.prototype.onResize = function onResizeH3Media() {
+        const result = resized?.apply(this, arguments);
+        syncEmbeddedMediaResponsiveLayout(this);
+        return result;
+    };
+    const serialized = nodeType.prototype.onSerialize;
+    nodeType.prototype.onSerialize = function onSerializeH3Media(info) {
+        const result = serialized?.apply(this, arguments);
+        if (info) {
+            info.properties ||= {};
+            info.properties[EMBEDDED_MEDIA_PROP] = plainCopy(ensureEmbeddedMedia(this));
+        }
+        return result;
+    };
+    const removed = nodeType.prototype.onRemoved;
+    nodeType.prototype.onRemoved = function onRemovedH3Media() {
+        stopEmbeddedAudioPreview(this);
+        this.__feihouMediaGallery?.remove?.();
+        this.__feihouMediaGallery = null;
+        this.__feihouMediaWorkbench = null;
+        this.__feihouMediaGalleryWidget = null;
+        removeEmbeddedMediaGalleryWidgets(this);
+        const result = removed?.apply(this, arguments);
+        setTimeout(() => notifyMediaConsumers(null), 0);
+        return result;
+    };
+}
+
 app.registerExtension({
     name: "FeiHouEasyH3",
     setup() {
@@ -6434,5 +6676,6 @@ app.registerExtension({
         installAdapterNode(nodeType, nodeData);
         installOutputNode(nodeType, nodeData);
         installNode(nodeType, nodeData);
+        installMediaNode(nodeType, nodeData);
     },
 });

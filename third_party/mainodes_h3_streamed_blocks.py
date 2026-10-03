@@ -915,8 +915,20 @@ class H3StreamedBlocks:
             log.warning("H3StreamedBlocks: kv_store kvi8s needs the sageattention package; falling back to bf16 (exact)")
             cfg["kv_sage"] = False
         m = model.clone()
+        # Preserve user-owned implementations rather than silently replacing them.
+        object_paths = getattr(model, "object_patches", {})
+        if any("forward" in str(path) for path in object_paths):
+            log.warning("H3StreamedBlocks: existing forward object patch retained; streaming not installed (unverified composition)")
+            return (m,)
+        existing = model.model_options.get("transformer_options", {}).get("patches_replace", {}).get("dit", {})
+        preserved = 0
         for i, block in enumerate(blocks):
+            if ("double_block", i) in existing:
+                preserved += 1
+                continue
             m.set_model_patch_replace(_make_replacement(block, cfg, i), "dit", "double_block", i)
+        if preserved:
+            log.warning("H3StreamedBlocks: retained %d existing blocks; installed streaming on %d blocks; combined effect unverified", preserved, len(blocks)-preserved)
         fl = getattr(dm, "final_layer", None)
         if final_layer_chunk and fl is not None and hasattr(fl, "video_out") and hasattr(fl, "audio_out"):
             _exact = str(final_layer_gemm).startswith("exact")

@@ -2239,19 +2239,22 @@ class MiniMaxH3Bundle:
             return self._model
 
     def second_sampling_model_for(self, kind: str):
-        """Load only the explicitly selected second-pass transformer.
+        """Load the second-pass transformer with the second-pass LoRA stack.
 
-        No fallback to the first-pass models is intentional: enabling the
-        switch without selecting a matching second-pass model keeps this output
-        empty and does not consume RAM or VRAM.
+        Remix Loader has one shared main transformer. When its optional
+        second-pass selector is left at None, reuse that main transformer as a
+        clean second-pass base and apply only the second-pass LoRA stack.
         """
         if not self.second_sampling_enabled:
             return None
         kind = "ref2va" if kind == "ref2va" else "fl2va"
         model_name = self.second_ref2va_model_name if kind == "ref2va" else self.second_fl2va_model_name
+        using_remix_fallback = _is_none_model(model_name) and self.remix_loader
+        if using_remix_fallback:
+            model_name = self.ref2va_model_name if kind == "ref2va" else self.fl2va_model_name
         if _is_none_model(model_name):
             return None
-        cache_key = ("file", model_name, self.second_lora_stack)
+        cache_key = ("file", model_name, using_remix_fallback, self.second_lora_stack)
         with self._lock:
             if self._second_model is not None and self._second_model_cache_key == cache_key:
                 model = self._second_model
@@ -2274,6 +2277,8 @@ class MiniMaxH3Bundle:
                 self._second_model_kind = kind
                 self._second_model_name = model_name
                 self._second_model_cache_key = cache_key
+                if using_remix_fallback:
+                    logging.info("Easy H3 Remix: no second-pass model selected; using the main model with the second-pass LoRA stack")
 
             # Clone-safe metadata is read immediately before the second sampler
             # prepares this model on GPU. It unloads only the first-pass
@@ -2411,7 +2416,7 @@ def _low_vram_block_conflict_messages(model: Any) -> list[str]:
                 sample = keys[0]
                 messages.append(
                     f"已有 DiT block 替换：{owner}（{len(keys)} 个 block，例如 {sample}）。"
-                    "完整低显存分块会替换同一 block；请勿把两个 block 实现叠加使用。"
+                    "保留已有 block 实现，该 block 不安装 Easy H3 分块；组合效果未经验证。"
                 )
         object_patches = getattr(model, "object_patches", {})
         if isinstance(object_patches, Mapping):
@@ -2481,6 +2486,8 @@ def _apply_complete_streamed_blocks(model):
 
 def _clone_h3_model_with_memory_features(model, *, force_offload: bool, streamed_attention: bool):
     """Attach optional per-workflow H3 memory features to a model clone."""
+    from .h3_diagnostics import diagnose, sampling_diagnostics
+    diagnose(model, 'before Easy H3 features')
     if not force_offload and not streamed_attention:
         return model
     try:
@@ -2490,6 +2497,11 @@ def _clone_h3_model_with_memory_features(model, *, force_offload: bool, streamed
         return model
     if streamed_attention:
         patched = _apply_complete_streamed_blocks(patched)
+
+    import comfy.patcher_extension
+    patched.remove_wrappers_with_key(comfy.patcher_extension.WrappersMP.OUTER_SAMPLE, 'feihou_h3_diagnostics')
+    patched.add_wrapper_with_key(comfy.patcher_extension.WrappersMP.OUTER_SAMPLE,
+                                'feihou_h3_diagnostics', sampling_diagnostics)
 
     if force_offload:
         try:
@@ -2532,6 +2544,30 @@ class MiniMaxH3Context:
     duration_control: Any = None
     # Original first IMAGE, before reference-size adaptation. CPU only, no VAE inversion.
     reference_image_1: Any = None
+    # I2V/FL2V keyframe sources for canvas-size rebuilds (Dual Sample nodes):
+    # tuple of (resolved_frame_index, crop_mode, IMAGE on CPU).
+    keyframe_images: Any = None
+    # Rebuilds canvas-sized conditioning at another width/height for the
+    # Dual Sample nodes (H3HighresRebuilder or None).
+    highres_rebuilder: Any = None
+    # Plan handed from Dual Sample 1st to Dual Sample 2nd (dict or None).
+    dual_plan: Any = None
+
+
+@dataclass(frozen=True)
+class H3HighresRebuilder:
+    """Re-run the exact Easy H3 conditioning builder at a new canvas size.
+
+    The callable may accept a third ``trigger_prefix`` argument.  Older callers
+    continue to pass only width and height.
+
+    ``canvas_dependent`` is True when the conditioning actually changes with the
+    canvas (``match`` reference sizing or first/last-frame keyframes); a fixed
+    short-edge reference size produces identical reference tokens at any canvas.
+    """
+
+    build: Any
+    canvas_dependent: bool = True
 
 
 @dataclass(frozen=True)
@@ -2639,10 +2675,10 @@ class FeiHouEasyH3LoraStack:
             if not key.lower().startswith("lora_") or not isinstance(value, Mapping):
                 continue
             result.extend(_normalize_lora_stack([value]))
-        # This loader always uses additive bypass, including old API workflows
-        # containing bypass=false and upstream stacks. Keep the general-purpose
-        # normalizer unchanged for other callers.
-        return ([(name, strength, True) for name, strength, _ in result],)
+        # Preserve the per-entry mode supplied by the UI.  Older workflows and
+        # direct tuple inputs without a third item still default to bypass in
+        # _normalize_lora_stack, so existing saved stacks remain compatible.
+        return (result,)
 
 
 class FeiHouEasyH3Loader:
@@ -2712,7 +2748,7 @@ class FeiHouEasyH3RemixLoader:
     FUNCTION = "load"
     RETURN_TYPES = ("MINIMAX_H3_BUNDLE",)
     RETURN_NAMES = ("h3_bundle",)
-    DESCRIPTION = "Load a MiniMax H3 Remix transformer shared by FL2VA and REF2VA, with optional independent first/second-pass LoRA stacks."
+    DESCRIPTION = "Load a MiniMax H3 Remix transformer shared by FL2VA and REF2VA, with independent first/second-pass LoRA stacks; the second-pass output falls back to the main model when no second-pass model is selected."
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -2757,7 +2793,9 @@ class FeiHouEasyH3RemixLoader:
             video_vae=video_vae_obj,
             audio_vae=audio_vae_obj,
             lora_stack=first_stack,
-            second_sampling_enabled=not _is_none_model(second_sampling_model),
+            # The second-pass output can fall back to this shared main model
+            # when the optional second-pass selector is left at None.
+            second_sampling_enabled=True,
             second_fl2va_model_name=second_sampling_model,
             second_ref2va_model_name=second_sampling_model,
             second_sampling_use_lora=bool(second_stack),
@@ -3368,7 +3406,9 @@ class FeiHouEasyH3:
                 kwargs[f"media_type_{index}"] = item["media_type"]
                 kwargs[f"media_trim_{index}"] = item.get("audio_trim", "")
             params = production_shot["params"]
-            prompt, mode = production_shot["prompt"], MODE_REFERENCE
+            # A shot without images/videos is text-to-video: H3 reference mode needs visual media.
+            prompt = production_shot["prompt"]
+            mode = MODE_REFERENCE if production_shot["media"] else MODE_IMAGE
             seconds = params["seconds"]
             # The main node's alignment menu stays authoritative after preview.
             # Production-pack preview migrates its legacy Boolean to the menu.
@@ -3432,12 +3472,15 @@ class FeiHouEasyH3:
         if second_sampling_requested:
             second_model_name = h3_bundle.second_ref2va_model_name if second_kind == "ref2va" else h3_bundle.second_fl2va_model_name
             if _is_none_model(second_model_name):
-                if h3_bundle.remix_loader:
-                    raise ValueError("A second-sampling model output is connected, but the Remix Loader has no second-pass model selected. Select one or disconnect that output.")
-                model_label = "REF2VA" if second_kind == "ref2va" else "FL2VA"
-                raise ValueError(f"A custom second-pass model is enabled, but no {model_label} second-pass model is selected. Select a model or disable the custom second-pass model.")
+                if not h3_bundle.remix_loader:
+                    model_label = "REF2VA" if second_kind == "ref2va" else "FL2VA"
+                    raise ValueError(f"A custom second-pass model is enabled, but no {model_label} second-pass model is selected. Select a model or disable the custom second-pass model.")
+                logging.info("Easy H3 Remix: second-pass output connected without a selected model; falling back to the main model plus second-pass LoRA")
             second_sampling_active = True
 
+        keyframe_images = None
+        highres_rebuilder = None
+        ref_size_is_match = str(ref_image_size or "").strip().lower() in {"match", "匹配"}
         if mode == MODE_REFERENCE and items:
             if production_shot is None and len(items) > MAX_MEDIA:
                 raise ValueError("Reference mode accepts at most fifteen media resources")
@@ -3452,6 +3495,11 @@ class FeiHouEasyH3:
                 raise ValueError("Reference mode needs an image or video in addition to audio")
             model = h3_bundle.model_for("ref2va")
             conditioning, latent, prompt_preview = _reference_conditioning(h3_bundle, prompt, width, height, length, ref_image_size, items, text_only=reference_text_only)
+            highres_rebuilder = H3HighresRebuilder(
+                build=lambda w, h, trigger_prefix="", _p=prompt, _l=length, _r=ref_image_size, _i=tuple(items), _t=reference_text_only:
+                    _reference_conditioning(h3_bundle, f"{trigger_prefix}\n{_p}" if trigger_prefix else _p, w, h, _l, _r, list(_i), text_only=_t)[:2],
+                canvas_dependent=ref_size_is_match,
+            )
         else:
             first_frame, last_frame = cls._keyframes(items, keyframe_role)
             model = h3_bundle.model_for("fl2va")
@@ -3464,9 +3512,24 @@ class FeiHouEasyH3:
                 conditioning, latent, prompt_preview = _reference_conditioning(
                     h3_bundle, prompt, width, height, length, ref_image_size, items, text_only=reference_text_only
                 )
+                highres_rebuilder = H3HighresRebuilder(
+                    build=lambda w, h, trigger_prefix="", _p=prompt, _l=length, _r=ref_image_size, _i=tuple(items), _t=reference_text_only:
+                        _reference_conditioning(h3_bundle, f"{trigger_prefix}\n{_p}" if trigger_prefix else _p, w, h, _l, _r, list(_i), text_only=_t)[:2],
+                    canvas_dependent=ref_size_is_match,
+                )
             else:
                 conditioning, latent = _empty_image_conditioning(h3_bundle, prompt, width, height, length, first_frame, last_frame)
                 prompt_preview = str(prompt or "")
+                keyframe_images = tuple(
+                    (index, crop, frame[:1, ..., :3].detach().cpu().clone())
+                    for index, crop, frame in ((0, "disabled", first_frame), (length - 1, "center", last_frame))
+                    if isinstance(frame, torch.Tensor) and frame.ndim == 4
+                ) or None
+                highres_rebuilder = H3HighresRebuilder(
+                    build=lambda w, h, trigger_prefix="", _p=prompt, _l=length, _f=first_frame, _z=last_frame:
+                        _empty_image_conditioning(h3_bundle, f"{trigger_prefix}\n{_p}" if trigger_prefix else _p, w, h, _l, _f, _z),
+                    canvas_dependent=first_frame is not None or last_frame is not None,
+                )
         model = _clone_h3_model_with_memory_features(
             model,
             force_offload=h3_bundle.force_offload_enabled,
@@ -3500,6 +3563,8 @@ class FeiHouEasyH3:
                 enabled=audio_duration_enabled,
                 target_seconds=requested_audio_seconds,
             ),
+            keyframe_images=keyframe_images,
+            highres_rebuilder=highres_rebuilder,
         )
         if h3_bundle.force_offload_enabled:
             _release_auxiliary_models_for_sampling(h3_bundle, phase="first-pass sampling")

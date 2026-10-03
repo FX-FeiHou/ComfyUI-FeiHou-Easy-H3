@@ -1941,6 +1941,11 @@ class H3FaceTrackCrop:
                 for k, b in enumerate(boxes)
             ],
             "crop_factor": float(crop_factor),
+            # The wrapper uses this metadata to stop cleanly when a requested
+            # multi-face rank was clamped because fewer faces exist in the clip.
+            "requested_select_index": int(requested_index),
+            "selected_index": int(select_index),
+            "max_faces": int(max_faces),
         }
 
         # A magnification below 1.0 means the crop is DOWNSCALED into the canvas, i.e. we
@@ -2216,7 +2221,7 @@ class H3FaceStitch:
 
     def run(self, base_images, refined_crops, transform, paste_region, mask_dilation, feather,
             colour_match, blend, undetected_frames="fade_out", masks=None,
-            feather_scales_with_crop=False):
+            feather_scales_with_crop=False, return_mask=False):
         boxes = transform["boxes"]
         if undetected_frames == "composite_anyway":
             weights = None
@@ -2256,6 +2261,7 @@ class H3FaceStitch:
             dev = base_images.device
         dt = base_images.dtype
         out = base_images[..., :3].clone()
+        coverage = torch.zeros_like(out[..., :1], dtype=torch.float32) if return_mask else None
 
         # chunked so the warped batch does not blow VRAM: N x H x W x 3 at once
         per_frame_mb = (H * W * 3 * 4) / 2 ** 20
@@ -2345,8 +2351,10 @@ class H3FaceStitch:
             mm_ = m * wv
 
             out[dst] = ((1.0 - mm_) * base + mm_ * patch).to(out.device, dt)
+            if coverage is not None:
+                coverage[dst] = torch.maximum(coverage[dst], mm_.to(coverage.device))
 
-        return (out,)
+        return (out, coverage) if coverage is not None else (out,)
 
 # ----------------------------------------------------------------------------
 # 3. inject real video into the AV latent

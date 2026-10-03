@@ -22,6 +22,23 @@ import { moveArrayItem, removeArrayItem } from "../../rgthree/common/shared_util
 const STACK_CLASS = "FeiHouEasyH3LoraStack";
 const STACK_WIDTH = 440;
 const BOTTOM_MARGIN = 14;
+const LORA_TEXT_NORMAL = "#f5f5f5";
+const LORA_TEXT_BYPASS = "#b8d8ff";
+const LORA_TEXT_DISABLED = "#777777";
+
+function drawLoraToggle(ctx, {posX, posY, height, value, activeColor}) {
+    ctx.save();
+    ctx.fillStyle = "rgba(255,255,255,0.12)";
+    ctx.beginPath();
+    ctx.roundRect(posX + 4, posY + 4, height * 1.5 - 8, height - 8, height * 0.5);
+    ctx.fill();
+    ctx.fillStyle = value ? activeColor : LORA_TEXT_DISABLED;
+    ctx.beginPath();
+    ctx.arc(posX + height * (value ? 1 : 0.5), posY + height * 0.5, height * 0.36, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+    return [posX, height * 1.5];
+}
 
 function isChineseLocale() {
     const locale = app.ui?.settings?.getSettingValue?.("Comfy.Locale") || navigator.language || "en";
@@ -51,18 +68,19 @@ function localizeLoraSlots(node) {
     }
 }
 
-function normalizeLoraValue(value) {
+function normalizeLoraValue(value, defaultBypass = true) {
     if (!value || typeof value !== "object" || Array.isArray(value) || !("lora" in value)) return null;
     return {
         on: value.on !== false,
         lora: value.lora && value.lora !== "None" ? String(value.lora) : null,
         strength: Number.isFinite(Number(value.strength)) ? Number(value.strength) : 1,
+        bypass: "bypass" in value ? value.bypass !== false : defaultBypass,
     };
 }
 
-function migrateLoraValues(values) {
+function migrateLoraValues(values, defaultBypass = true) {
     if (!Array.isArray(values)) return [];
-    const dynamic = values.map(normalizeLoraValue).filter(Boolean);
+    const dynamic = values.map((value) => normalizeLoraValue(value, defaultBypass)).filter(Boolean);
     if (dynamic.length) return dynamic;
     if (values.length < 5 || typeof values[0] !== "boolean") return [];
     const masterEnabled = values[0] !== false;
@@ -75,6 +93,7 @@ function migrateLoraValues(values) {
             on: masterEnabled && values[offset] !== false,
             lora: name && name !== "None" ? String(name) : null,
             strength: Number.isFinite(Number(values[offset + 2])) ? Number(values[offset + 2]) : 1,
+            bypass: defaultBypass,
         });
     }
     return migrated;
@@ -89,12 +108,21 @@ class FeiHouEasyH3LoraStackNode extends RgthreeBaseServerNode {
     }
 
     configure(info) {
-        const values = migrateLoraValues(info?.widgets_values || []);
+        const legacyBypass = typeof info?.properties?.feihou_lora_bypass === "boolean"
+            ? info.properties.feihou_lora_bypass
+            : true;
+        const values = migrateLoraValues(info?.widgets_values || [], legacyBypass);
+        // Mute state is mirrored in properties: some frontend restore paths
+        // (workflow tab switch) re-create this node and lose node.mode.
+        const savedMode = Number.isInteger(info?.properties?.feihou_mode) ? info.properties.feihou_mode : info?.mode;
         this.title = stackTitle();
         while (this.widgets?.length) this.removeWidget(0);
         this.widgetButtonSpacer = null;
         this.loraWidgetsCounter = 0;
         if (info?.id != null) super.configure({...info, widgets_values: []});
+        // The old node-level bypass property is consumed only as a migration
+        // hint above and is not written back to the workflow.
+        if (this.properties) delete this.properties.feihou_lora_bypass;
         this.title = stackTitle();
         for (const value of values) {
             const row = this.addNewLoraWidget();
@@ -103,6 +131,23 @@ class FeiHouEasyH3LoraStackNode extends RgthreeBaseServerNode {
         this.addNonLoraWidgets();
         localizeLoraSlots(this);
         this.resizeToContent();
+        if (Number.isInteger(savedMode)) {
+            this.mode = savedMode;
+            // Re-assert after the frontend finishes its own restore pass.
+            setTimeout(() => {
+                if (this.mode !== savedMode && this.properties?.feihou_mode === savedMode) {
+                    this.mode = savedMode;
+                    this.setDirtyCanvas?.(true, true);
+                }
+            }, 0);
+        }
+    }
+
+    onModeChange(from, to) {
+        super.onModeChange?.(from, to);
+        if (this.configuring) return;
+        this.properties ||= {};
+        if (Number.isInteger(to)) this.properties.feihou_mode = to;
     }
 
     onNodeCreated() {
@@ -123,7 +168,6 @@ class FeiHouEasyH3LoraStackNode extends RgthreeBaseServerNode {
     addNewLoraWidget(lora) {
         this.loraWidgetsCounter++;
         const row = this.addCustomWidget(new FeiHouEasyH3LoraWidget(`lora_${this.loraWidgetsCounter}`));
-        row.bypassMode = () => true;
         if (lora) row.setLora(lora);
         if (this.widgetButtonSpacer) {
             moveArrayItem(this.widgets, row, this.widgets.indexOf(this.widgetButtonSpacer));
@@ -132,9 +176,6 @@ class FeiHouEasyH3LoraStackNode extends RgthreeBaseServerNode {
     }
 
     addNonLoraWidgets() {
-        this.properties ||= {};
-        // Migrate saved regular-mode stacks without changing widget positions.
-        this.properties.feihou_lora_bypass = true;
         moveArrayItem(
             this.widgets,
             this.addCustomWidget(new RgthreeDividerWidget({marginTop: 4, marginBottom: 0, thickness: 0})),
@@ -200,6 +241,13 @@ class FeiHouEasyH3LoraStackNode extends RgthreeBaseServerNode {
                     content: row.value.on ? t("禁用", "Disable") : t("启用", "Enable"),
                     callback: () => {
                         row.value.on = !row.value.on;
+                        this.setDirtyCanvas(true, true);
+                    },
+                },
+                {
+                    content: row.value.bypass ? t("改为正常加载", "Use regular loading") : t("改为旁路加载", "Use bypass loading"),
+                    callback: () => {
+                        row.value.bypass = !row.value.bypass;
                         this.setDirtyCanvas(true, true);
                     },
                 },
@@ -312,9 +360,10 @@ class FeiHouEasyH3LoraWidget extends RgthreeBaseWidget {
     constructor(name) {
         super(name);
         this.haveMouseMovedStrength = false;
-        this._value = {on: true, lora: null, strength: 1};
+        this._value = {on: true, lora: null, strength: 1, bypass: true};
         this.hitAreas = {
             toggle: {bounds: [0, 0], onDown: this.onToggleDown},
+            bypass: {bounds: [0, 0], onDown: this.onBypassDown},
             lora: {bounds: [0, 0], onClick: this.onLoraClick},
             strengthDec: {bounds: [0, 0], onClick: this.onStrengthDecDown},
             strengthVal: {bounds: [0, 0], onClick: this.onStrengthValUp},
@@ -324,7 +373,7 @@ class FeiHouEasyH3LoraWidget extends RgthreeBaseWidget {
     }
 
     set value(value) {
-        this._value = normalizeLoraValue(value) || {on: true, lora: null, strength: 1};
+        this._value = normalizeLoraValue(value) || {on: true, lora: null, strength: 1, bypass: true};
     }
 
     get value() {
@@ -340,42 +389,82 @@ class FeiHouEasyH3LoraWidget extends RgthreeBaseWidget {
         const margin = 10;
         const innerMargin = margin * 0.33;
         const midY = posY + height * 0.5;
+        const lowQuality = isLowQuality();
+        const rowColor = !this.value.on ? LORA_TEXT_DISABLED
+            : this.value.bypass ? LORA_TEXT_BYPASS : LORA_TEXT_NORMAL;
         let posX = margin;
+        ctx.globalAlpha = app.canvas.editor_alpha;
         drawRoundedRectangle(ctx, {pos: [posX, posY], size: [node.size[0] - margin * 2, height]});
-        this.hitAreas.toggle.bounds = drawTogglePart(ctx, {posX, posY, height, value: this.value.on});
+        this.hitAreas.toggle.bounds = drawLoraToggle(ctx, {
+            posX, posY, height, value: this.value.on, activeColor: LORA_TEXT_NORMAL,
+        });
         posX += this.hitAreas.toggle.bounds[1] + innerMargin;
-        if (isLowQuality()) {
+        ctx.fillStyle = rowColor;
+        ctx.textAlign = "left";
+        ctx.textBaseline = "middle";
+        const enabledLabel = t("启用", "On");
+        if (!lowQuality) ctx.fillText(enabledLabel, posX, midY);
+        posX += ctx.measureText(enabledLabel).width + innerMargin;
+        this.hitAreas.bypass.bounds = drawLoraToggle(ctx, {
+            posX, posY, height, value: this.value.bypass,
+            activeColor: this.value.on ? LORA_TEXT_BYPASS : LORA_TEXT_DISABLED,
+        });
+        posX += this.hitAreas.bypass.bounds[1] + innerMargin;
+        const bypassLabel = t("旁路", "Bypass");
+        if (!lowQuality) ctx.fillText(bypassLabel, posX, midY);
+        posX += ctx.measureText(bypassLabel).width + innerMargin;
+        ctx.strokeStyle = rowColor;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(posX, posY + height * 0.2);
+        ctx.lineTo(posX, posY + height * 0.8);
+        ctx.stroke();
+        posX += innerMargin * 2 + 1;
+        // Invisible text/numeric controls must not retain stale click targets
+        // when zooming out. The two switches keep the same positions.
+        for (const name of ["lora", "strengthDec", "strengthVal", "strengthInc", "strengthAny"]) {
+            this.hitAreas[name].bounds = [0, 0];
+        }
+        if (lowQuality) {
             ctx.restore();
             return;
         }
-        if (!this.value.on) ctx.globalAlpha = app.canvas.editor_alpha * 0.4;
-        ctx.fillStyle = LiteGraph.WIDGET_TEXT_COLOR;
+        ctx.fillStyle = rowColor;
         const [leftArrow, numberText, rightArrow] = drawNumberWidgetPart(ctx, {
             posX: node.size[0] - margin - innerMargin * 2,
             posY,
             height,
             value: this.value.strength,
             direction: -1,
+            textColor: rowColor,
         });
         this.hitAreas.strengthDec.bounds = leftArrow;
         this.hitAreas.strengthVal.bounds = numberText;
         this.hitAreas.strengthInc.bounds = rightArrow;
         this.hitAreas.strengthAny.bounds = [leftArrow[0], rightArrow[0] + rightArrow[1] - leftArrow[0]];
-        const loraWidth = leftArrow[0] - innerMargin - posX;
+        const loraWidth = Math.max(0, leftArrow[0] - innerMargin - posX);
         ctx.textAlign = "left";
         ctx.textBaseline = "middle";
-        ctx.fillText(fitString(ctx, String(this.value.lora || t("无", "None")), loraWidth), posX, midY);
+        if (loraWidth > 0) ctx.fillText(fitString(ctx, String(this.value.lora || t("无", "None")), loraWidth), posX, midY);
         this.hitAreas.lora.bounds = [posX, loraWidth];
         ctx.globalAlpha = app.canvas.editor_alpha;
         ctx.restore();
     }
 
     serializeValue() {
-        return {...this.value, bypass: this.bypassMode ? this.bypassMode() : true};
+        return {...this.value};
     }
 
-    onToggleDown() {
+    onToggleDown(event, pos, node) {
         this.value.on = !this.value.on;
+        node?.setDirtyCanvas?.(true, true);
+        this.cancelMouseDown();
+        return true;
+    }
+
+    onBypassDown(event, pos, node) {
+        this.value.bypass = !this.value.bypass;
+        node?.setDirtyCanvas?.(true, true);
         this.cancelMouseDown();
         return true;
     }

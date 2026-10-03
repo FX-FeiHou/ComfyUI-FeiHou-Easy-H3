@@ -10,6 +10,7 @@ import ipaddress
 import json
 import math
 import os
+import posixpath
 from pathlib import Path, PurePosixPath
 import re
 import shutil
@@ -226,6 +227,41 @@ def inventory(root):
     return sorted(files)
 
 
+_PROJECT_DATA = re.compile(r'<script\b[^>]*\bid\s*=\s*["\']dh-project-data["\'][^>]*>(.*?)</script\s*>', re.I | re.S)
+
+
+def asset_file_map(html, html_file, files):
+    """Map asset IDs (P1, P2 ...) to package images declared in the page's inline project data.
+
+    Only the JSON data block is parsed; no page script runs. User images keep their own
+    names (for example ../人物.jpg) and still resolve as P1. Files named after the ID win.
+    """
+    match = _PROJECT_DATA.search(html)
+    if not match:
+        return {}
+    try:
+        project = json.loads(match.group(1))
+    except ValueError:
+        return {}
+    by_name = {f.casefold(): f for f in files if Path(f).suffix.lower() in IMAGE_EXT}
+    base = PurePosixPath(html_file).parent.as_posix()
+    mapping = {}
+    assets = project.get("assets") if isinstance(project, dict) else None
+    for asset in assets if isinstance(assets, list) else []:
+        if not isinstance(asset, dict):
+            continue
+        ident, name = str(asset.get("id", "")).strip(), str(asset.get("file", "")).strip().replace("\\", "/")
+        if not ident or not name or name.startswith("data:") or re.match(r"^[a-z][a-z0-9+.-]*:", name, re.I):
+            continue
+        rel = posixpath.normpath(posixpath.join(base, name)) if base not in ("", ".") else posixpath.normpath(name)
+        if rel == ".." or rel.startswith("../") or rel.startswith("/"):
+            continue
+        found = by_name.get(rel.casefold())
+        if found:
+            mapping[ident.casefold()] = found
+    return mapping
+
+
 def inspect_pack(source, shotlist_file=""):
     root = _resolve_pack_source(source)
     source = str(root)
@@ -256,7 +292,8 @@ def inspect_pack(source, shotlist_file=""):
     html = page.read_text(encoding="utf-8-sig")
     package_id = uuid.uuid4().hex
     data = {"source": source, "root": str(root), "html_file": selected,
-            "html_sha256": hashlib.sha256(html.encode()).hexdigest(), "files": files}
+            "html_sha256": hashlib.sha256(html.encode()).hexdigest(), "files": files,
+            "asset_files": asset_file_map(html, selected, files)}
     atomic_json(cache_root() / f"{package_id}.json", data)
     return {"package_id": package_id, "html": html, "html_file": selected,
             "audio_files": [f for f in files if Path(f).suffix.lower() in AUDIO_EXT]}
@@ -378,13 +415,20 @@ def validate_shots(data, shots, audio_file=""):
         audios = _resolve_audio_references(data, raw, selected_audio, default_range)
         selected_audio = audios[0]["file"] if audios else ""
         refs = raw.get("refs", [])
-        if not isinstance(refs, list) or not 1 <= len(refs) <= 9:
-            raise ValueError(f"{shot_id}: expected 1–9 ordered image references, got {len(refs)}")
+        if not isinstance(refs, list) or len(refs) > 9:
+            raise ValueError(f"{shot_id}: expected 0–9 ordered image references, got {len(refs) if isinstance(refs, list) else refs!r}")
+        declared_files = data.get("asset_files", {})
         images = []
         for ref in refs:
-            matches = assets.get(str(ref).strip().casefold(), [])
+            key = str(ref).strip().casefold()
+            matches = assets.get(key, [])
+            if not matches and key in declared_files:
+                matches = [declared_files[key]]
+            if not matches:
+                raise ValueError(f"{shot_id}: asset {ref} has no image. Name its image {ref}.png (or .jpg/.webp) "
+                                 f"inside the package, or set its file in the asset page. 资产 {ref} 缺少图片")
             if len(matches) != 1:
-                raise ValueError(f"{shot_id}: asset {ref} is missing or ambiguous: {matches}")
+                raise ValueError(f"{shot_id}: asset {ref} is ambiguous; keep only one image named {ref}: {matches}")
             if not contained(data["root"], matches[0]).is_file():
                 raise ValueError(f"{shot_id}: missing image: {matches[0]}")
             images.append(matches[0])
@@ -398,6 +442,10 @@ def validate_shots(data, shots, audio_file=""):
             if len(matches) != 1 or not contained(data["root"], matches[0]).is_file():
                 raise ValueError(f"{shot_id}: video {ref} is missing or ambiguous: {matches}")
             videos.append(matches[0])
+        if audios and not images and not videos:
+            raise ValueError(f"{shot_id}: reference audio needs at least one reference image or video "
+                             "(MiniMax H3 reference mode). Add an image, or remove this shot's audio for text-to-video. "
+                             "无图镜头不能带参考音频：请加参考图，或去掉本镜音频走文生视频")
         prompts = {lang: str(raw.get(f"prompt_{lang}", "")).strip() for lang in ("zh", "en")}
         if not any(prompts.values()) or any(len(p) > 100000 for p in prompts.values()):
             raise ValueError(f"{shot_id}: missing or oversized prompt")
@@ -411,7 +459,8 @@ def validate_shots(data, shots, audio_file=""):
                 raise ValueError(f"{shot_id}: prompt references an unavailable Audio slot (loaded {len(audios)})")
             if not selected_audio and re.search(r"<Audio\s+\d+>", prompt, re.I):
                 raise ValueError(f"{shot_id}: prompt references Audio but no reference audio exists")
-        params = {"mode": "reference", "seconds": duration, "audio_duration_auto": False if digital_human or raw.get("audio_references") is not None else bool(selected_audio),
+        # No visual media: the Easy H3 node runs image mode without media, i.e. text-to-video.
+        params = {"mode": "reference" if images or videos else "image", "seconds": duration, "audio_duration_auto": False if digital_human or raw.get("audio_references") is not None else bool(selected_audio),
                   "reference_mention_mode": "index", "prompt_optimizer_enabled": False}
         aspect = str(raw.get("aspect_ratio", "")).strip()
         if aspect:

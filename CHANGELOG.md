@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.4.12
+
+- Adds a Standard-edition official-node two-pass H3 enhancement node. It samples a coarse high-noise pass, enlarges the denoised video latent, and continues with a low-noise refinement pass.
+- Adds a `Default Trigger Words` switch to both Sample Enhancer passes. It defaults on and prepends the built-in detail trigger to that pass's encoded prompt without exposing the trigger text in the node UI.
+- LoRA loading is intentionally not integrated; connect externally configured first/refinement models, including any user-selected LoRA chain.
+- Resizes MiniMax H3 reference/keyframe latent metadata with the video latent and preserves the nested audio latent. GPU quality and memory usage were not re-tested.
+
+## v1.4.11
+
+- Production-pack loader accepts shots with no reference images. Such shots run as text-to-video (image mode with no media); shots that reference audio still need at least one image or video, with a clear error.
+- Resolves asset IDs through the Shotlist's inline project data, so a user image declared as `P1` (for example `../人物.jpg`) loads as P1 without being renamed. Files named after the ID (`P3.png`) still take priority; paths outside the package are ignored.
+- Clearer missing/ambiguous asset messages. Folder paths for local ComfyUI are unchanged and need no ZIP. No UI or widget-order changes; RH edition unchanged. Loader validation tested with sample packs; GPU generation not re-tested.
+
 ## v1.4.10
 
 - Removes the face-refinement 24 FPS restriction; uses the frame rate supplied by H3 context for existing timing calculations and output.

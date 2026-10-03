@@ -59,7 +59,7 @@ function display(node, shot) {
                 const link = graph?.links?.get?.(id) || graph?.links?.[id];
                 const target = graph?.getNodeById(link?.target_id);
                 if (!target) continue;
-                if ((target.comfyClass || target.type) === "FeiHouEasyH3"
+                if (["FeiHouEasyH3", "FeiHouEasyH3Setup"].includes(target.comfyClass || target.type)
                     && target.inputs?.[link.target_slot]?.name === "production_shot") {
                     applyProductionShotPreview(target, shot);
                     applied++;
@@ -247,7 +247,7 @@ app.registerExtension({
         const refresh = () => {
             for (const node of app.graph?._nodes || []) {
                 if ((node.comfyClass || node.type) === CLASS) localize(node);
-                if ((node.comfyClass || node.type) === "FeiHouEasyH3") {
+                if (["FeiHouEasyH3", "FeiHouEasyH3Setup"].includes(node.comfyClass || node.type)) {
                     const input = node.inputs?.find((s) => s.name === "production_shot");
                     if (input) input.label = tr("Production shot", "制作包分镜");
                 }
@@ -257,7 +257,7 @@ app.registerExtension({
         app.ui?.settings?.addEventListener?.("change", refresh);
     },
     nodeCreated(node) {
-        if ((node.comfyClass || node.type) === "FeiHouEasyH3") {
+        if (["FeiHouEasyH3", "FeiHouEasyH3Setup"].includes(node.comfyClass || node.type)) {
             const input = node.inputs?.find((s) => s.name === "production_shot");
             if (input) input.label = tr("Production shot", "制作包分镜");
         }

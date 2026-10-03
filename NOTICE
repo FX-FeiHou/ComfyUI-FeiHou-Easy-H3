@@ -35,6 +35,21 @@ in LICENSES/GPL-3.0-or-later-ComfyUI-MAINodes.txt. Easy H3 changes only its
 integration, workflow controls, and documentation; the vendored module keeps
 its source attribution and GPL SPDX identifier.
 
+The Dual Sample nodes' dual-clock Euler sampler, learned 3D latent resizer
+(network, latent statistics, geometry) and Semantic Bridge adapter are adapted
+from:
+  comfyui-minimax-h3-audio-T8
+  Copyright (C) 2026 MiniMax H3 Audio T8 contributors
+That code is retained in
+  third_party/h3_dual_clock.py
+  third_party/h3_learned_upscale.py
+  third_party/h3_semantic_bridge.py
+  third_party/h3_semantic_bridge_trans.py
+  third_party/h3_semantic_bridge_mlp.py
+and is distributed under GNU GPL-3.0-or-later; its license text is kept in
+LICENSES/GPL-3.0-or-later-comfyui-minimax-h3-audio.txt. Easy H3 changes only
+module layout, imports, user-visible names and the node integration.
+
 This repository does not claim authorship of the upstream project's original
 implementation, including its MiniMax H3 workflow design, media/reference
 editor concepts, or other upstream code retained here. Changes made by FeiHou
