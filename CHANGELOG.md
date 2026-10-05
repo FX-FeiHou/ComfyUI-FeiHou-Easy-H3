@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.4.13
+
+- Removes the custom API host and LAN endpoint allow-lists. Custom HTTPS-compatible API URLs can be configured directly without allowed_api_hosts.json.
+- Keeps URL parsing, the external HTTPS requirement, TLS verification, redirect blocking, and local-only settings routes.
+- Validation: Python and JavaScript syntax checks plus static reference checks. GPU generation and live third-party API requests were not performed.
+
 ## v1.4.12
 
 - Adds a Standard-edition official-node two-pass H3 enhancement node. It samples a coarse high-noise pass, enlarges the denoised video latent, and continues with a low-noise refinement pass.

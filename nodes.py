@@ -123,15 +123,6 @@ PROMPT_OPTIMIZER_MODEL_LIST_TIMEOUT_SECONDS = 20
 PROMPT_OPTIMIZER_JPEG_QUALITY = 85
 PROMPT_OPTIMIZER_VIDEO_SAMPLE_COUNT = 3
 PROMPT_OPTIMIZER_CONFIG_VERSION = 6
-PROMPT_OPTIMIZER_ALLOWED_HOSTS_VERSION = 1
-PROMPT_OPTIMIZER_ALLOWED_HOSTS_FILENAME = "allowed_api_hosts.json"
-PROMPT_OPTIMIZER_BUILTIN_ALLOWED_HOSTS = frozenset({
-    "open.bigmodel.cn",
-    "api.xflow.cc",
-    "dashscope.aliyuncs.com",
-    "api.deepseek.com",
-})
-PROMPT_OPTIMIZER_MAX_CUSTOM_ALLOWED_HOSTS = 100
 PROMPT_OPTIMIZER_ZHIPU_MODELS = (
     "glm-5.1", "glm-5", "glm-5-turbo", "glm-5v-turbo", "glm-4.7", "glm-4.7-flash",
     "glm-4.7-flashx", "glm-4.6", "glm-4.6v", "glm-4.6v-flash", "glm-4.5",
@@ -513,128 +504,15 @@ def _prompt_optimizer_config_path() -> str:
     return os.path.join(_prompt_optimizer_config_directory(), "prompt_optimizer.json")
 
 
-def _prompt_optimizer_allowed_hosts_path() -> str:
-    """A local-only allow-list that is deliberately not writable by web routes."""
-    return os.path.join(_prompt_optimizer_config_directory(), PROMPT_OPTIMIZER_ALLOWED_HOSTS_FILENAME)
-
-
 def _legacy_prompt_optimizer_config_path() -> str:
     return os.path.join(os.path.dirname(os.path.realpath(__file__)), "prompt_optimizer.json")
-
-
-def _normalise_allowed_host(value: Any) -> str:
-    """Accept one DNS hostname, never a URL, wildcard, or IP address."""
-    host = str(value or "").strip().rstrip(".").lower()
-    if not host or any(token in host for token in ("://", "/", "\\", "@", "?", "#", ":", "*")):
-        return ""
-    try:
-        ipaddress.ip_address(host)
-        return ""
-    except ValueError:
-        pass
-    try:
-        host = host.encode("idna").decode("ascii")
-    except UnicodeError:
-        return ""
-    if len(host) > 253 or not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+", host):
-        return ""
-    return host
-
-
-def _read_optimizer_allowlist() -> Mapping:
-    """Read local-only authorization; workflows and web settings cannot write it."""
-    path = _prompt_optimizer_allowed_hosts_path()
-    payload: Any = {}
-    with _PROMPT_OPTIMIZER_CONFIG_LOCK:
-        try:
-            with open(path, "r", encoding="utf-8") as handle:
-                text = handle.read(65537)
-                if len(text) > 65536:
-                    raise ValueError("API allow-list exceeds 64 KiB")
-                payload = json.loads(text)
-        except FileNotFoundError:
-            # Create a discoverable, intentionally empty local file.  The web
-            # UI can explain how to add custom hosts, but cannot modify it.
-            directory = os.path.dirname(path)
-            os.makedirs(directory, exist_ok=True)
-            temporary_path = ""
-            try:
-                with tempfile.NamedTemporaryFile(
-                    mode="w", encoding="utf-8", dir=directory,
-                    prefix=".allowed_api_hosts.", suffix=".tmp", delete=False,
-                ) as handle:
-                    temporary_path = handle.name
-                    json.dump({"version": PROMPT_OPTIMIZER_ALLOWED_HOSTS_VERSION, "hosts": [], "lan_endpoints": []}, handle, ensure_ascii=False, indent=2)
-                    handle.write("\n")
-                os.replace(temporary_path, path)
-            finally:
-                if temporary_path and os.path.exists(temporary_path):
-                    try:
-                        os.remove(temporary_path)
-                    except OSError:
-                        pass
-        except (json.JSONDecodeError, OSError, TypeError, ValueError):
-            logging.warning("Easy H3: unable to read custom API host allow-list: %s", path)
-            return {}
-
-    return payload if isinstance(payload, Mapping) else {}
-
-
-def _read_custom_allowed_optimizer_hosts() -> set[str]:
-    payload = _read_optimizer_allowlist()
-
-    entries = payload.get("hosts", []) if isinstance(payload, Mapping) else []
-    hosts: set[str] = set()
-    for value in entries[:PROMPT_OPTIMIZER_MAX_CUSTOM_ALLOWED_HOSTS] if isinstance(entries, list) else []:
-        host = _normalise_allowed_host(value)
-        if host:
-            hosts.add(host)
-    return hosts
-
-
-def _allowed_optimizer_hosts() -> set[str]:
-    return set(PROMPT_OPTIMIZER_BUILTIN_ALLOWED_HOSTS) | _read_custom_allowed_optimizer_hosts()
-
-
-def _lan_api_origin(value: Any, *, allow_path: bool = False) -> str:
-    """Exact RFC1918 IPv4 service origin, not an entire subnet or DNS alias."""
-    text = str(value or "").strip()
-    if not text or any(ord(c) < 33 for c in text) or "\\" in text:
-        return ""
-    try:
-        parsed = urllib.parse.urlsplit(text)
-        if parsed.scheme not in {"http", "https"} or parsed.username is not None or parsed.password is not None:
-            return ""
-        if parsed.fragment or (not allow_path and (parsed.path not in {"", "/"} or parsed.query)):
-            return ""
-        address = ipaddress.ip_address(parsed.hostname or "")
-        networks = ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
-        if address.version != 4 or not any(address in ipaddress.ip_network(n) for n in networks):
-            return ""
-        port = parsed.port
-        if port is None:
-            port = 443 if parsed.scheme == "https" else 80
-        if not 1 <= port <= 65535:
-            return ""
-        return f"{parsed.scheme}://{address}:{port}"
-    except (ValueError, TypeError):
-        return ""
-
-
-def _allowed_lan_optimizer_origins() -> set[str]:
-    entries = _read_optimizer_allowlist().get("lan_endpoints", [])
-    if not isinstance(entries, list):
-        return set()
-    return {origin for entry in entries[:PROMPT_OPTIMIZER_MAX_CUSTOM_ALLOWED_HOSTS]
-            if (origin := _lan_api_origin(entry))}
 
 
 def _validate_optimizer_base_url(api_url: str, api_format: str = "openai") -> str:
     """Validate an outbound prompt-API URL before any request is created.
 
-    Custom hosts must be deliberately approved in the local allow-list file.
-    This closes the server-side request forgery path while preserving support
-    for user-selected third-party API providers.
+    Custom API hosts are accepted directly. External APIs still require HTTPS;
+    local Ollama keeps its normal localhost-only HTTP handling.
     """
     base = str(api_url or "").strip().rstrip("/")
     if not base:
@@ -651,28 +529,13 @@ def _validate_optimizer_base_url(api_url: str, api_format: str = "openai") -> st
         raise ValueError("Prompt optimization API URL is invalid")
 
     normalized_format = str(api_format or "openai").strip().lower()
-    # A local administrator must explicitly authorize the scheme, IP and port.
-    # No DNS resolution or blanket private-network exemption is involved.
-    lan_origin = _lan_api_origin(base, allow_path=True)
-    if lan_origin:
-        if lan_origin in _allowed_lan_optimizer_origins():
-            return base
-        raise ValueError(
-            f"LAN API endpoint '{lan_origin}' is not allowed. Add this exact origin "
-            f"to lan_endpoints in {PROMPT_OPTIMIZER_ALLOWED_HOSTS_FILENAME} on the ComfyUI server."
-        )
     if normalized_format == "ollama":
         if scheme not in {"http", "https"} or host not in {"localhost", "127.0.0.1", "::1"}:
-            raise ValueError("Ollama requires localhost, 127.0.0.1, ::1, or an exact RFC1918 IP endpoint approved in lan_endpoints")
+            raise ValueError("Ollama requires localhost, 127.0.0.1, or ::1")
         return base
 
     if scheme != "https":
         raise ValueError("External prompt optimization APIs must use HTTPS")
-    if host not in _allowed_optimizer_hosts():
-        raise ValueError(
-            f"API host '{host}' is not allowed. Add this hostname to "
-            f"{PROMPT_OPTIMIZER_ALLOWED_HOSTS_FILENAME} and restart ComfyUI."
-        )
     return base
 
 
@@ -965,9 +828,6 @@ def _prompt_optimizer_provider_choices(settings: Mapping[str, Any] | None = None
 
 
 def _read_prompt_optimizer_config() -> dict[str, Any]:
-    # Make the documented local allow-list discoverable as soon as Easy H3
-    # reads its configuration, without exposing a web route that can edit it.
-    _read_custom_allowed_optimizer_hosts()
     path = _prompt_optimizer_config_path()
     with _PROMPT_OPTIMIZER_CONFIG_LOCK:
         try:
@@ -992,7 +852,7 @@ def _write_prompt_optimizer_config(value: Mapping[str, Any] | None) -> dict[str,
             continue
         api_url = str(provider.get("api_url") or "").strip()
         # A blank newly-created custom provider remains editable. It becomes
-        # usable only after it has a valid, allow-listed endpoint.
+        # usable only after it has a valid endpoint.
         if api_url:
             _validate_optimizer_base_url(api_url, str(provider.get("api_format") or "openai"))
     path = _prompt_optimizer_config_path()

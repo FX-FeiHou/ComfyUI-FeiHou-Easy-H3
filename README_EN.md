@@ -39,43 +39,13 @@ Place the LoRA stack to the left of `FeiHou Easy H3 Loader` and connect its `lor
 
 Prompt configuration is shown directly in the dedicated `🐵Easy H3` page in ComfyUI Settings, without secondary dialogs. Base URLs are editable, pasted API keys save automatically, and preset providers contain neither keys nor models. The same page contains the single prompt-optimization rule list. The main node shows the API and scheme controls only when Advanced options is enabled; the scheme is ignored until a configured API provider is selected. The final prompt is carried in H3 Context and can be connected from `FeiHou Easy H3 Output` to the bundled Prompt Preview node.
 
-### Custom API host allow-list
+### Custom APIs
 
-The built-in Zhipu, xFlow, Alibaba Cloud Bailian, and DeepSeek hosts are already allowed. Local Ollama at `localhost`, `127.0.0.1`, or `::1` requires no extra authorization. Remote LAN Ollama and compatible APIs can be explicitly authorized using `lan_endpoints` below. Before configuring a new third-party API, start ComfyUI once so the plugin creates this local file:
+Custom APIs can be entered directly as complete HTTPS URLs, such as https://api.example.com/v1; no domain allow-list file is required. Configure the API key and models in the Easy H3 settings page. API keys remain in the local ComfyUI user directory and are not exported with workflows.
 
-`ComfyUI/user/default/ComfyUI-FeiHou-Easy-H3/allowed_api_hosts.json`
+External prompt APIs still require HTTPS. Local Ollama may use http://localhost:11434, 127.0.0.1, or ::1. API settings, model discovery, and immediate prompt-optimization routes remain available only from the machine running ComfyUI.
 
-Add the API **hostname only** to its `hosts` array—do not enter `https://`, a path, port, wildcard, or IP address:
-
-```json
-{
-  "version": 1,
-  "hosts": [
-    "api.example.com",
-    "llm.company.cn"
-  ]
-}
-```
-
-Save the file and restart ComfyUI. You can then enter `https://api.example.com/v1`, its API key, and models in the Custom API panel. The allow-list is intentionally maintained in a local file and cannot be changed from the Settings page: it prevents an exposed ComfyUI server from being induced to request private-network addresses or send API keys to a malicious server. Settings, model discovery, and immediate prompt-optimization routes also accept requests only from the host running ComfyUI.
-
-#### LAN inference endpoints
-
-Keep existing `hosts` entries and add this field to the same server-local file:
-
-```json
-{
-  "version": 1,
-  "hosts": ["api.example.com"],
-  "lan_endpoints": ["http://192.168.1.20:11434", "http://10.0.0.8:8000"]
-}
-```
-
-Only explicit IPv4 addresses in 10/8, 172.16/12 and 192.168/16 are accepted. Authorization matches scheme, IP and port, not an entire subnet. Do not put paths, queries, credentials, wildcards or LAN DNS names in this field. The node URL may include an API path such as `http://10.0.0.8:8000/v1`.
-
-Public APIs still require HTTPS; certificate verification and redirect restrictions remain unchanged. LAN HTTP is unencrypted: authorize only trusted services. Edit the file on the ComfyUI server, then restart ComfyUI. The remote inference service must also listen on its LAN interface with an accessible firewall port. Existing files without this field retain their previous behavior. Remote settings-management routes remain restricted; RH platform APIs are not changed.
-
-The package uses unique `FeiHouEasyH3*` node IDs and dedicated prompt-optimizer routes, so it can be installed alongside the original project.
+The package uses unique FeiHouEasyH3* node IDs and dedicated prompt-optimizer routes, so it can be installed alongside the original project.
 
 ## Attribution, changes, and license
 
