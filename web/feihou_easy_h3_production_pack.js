@@ -64,6 +64,13 @@ function display(node, shot) {
                     applyProductionShotPreview(target, shot);
                     applied++;
                 } else if (/reroute/i.test(target.type || "")) visit(target);
+                else if ((target.type || "") === "SetNode") {
+                    // Follow KJNodes Set/Get pairs as well.
+                    const name = target.widgets?.[0]?.value;
+                    for (const getter of graph?._nodes || []) {
+                        if ((getter.type || "") === "GetNode" && getter.widgets?.[0]?.value === name) visit(getter);
+                    }
+                }
             }
         }
     };

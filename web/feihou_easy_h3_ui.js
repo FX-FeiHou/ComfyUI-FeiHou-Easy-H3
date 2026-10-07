@@ -5035,9 +5035,13 @@ function productionFallbackValues(node) {
 export function applyProductionShotPreview(node, shot) {
     if (!isTarget(node) || !shot?.media || !shot?.params) return;
     node.properties ||= {};
-    // A Core node's media live on its Media node; the backend applies the
-    // pack media at execution, so the preview never overwrites that gallery.
-    if (!isCoreNode(node)) node.properties[EMBEDDED_MEDIA_PROP] = shot.media.map((item) => ({ ...item }));
+    // Show the shot's media where this node keeps its gallery: its own for the
+    // main node, the connected Media node for Setup (as the main node did).
+    const mediaStore = mediaStoreNode(node);
+    if (mediaStore) {
+        mediaStore.properties ||= {};
+        mediaStore.properties[EMBEDDED_MEDIA_PROP] = shot.media.map((item) => ({ ...item }));
+    }
     const params = { ...productionFallbackValues(node), ...shot.params };
     delete params.resolution;
     delete params.width;
@@ -5057,6 +5061,12 @@ export function applyProductionShotPreview(node, shot) {
     renderEditorFromNode(node, true);
     refreshVueNodeWidgets(node);
     node.setDirtyCanvas?.(true, true);
+    if (mediaStore && mediaStore !== node) {
+        ensureEmbeddedMedia(mediaStore);
+        renderEmbeddedMediaGallery(mediaStore);
+        refreshVueNodeWidgets(mediaStore);
+        mediaStore.setDirtyCanvas?.(true, true);
+    }
 }
 
 function installPromptEditorSoon(node) {

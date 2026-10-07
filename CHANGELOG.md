@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.4.14
+
+- Production-pack preview now loads the shot's images, videos and audio into the Media node connected to FeiHou Easy H3 Setup (previously only the standalone main node showed them; Setup and its Media node stayed empty).
+- The pack loader also finds Setup through KJNodes Set/Get pairs, not only direct links and reroutes, so prompts, parameters and media load in such workflows.
+- Front-end only; generation already used the pack media at execution. Validation: JavaScript syntax checks. Not re-tested in a live ComfyUI session.
+
 ## v1.4.13
 
 - Removes the custom API host and LAN endpoint allow-lists. Custom HTTPS-compatible API URLs can be configured directly without allowed_api_hosts.json.
