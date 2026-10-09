@@ -6,6 +6,10 @@
 - The pack loader also finds Setup through KJNodes Set/Get pairs, not only direct links and reroutes, so prompts, parameters and media load in such workflows.
 - Front-end only; generation already used the pack media at execution. Validation: JavaScript syntax checks. Not re-tested in a live ComfyUI session.
 
+## v1.4.15
+
+- Removes the standalone Dual Sample 1st/2nd nodes from the node menu. Sample Enhancer 1st/2nd remain available and continue to use their shared internal sampling implementation.
+
 ## v1.4.13
 
 - Removes the custom API host and LAN endpoint allow-lists. Custom HTTPS-compatible API URLs can be configured directly without allowed_api_hosts.json.
