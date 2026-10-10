@@ -45,6 +45,7 @@ import nodes
 from comfy_extras import nodes_minimax_h3 as h3
 from comfy_extras import nodes_audio as comfy_audio_nodes
 from comfy_api.latest import InputImpl
+from . import local_llm
 from .production_pack import SHOT_TYPE, register_routes as register_production_pack_routes
 
 
@@ -122,7 +123,7 @@ PROMPT_OPTIMIZER_MAX_OUTPUT_TOKENS = 50000
 PROMPT_OPTIMIZER_MODEL_LIST_TIMEOUT_SECONDS = 20
 PROMPT_OPTIMIZER_JPEG_QUALITY = 85
 PROMPT_OPTIMIZER_VIDEO_SAMPLE_COUNT = 3
-PROMPT_OPTIMIZER_CONFIG_VERSION = 6
+PROMPT_OPTIMIZER_CONFIG_VERSION = 7
 PROMPT_OPTIMIZER_ZHIPU_MODELS = (
     "glm-5.1", "glm-5", "glm-5-turbo", "glm-5v-turbo", "glm-4.7", "glm-4.7-flash",
     "glm-4.7-flashx", "glm-4.6", "glm-4.6v", "glm-4.6v-flash", "glm-4.5",
@@ -618,7 +619,7 @@ def _normalize_prompt_optimizer_config(
         if not isinstance(item, Mapping):
             continue
         provider_id = _safe_config_id(item.get("id") or item.get("name"), "provider")
-        if provider_id and provider_id not in supplied:
+        if provider_id and provider_id != "local" and provider_id not in supplied:
             supplied[provider_id] = item
 
     providers: list[dict[str, Any]] = []
@@ -728,7 +729,7 @@ def _normalize_prompt_optimizer_config(
         if len(custom_schemes) >= 50:
             break
 
-    provider_ids = {item["id"] for item in providers}
+    provider_ids = {"local", *{item["id"] for item in providers}}
     active_provider = _safe_config_id(source.get("active_provider") or previous.get("active_provider") or "zhipu", "provider")
     if active_provider not in provider_ids:
         active_provider = providers[0]["id"] if providers else "zhipu"
@@ -743,6 +744,7 @@ def _normalize_prompt_optimizer_config(
     read_media = source.get("read_media", False)
     if isinstance(read_media, str):
         read_media = read_media.strip().lower() in {"1", "true", "yes", "on"}
+    local = local_llm.normalize_config(source.get("local"), previous.get("local"))
     return {
         "version": PROMPT_OPTIMIZER_CONFIG_VERSION,
         "active_provider": active_provider,
@@ -750,6 +752,7 @@ def _normalize_prompt_optimizer_config(
         "active_scheme": active_scheme,
         "custom_schemes": custom_schemes,
         "read_media": bool(read_media),
+        "local": local,
     }
 
 
@@ -764,7 +767,8 @@ def _public_prompt_optimizer_config(value: Mapping[str, Any]) -> dict[str, Any]:
             f"{api_key[:6]}***{api_key[-4:]}" if len(api_key) >= 12 else ("***" if api_key else "")
         )
         public_providers.append(provider)
-    result["providers"] = public_providers
+    result["providers"] = [*public_providers, local_llm.provider(value)]
+    result["local_catalog"] = local_llm.catalog()
     result["schemes"] = _public_prompt_optimizer_schemes(value)
     return result
 
@@ -812,7 +816,7 @@ def _prompt_optimizer_scheme_choices(settings: Mapping[str, Any] | None = None) 
 def _prompt_optimizer_provider_choices(settings: Mapping[str, Any] | None = None) -> list[str]:
     config = settings if isinstance(settings, Mapping) else _read_prompt_optimizer_config()
     choices = []
-    for item in config.get("providers", []) if isinstance(config.get("providers"), list) else []:
+    for item in [*config.get("providers", []), local_llm.provider(config)]:
         if not isinstance(item, Mapping) or not item.get("id"):
             continue
         provider_id = str(item.get("id"))
@@ -1520,6 +1524,10 @@ def _optimizer_service_selection(settings: Mapping[str, Any], requested: Any = N
 
 def _active_optimizer_provider(settings: Mapping[str, Any], requested: Any = None) -> dict[str, Any]:
     provider_id, requested_model = _optimizer_service_selection(settings, requested)
+    if provider_id == "local":
+        provider = local_llm.provider(settings)
+        provider["_requested_model"] = requested_model or provider.get("model", "")
+        return provider
     if not provider_id:
         return {}
     for item in settings.get("providers", []) if isinstance(settings.get("providers"), list) else []:
@@ -1572,11 +1580,31 @@ def _run_configured_prompt_optimizer(
     resources: list[Mapping[str, Any]] | None = None,
     settings: Mapping[str, Any] | None = None,
     reference_short_edge: Any = REF_IMAGE_DEFAULT,
+    *, manual: bool = False,
 ) -> tuple[str, str, str]:
     config = settings if isinstance(settings, Mapping) else _read_prompt_optimizer_config()
     provider = _active_optimizer_provider(config, service_model)
     if not provider:
         raise ValueError("The selected prompt optimization service is disabled or no longer exists")
+
+    if provider.get("api_format") == "local":
+        model = str(provider.get("_requested_model") or "")
+        if not str(prompt or "").strip():
+            raise ValueError("Prompt cannot be empty")
+        if not model:
+            raise ValueError("请在 Easy H3 设置中选择本地模型")
+        records, _ = local_llm.scan_models()
+        record = next((item for item in records if item["id"] == model), None)
+        media_parts = (_optimizer_media_parts(list(resources or []), "openai", reference_short_edge)
+                       if _as_bool(config.get("read_media")) and record and record["vision"] else [])
+        raw_counts = media_counts if isinstance(media_counts, Mapping) else {}
+        counts = {kind: max(0, min(MAX_MEDIA, int(raw_counts.get(kind, 0) or 0)))
+                  for kind in ("image", "video", "audio")}
+        guide, custom_prompt = _optimizer_scheme(config, scene_guide)
+        system = _optimizer_system_prompt(guide, str(mode or MODE_IMAGE),
+            min(MAX_SECONDS, max(MIN_SECONDS, float(seconds))), counts, len(media_parts), custom_prompt)
+        result = local_llm.generate(config.get("local"), model, system, str(prompt), media_parts, manual=manual)
+        return result, "local", model
 
     api_key = str(provider.get("api_key") or "")
     api_url = str(provider.get("api_url") or "")
@@ -1744,6 +1772,8 @@ def _register_prompt_optimizer_route() -> bool:
             return _local_only_route_response(web)
         try:
             provider_id = _safe_config_id(request.match_info.get("provider_id"), "provider")
+            if provider_id == "local":
+                return web.json_response({"ok": True, **local_llm.catalog()})
             settings = _read_prompt_optimizer_config()
             provider = next(
                 (item for item in settings.get("providers", []) if isinstance(item, Mapping) and str(item.get("id")) == provider_id),
@@ -1789,6 +1819,7 @@ def _register_prompt_optimizer_route() -> bool:
                 resources,
                 settings,
                 payload.get("ref_image_size") or REF_IMAGE_DEFAULT,
+                manual=True,
             )
             return web.json_response({
                 "ok": True,

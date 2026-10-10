@@ -22,6 +22,15 @@ That project is published under the GNU General Public License, version 3.
 Because this repository contains adapted portions of that project, this
 repository as a whole is distributed under GNU GPL v3; see LICENSE.
 
+The optional local Transformers/GGUF prompt-optimizer adapter is a modified
+integration of:
+  Goohai-MiniMax-H3_Integration
+  https://github.com/goohai/Goohai-MiniMax-H3_Integration
+  Original author: goohai
+
+That project is published under GNU GPL-3.0-or-later. Easy H3 keeps the
+adapter optional and preserves its upstream attribution; see LICENSE.
+
 The optional "Complete low-VRAM streamed blocks" implementation is derived
 from:
   ComfyUI-MAINodes / vram_lab.py

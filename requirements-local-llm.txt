@@ -1,0 +1,10 @@
+# Optional dependencies for the Standard-edition local prompt optimizer.
+# API-based prompt optimization does not require these packages.
+transformers>=4.49
+accelerate
+safetensors
+sentencepiece
+Pillow
+imageio-ffmpeg>=0.6.0
+# Optional GGUF backend (install a build matching the active Python/CUDA stack):
+# llama-cpp-python

@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.4.16
+
+- Adds an optional Standard-edition local LLM/VLM prompt optimizer. It discovers Transformers and GGUF models under `ComfyUI/models/llm`, with optional GGUF `mmproj` selection, device, context, and output-token settings.
+- Keeps local model controls inside the existing prompt-optimizer settings and hides the node's optimizer provider and guide controls until prompt optimization is enabled.
+- Local optimization unloads ComfyUI models around the request and releases temporary caches before H3 sampling continues. The RH edition is unchanged.
+- Adds optional local-model dependencies in `requirements-local-llm.txt`; API prompt optimization remains available without installing them.
+- Identifies GGUF prompt models from their metadata, including Qwen-Image PE weights using the Qwen35 architecture; distinguishes the I2I vision projector from the T2I text model.
+
 ## v1.4.14
 
 - Production-pack preview now loads the shot's images, videos and audio into the Media node connected to FeiHou Easy H3 Setup (previously only the standalone main node showed them; Setup and its Media node stayed empty).

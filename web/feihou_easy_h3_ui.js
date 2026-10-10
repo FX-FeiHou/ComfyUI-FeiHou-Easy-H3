@@ -27,6 +27,8 @@ const PROMPT_OPTIMIZER_SETTINGS_DEFAULTS = Object.freeze({
     custom_schemes: [],
     schemes: [],
     read_media: false,
+    local: { model: "", mmproj: "", device: "auto", max_tokens: 4096, context_length: 32768 },
+    local_catalog: { models: [], projectors: [], missing_transformers: [], gguf_available: false },
 });
 let promptOptimizerSettingsCache = { ...PROMPT_OPTIMIZER_SETTINGS_DEFAULTS };
 let promptOptimizerSettingsLoaded = false;
@@ -3862,7 +3864,7 @@ function normalizePromptOptimizerSettings(value) {
     const source = value && typeof value === "object" ? value : {};
     const providers = Array.isArray(source.providers) ? source.providers.map((item, index) => {
         const provider = item && typeof item === "object" ? item : {};
-        const apiFormat = ["openai", "gemini", "ollama"].includes(String(provider.api_format || "").toLowerCase())
+        const apiFormat = ["openai", "gemini", "ollama", "local"].includes(String(provider.api_format || "").toLowerCase())
             ? String(provider.api_format).toLowerCase()
             : "openai";
         return {
@@ -3892,6 +3894,15 @@ function normalizePromptOptimizerSettings(value) {
         editable: asBoolean(item?.editable, false),
     })).filter((item) => item.id) : [];
     const activeProvider = String(source.active_provider || providers[0]?.id || "zhipu");
+    const localSource = source.local && typeof source.local === "object" ? source.local : {};
+    const local = {
+        model: String(localSource.model || "").trim(),
+        mmproj: String(localSource.mmproj || "").trim(),
+        device: ["auto", "cpu", "cuda"].includes(String(localSource.device || "")) ? String(localSource.device) : "auto",
+        max_tokens: Number.isFinite(Number(localSource.max_tokens)) ? Math.max(1, Math.min(16384, Number(localSource.max_tokens))) : 4096,
+        context_length: Number.isFinite(Number(localSource.context_length)) ? Math.max(2048, Math.min(131072, Number(localSource.context_length))) : 32768,
+    };
+    const localCatalog = source.local_catalog && typeof source.local_catalog === "object" ? source.local_catalog : {};
     return {
         active_provider: providers.some((item) => item.id === activeProvider) ? activeProvider : providers[0]?.id || "zhipu",
         providers,
@@ -3905,6 +3916,13 @@ function normalizePromptOptimizerSettings(value) {
             : [],
         schemes,
         read_media: asBoolean(source.read_media, false),
+        local,
+        local_catalog: {
+            models: Array.isArray(localCatalog.models) ? localCatalog.models : [],
+            projectors: Array.isArray(localCatalog.projectors) ? localCatalog.projectors : [],
+            missing_transformers: Array.isArray(localCatalog.missing_transformers) ? localCatalog.missing_transformers.map(String) : [],
+            gguf_available: asBoolean(localCatalog.gguf_available, false),
+        },
     };
 }
 
@@ -3965,6 +3983,7 @@ function promptOptimizerState(node) {
     return {
         ...promptOptimizerSettingsCache,
         ...provider,
+        local: promptOptimizerSettingsCache.local,
         requested_service: requestedService,
         requested_provider: requestedProvider,
         requested_model: requestedModel,
@@ -4042,8 +4061,12 @@ function syncPromptOptimizerButton(node) {
         && asBoolean(getWidgetValue(node, "prompt_optimizer_enabled", false))
         && Boolean(state.requested_provider && state.requested_model);
     const model = state.requested_model;
-    const keyReady = state.api_format === "ollama" || state.api_key_exists || Boolean(String(state.api_key || "").trim());
-    const configured = enabled && Boolean(String(state.api_url || "").trim() && String(model || "").trim() && keyReady);
+    const local = state.api_format === "local";
+    const keyReady = local || state.api_format === "ollama" || state.api_key_exists || Boolean(String(state.api_key || "").trim());
+    const localModelReady = local && promptOptimizerSettingsCache.local_catalog.models.some((item) => String(item?.id || "") === String(model || ""));
+    const configured = enabled && (local
+        ? Boolean(String(model || "").trim() && localModelReady)
+        : Boolean(String(state.api_url || "").trim() && String(model || "").trim() && keyReady));
     const external = promptInputIsConnected(node);
     const pending = Boolean(node.__h3OptimizerPending);
     const locked = external || pending;
@@ -4146,8 +4169,10 @@ async function optimizePromptFromEditor(node) {
     }
     const resources = promptOptimizerResources(node);
     const model = state.requested_model;
-    const keyReady = state.api_format === "ollama" || state.api_key_exists || Boolean(String(state.api_key || "").trim());
-    if (!String(state.api_url || "").trim() || !String(model || "").trim() || !keyReady) {
+    const local = state.api_format === "local";
+    const keyReady = local || state.api_format === "ollama" || state.api_key_exists || Boolean(String(state.api_key || "").trim());
+    const localModelReady = local && promptOptimizerSettingsCache.local_catalog.models.some((item) => String(item?.id || "") === String(model || ""));
+    if (local ? !String(model || "").trim() || !localModelReady : !String(state.api_url || "").trim() || !String(model || "").trim() || !keyReady) {
         notifyPromptOptimizer(TEXT.optimizerMissing);
         return;
     }
