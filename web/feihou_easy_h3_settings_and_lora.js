@@ -387,7 +387,11 @@ async function mountInlineSettings(root) {
                 const format = String(model?.format || "").toUpperCase();
                 const vision = model?.vision ? " · VLM" : " · LLM";
                 const available = model?.available !== false;
-                const suffix = available ? "" : t(" · 需完整模型目录", " · Full model directory required");
+                const suffix = !available
+                    ? model?.status === "unsupported_runtime"
+                        ? t(" · 需要 Transformers 5+", " · Requires Transformers 5+")
+                        : t(" · 需完整模型目录", " · Full model directory required")
+                    : model?.status === "fixed_profile" ? t(" · 内置架构", " · Built-in architecture") : "";
                 const option = new Option(`${model.name || id} · ${format}${vision}${suffix}`, id);
                 option.disabled = !available;
                 modelSelect.append(option);

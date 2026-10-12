@@ -1,6 +1,8 @@
 # Optional dependencies for the Standard-edition local prompt optimizer.
 # API-based prompt optimization does not require these packages.
-transformers>=4.49
+# Qwen3-8B and DeepSeek-V4 fixed safetensors profiles use these native model classes.
+# DeepSeek-V4 is provided by the native Transformers 5.x model registry.
+transformers>=5.0.0
 accelerate
 safetensors
 sentencepiece

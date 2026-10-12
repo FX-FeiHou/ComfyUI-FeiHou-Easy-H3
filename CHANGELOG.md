@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.4.18
+
+- Standard local prompt optimization can load a single `.safetensors` file for the built-in Qwen3-8B, DeepSeek-V4 Flash, and DeepSeek-V4 Pro profiles.
+- Detects those profiles from the safetensors tensor header, so renamed files still work; complete Transformers directories and GGUF behavior remain unchanged.
+- Resolves a matching tokenizer from local files or the model's Hugging Face repository. RH is unchanged.
+
 ## v1.4.17
 
 - Scans standalone `.safetensors` files under `models/llm`, including files whose names were changed.
