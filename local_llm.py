@@ -89,6 +89,27 @@ def _gguf_metadata(path):
     return metadata
 
 
+def _safetensors_metadata(path):
+    """Read only the safetensors header; never load the weight tensors."""
+    metadata = {}
+    try:
+        with path.open("rb") as handle:
+            header_size_bytes = handle.read(8)
+            if len(header_size_bytes) != 8:
+                return metadata
+            header_size = struct.unpack("<Q", header_size_bytes)[0]
+            # A corrupt file must not make a model scan allocate unbounded memory.
+            if header_size > 16 * 1024 * 1024:
+                return metadata
+            header = json.loads(handle.read(header_size).decode("utf-8"))
+            values = header.get("__metadata__") if isinstance(header, dict) else None
+            if isinstance(values, dict):
+                metadata.update(values)
+    except (OSError, ValueError, UnicodeError, struct.error):
+        pass
+    return metadata
+
+
 def _handler(name):
     if re.search(r"qwen[-_. ]?3[._-]?(?:5|6|8)", name.lower()):
         return "Qwen35ChatHandler"
@@ -124,17 +145,24 @@ def scan_models():
     for root_index, root in enumerate(model_roots()):
         if not root.is_dir():
             continue
-        candidates = list(root.rglob("*.gguf")) + [p.parent for p in root.rglob("config.json")]
+        candidates = (list(root.rglob("*.gguf"))
+                      + [p.parent for p in root.rglob("config.json")]
+                      + [p for p in root.rglob("*.safetensors") if p.is_file()])
         for path in sorted(candidates):
             path = path.resolve()
             # Do not expose a symlink outside an explicitly configured model root.
             if not path.is_relative_to(root) or path in seen:
                 continue
+            # A complete Transformers directory is represented by its directory
+            # record below. Do not also list each shard in that directory.
+            if path.is_file() and (path.parent / "config.json").is_file():
+                continue
             seen.add(path)
             relative = path.relative_to(root).as_posix()
             identifier = relative if root_index == 0 else f"root{root_index}/{relative}"
             record = {"id": identifier, "name": relative, "path": str(path),
-                      "format": "gguf" if path.suffix.lower() == ".gguf" else "transformers"}
+                      "format": "gguf" if path.suffix.lower() == ".gguf" else (
+                          "safetensors" if path.is_file() else "transformers")}
             if record["format"] == "gguf":
                 if _is_projector(path):
                     projectors.append(record)
@@ -146,6 +174,14 @@ def scan_models():
                     continue
                 tags = metadata.get("general.tags") or []
                 record["vision"] = architecture in {"qwen3vl", "qwen2vl"} or "image-editing" in tags
+                record["available"] = True
+            elif record["format"] == "safetensors":
+                metadata = _safetensors_metadata(path)
+                record["architecture"] = str(metadata.get("general.architecture") or "").lower()
+                record["vision"] = False
+                record["available"] = False
+                record["status"] = "metadata_only"
+                record["reason"] = "缺少 config.json；请把完整 Transformers 模型目录放入 models/llm"
             else:
                 try:
                     config = json.loads((path / "config.json").read_text(encoding="utf-8"))
@@ -155,6 +191,7 @@ def scan_models():
                     word in json.dumps(config).lower() for word in ("vision", "visual", "gemma3", "minicpm-v", "internvl")))
                 if not any(path.glob("*.safetensors")) and not any(path.glob("pytorch_model*.bin")):
                     continue
+                record["available"] = True
             models.append(record)
     for model in models:
         suggestion = matching_projector(model["id"], projectors)
@@ -176,10 +213,11 @@ def catalog():
 def provider(config):
     models, _ = scan_models()
     local = normalize_config(config.get("local"))
+    runnable = [m for m in models if m.get("available", True)]
     return {"id": "local", "name": "本地模型", "description": "Transformers / GGUF",
             "api_format": "local", "api_url": "", "api_key": "", "builtin": True,
-            "llm_models": [m["id"] for m in models if not m["vision"]],
-            "vlm_models": [m["id"] for m in models if m["vision"]],
+            "llm_models": [m["id"] for m in runnable if not m["vision"]],
+            "vlm_models": [m["id"] for m in runnable if m["vision"]],
             "llm_model": local["model"], "vlm_model": local["model"], **local}
 
 
@@ -306,6 +344,8 @@ def generate(config, selected, system, prompt, media_parts, *, manual=False):
     record = next((m for m in models if m["id"] == selected), None)
     if record is None:
         raise ValueError("所选本地模型已不存在，请刷新本地模型列表")
+    if not record.get("available", True):
+        raise ValueError(record.get("reason") or "所选本地模型缺少可加载所需的完整文件")
     projector_id = config["mmproj"] or record.get("suggested_mmproj", "")
     projector = next((m for m in projectors if m["id"] == projector_id), None)
     if not _LOCK.acquire(blocking=False):

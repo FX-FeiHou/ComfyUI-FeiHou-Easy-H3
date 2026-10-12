@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.4.17
+
+- Scans standalone `.safetensors` files under `models/llm`, including files whose names were changed.
+- Shows standalone weights in Standard settings as metadata-only entries when their `config.json` and tokenizer/model directory are missing; they are visible for diagnosis but cannot be selected for generation.
+- Keeps complete Transformers directories runnable and prevents duplicate entries for their weight shards. RH is unchanged.
+
 ## v1.4.16
 
 - Adds an optional Standard-edition local LLM/VLM prompt optimizer. It discovers Transformers and GGUF models under `ComfyUI/models/llm`, with optional GGUF `mmproj` selection, device, context, and output-token settings.

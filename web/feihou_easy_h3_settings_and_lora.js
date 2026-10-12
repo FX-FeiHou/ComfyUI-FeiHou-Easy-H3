@@ -386,7 +386,11 @@ async function mountInlineSettings(root) {
                 if (!id) continue;
                 const format = String(model?.format || "").toUpperCase();
                 const vision = model?.vision ? " · VLM" : " · LLM";
-                modelSelect.append(new Option(`${model.name || id} · ${format}${vision}`, id));
+                const available = model?.available !== false;
+                const suffix = available ? "" : t(" · 需完整模型目录", " · Full model directory required");
+                const option = new Option(`${model.name || id} · ${format}${vision}${suffix}`, id);
+                option.disabled = !available;
+                modelSelect.append(option);
             }
             modelSelect.value = state.local.model || "";
             modelSelect.addEventListener("change", async () => {
@@ -448,8 +452,8 @@ async function mountInlineSettings(root) {
                     };
                     const localProvider = state.providers.find((item) => item.id === "local");
                     if (localProvider) {
-                        localProvider.llm_models = state.local_catalog.models.filter((item) => !item.vision).map((item) => String(item.id));
-                        localProvider.vlm_models = state.local_catalog.models.filter((item) => item.vision).map((item) => String(item.id));
+                        localProvider.llm_models = state.local_catalog.models.filter((item) => item.available !== false && !item.vision).map((item) => String(item.id));
+                        localProvider.vlm_models = state.local_catalog.models.filter((item) => item.available !== false && item.vision).map((item) => String(item.id));
                     }
                     await persist(t("本地模型列表已刷新", "Local model list refreshed"));
                     renderProvider(container);
