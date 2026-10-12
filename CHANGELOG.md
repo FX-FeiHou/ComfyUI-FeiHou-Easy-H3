@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.4.19
+
+- Standard local prompt optimization adds embedded bare-safetensors profiles for Qwen3 0.6B, 1.7B, 4B, 14B, 32B, and Mistral 7B Instruct v0.3; existing Qwen3-8B support remains compatible.
+- Bare-safetensors detection now uses exact tensor structure instead of filename guesses, so renamed files remain detectable without confusing unrelated models with the same layer count.
+- DeepSeek-V4 runtime detection now checks whether the installed Transformers package actually contains its model implementation instead of assuming every 5.x package supports it.
+
 ## v1.4.18
 
 - Standard local prompt optimization can load a single `.safetensors` file for the built-in Qwen3-8B, DeepSeek-V4 Flash, and DeepSeek-V4 Pro profiles.

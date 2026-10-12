@@ -373,8 +373,8 @@ async function mountInlineSettings(root) {
 
         if (provider.id === "local") {
             const description = el("p", "fh-inline-local-note", t(
-                "本地模型只在 Easy H3 节点打开“提示词优化”后使用；模型文件放在 ComfyUI/models/llm（或已注册的 llm 模型目录）。",
-                "Local models are used only after Prompt optimization is enabled on the Easy H3 node. Put them in ComfyUI/models/llm or a registered llm model directory.",
+                "本地模型只在 Easy H3 节点打开“提示词优化”后使用；支持 GGUF、完整 Transformers 目录，以及内置架构的裸 safetensors。模型文件放在 ComfyUI/models/llm（或已注册的 llm 模型目录）。",
+                "Local models are used only after Prompt optimization is enabled. GGUF, complete Transformers folders, and bare safetensors with a built-in architecture are supported. Put them in ComfyUI/models/llm or a registered llm model directory.",
             ));
             card.append(description);
 

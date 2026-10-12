@@ -18,6 +18,7 @@ The main node provides:
 - reference-image short-edge presets of 480, 544, 640, 736, 768, 832, 928, 1024, and 1088;
 - Advanced options include **Force offload (with post-sampling cache release)** and optional **Complete low-VRAM streamed blocks (experimental)**. The former releases unused allocator cache after sampling and before VAE decoding; the latter streams H3 QKV, attention, MLP/SwiGLU, and output-head work. Do not chain `ModelAttentionBackend / comfy kitchen attention` when this option is enabled;
 - prompt-optimizer settings for Zhipu, xFlow API aggregation, Ollama, Alibaba Cloud, DeepSeek, and custom OpenAI/Gemini/Ollama-compatible APIs;
+- local GGUF, complete Transformers directories, and bare `.safetensors` files with built-in architecture detection; the Standard edition embeds Qwen3 0.6B, 1.7B, 4B, 8B, 14B, 32B, and Mistral 7B Instruct v0.3 configurations, so renaming a file does not break detection;
 - built-in and user-defined prompt schemes.
 
 Video soundtracks remain paired with their source videos. The three audio slots are standalone audio references. In image/first-last-frame mode, only the first two image slots are active; switching modes preserves the remaining gallery selections.

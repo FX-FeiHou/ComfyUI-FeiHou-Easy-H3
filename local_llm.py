@@ -9,7 +9,6 @@ import base64
 from difflib import SequenceMatcher
 import gc
 import importlib.util
-from importlib.metadata import PackageNotFoundError, version as package_version
 from io import BytesIO
 import json
 from pathlib import Path
@@ -207,6 +206,81 @@ FIXED_MODEL_PROFILES = {
 }
 
 
+def _qwen3_profile(profile_id, repo, hidden_size, intermediate_size,
+                   num_hidden_layers, num_attention_heads, tie_word_embeddings):
+    """Build an embedded Qwen3 config from the official model-card config."""
+    return {
+        "model_type": "qwen3",
+        "tokenizer_repo": repo,
+        "config": {
+            "architectures": ["Qwen3ForCausalLM"],
+            "attention_bias": False,
+            "attention_dropout": 0.0,
+            "bos_token_id": 151643,
+            "eos_token_id": 151645,
+            "head_dim": 128,
+            "hidden_act": "silu",
+            "hidden_size": hidden_size,
+            "initializer_range": 0.02,
+            "intermediate_size": intermediate_size,
+            "max_position_embeddings": 40960,
+            "max_window_layers": num_hidden_layers,
+            "model_type": "qwen3",
+            "num_attention_heads": num_attention_heads,
+            "num_hidden_layers": num_hidden_layers,
+            "num_key_value_heads": 8,
+            "rms_norm_eps": 1e-6,
+            "rope_scaling": None,
+            "rope_theta": 1000000,
+            "sliding_window": None,
+            "tie_word_embeddings": tie_word_embeddings,
+            "torch_dtype": "bfloat16",
+            "use_cache": True,
+            "use_sliding_window": False,
+            "vocab_size": 151936,
+        },
+    }
+
+
+# Qwen3 is released in several Apache-2.0 sizes. Keep their official
+# structural values here so a renamed single .safetensors file can still be
+# matched without a neighboring config.json. The 8B profile above is retained
+# for backward compatibility with existing settings.
+FIXED_MODEL_PROFILES.update({
+    "qwen3-0.6b": _qwen3_profile("qwen3-0.6b", "Qwen/Qwen3-0.6B", 1024, 3072, 28, 16, True),
+    "qwen3-1.7b": _qwen3_profile("qwen3-1.7b", "Qwen/Qwen3-1.7B", 2048, 6144, 28, 16, True),
+    "qwen3-4b": _qwen3_profile("qwen3-4b", "Qwen/Qwen3-4B", 2560, 9728, 36, 32, True),
+    "qwen3-14b": _qwen3_profile("qwen3-14b", "Qwen/Qwen3-14B", 5120, 17408, 40, 40, False),
+    "qwen3-32b": _qwen3_profile("qwen3-32b", "Qwen/Qwen3-32B", 5120, 25600, 64, 64, False),
+    "mistral-7b-instruct-v0.3": {
+        "model_type": "mistral",
+        "tokenizer_repo": "mistralai/Mistral-7B-Instruct-v0.3",
+        "config": {
+            "architectures": ["MistralForCausalLM"],
+            "attention_dropout": 0.0,
+            "bos_token_id": 1,
+            "eos_token_id": 2,
+            "hidden_act": "silu",
+            "hidden_size": 4096,
+            "initializer_range": 0.02,
+            "intermediate_size": 14336,
+            "max_position_embeddings": 32768,
+            "model_type": "mistral",
+            "num_attention_heads": 32,
+            "num_hidden_layers": 32,
+            "num_key_value_heads": 8,
+            "rms_norm_eps": 1e-5,
+            "rope_theta": 1000000.0,
+            "sliding_window": None,
+            "tie_word_embeddings": False,
+            "torch_dtype": "bfloat16",
+            "use_cache": True,
+            "vocab_size": 32768,
+        },
+    },
+})
+
+
 def normalize_config(value=None, existing=None):
     data = {**DEFAULTS, **(existing or {}), **(value if isinstance(value, dict) else {})}
     def integer(key, low, high):
@@ -299,7 +373,13 @@ def _safetensors_metadata(path):
 
 
 def _header_model_shape(header):
-    entry = header.get("model.embed_tokens.weight")
+    entry = header.get("model.embed_tokens.weight") or header.get("transformer.embeddings.word_embeddings.weight")
+    shape = entry.get("shape") if isinstance(entry, dict) else None
+    return tuple(shape) if isinstance(shape, list) and all(isinstance(v, int) for v in shape) else ()
+
+
+def _header_tensor_shape(header, name):
+    entry = header.get(name)
     shape = entry.get("shape") if isinstance(entry, dict) else None
     return tuple(shape) if isinstance(shape, list) and all(isinstance(v, int) for v in shape) else ()
 
@@ -313,24 +393,95 @@ def _header_layer_count(header):
     return max(indexes) + 1 if indexes else 0
 
 
+def _qwen3_structure_matches(profile, header):
+    config = profile["config"]
+    shape = _header_model_shape(header)
+    if shape != (config["vocab_size"], config["hidden_size"]):
+        return False
+    if _header_layer_count(header) != config["num_hidden_layers"]:
+        return False
+    q_shape = _header_tensor_shape(header, "model.layers.0.self_attn.q_proj.weight")
+    k_shape = _header_tensor_shape(header, "model.layers.0.self_attn.k_proj.weight")
+    v_shape = _header_tensor_shape(header, "model.layers.0.self_attn.v_proj.weight")
+    if q_shape != (config["num_attention_heads"] * config["head_dim"], config["hidden_size"]):
+        return False
+    if k_shape != (config["num_key_value_heads"] * config["head_dim"], config["hidden_size"]):
+        return False
+    if v_shape != k_shape:
+        return False
+    return all(name in header for name in (
+        "model.layers.0.input_layernorm.weight",
+        "model.layers.0.self_attn.o_proj.weight",
+        "model.layers.0.mlp.gate_proj.weight",
+        "model.layers.0.mlp.down_proj.weight",
+        "model.layers.0.mlp.up_proj.weight",
+    ))
+
+
+def _standard_decoder_structure_matches(profile, header):
+    """Match ordinary split-QKV decoder weights such as Mistral."""
+    config = profile["config"]
+    shape = _header_model_shape(header)
+    if shape != (config["vocab_size"], config["hidden_size"]):
+        return False
+    if _header_layer_count(header) != config["num_hidden_layers"]:
+        return False
+    head_dim = config["hidden_size"] // config["num_attention_heads"]
+    q_shape = _header_tensor_shape(header, "model.layers.0.self_attn.q_proj.weight")
+    k_shape = _header_tensor_shape(header, "model.layers.0.self_attn.k_proj.weight")
+    v_shape = _header_tensor_shape(header, "model.layers.0.self_attn.v_proj.weight")
+    if q_shape != (config["num_attention_heads"] * head_dim, config["hidden_size"]):
+        return False
+    if k_shape != (config["num_key_value_heads"] * head_dim, config["hidden_size"]):
+        return False
+    if v_shape != k_shape:
+        return False
+    return all(name in header for name in (
+        "model.layers.0.input_layernorm.weight",
+        "model.layers.0.self_attn.o_proj.weight",
+        "model.layers.0.mlp.gate_proj.weight",
+        "model.layers.0.mlp.down_proj.weight",
+        "model.layers.0.mlp.up_proj.weight",
+    ))
+
+
+def _deepseek_v4_structure_matches(profile, header):
+    config = profile["config"]
+    shape = _header_model_shape(header)
+    if shape != (config["vocab_size"], config["hidden_size"]):
+        return False
+    if _header_layer_count(header) != config["num_hidden_layers"]:
+        return False
+    q_shape = _header_tensor_shape(header, "model.layers.0.self_attn.q_a_proj.weight")
+    if q_shape != (config["q_lora_rank"], config["hidden_size"]):
+        return False
+    return all(name in header for name in (
+        "model.layers.0.input_layernorm.weight",
+        "model.layers.0.self_attn.kv_a_proj_with_mqa.weight",
+        "model.layers.0.self_attn.o_proj.weight",
+    ))
+
+
 def _fixed_profile_for(path, header):
-    """Choose a built-in profile from tensor structure and optional filename hints."""
+    """Choose a built-in profile from exact tensor structure, never its filename."""
     metadata = header.get("__metadata__") if isinstance(header, dict) else {}
     metadata = metadata if isinstance(metadata, dict) else {}
     model_type = str(metadata.get("model_type") or metadata.get("general.architecture") or "").lower()
-    text = str(path).lower().replace("_", "-")
-    layers = _header_layer_count(header)
-    shape = _header_model_shape(header)
-    hidden_size = shape[1] if len(shape) == 2 else 0
-
-    if ("deepseek" in text or "deepseek_v4" in model_type or model_type == "deepseek-v4"
-            or layers in {43, 61}):
-        return FIXED_MODEL_PROFILES["deepseek-v4-pro" if layers == 61 or "pro" in text
-                                    else "deepseek-v4-flash"]
-    if ("qwen3-8b" in text or "qwen3.8" in str(path).lower()
-            or (model_type == "qwen3" and layers == 36 and hidden_size == 4096)
-            or (layers == 36 and hidden_size == 4096 and "model.embed_tokens.weight" in header)):
-        return FIXED_MODEL_PROFILES["qwen3-8b"]
+    if model_type in {"deepseek_v4", "deepseek-v4"}:
+        for profile_id in ("deepseek-v4-flash", "deepseek-v4-pro"):
+            profile = FIXED_MODEL_PROFILES[profile_id]
+            if _deepseek_v4_structure_matches(profile, header):
+                return profile
+        return None
+    for profile_id, profile in FIXED_MODEL_PROFILES.items():
+        if profile["model_type"] == "qwen3" and _qwen3_structure_matches(profile, header):
+            if model_type and model_type not in {"qwen3", "qwen3forcausallm"}:
+                return None
+            return profile
+        if profile["model_type"] in {"mistral", "llama"} and _standard_decoder_structure_matches(profile, header):
+            if model_type and model_type not in {profile["model_type"], f"{profile['model_type']}forcausallm"}:
+                return None
+            return profile
     return None
 
 
@@ -338,10 +489,10 @@ def _fixed_profile_runtime_available(profile):
     if profile["model_type"] != "deepseek_v4":
         return True
     try:
-        parts = package_version("transformers").split(".")[:2]
-        major, minor = (int(re.match(r"\d+", part).group()) for part in parts)
-        return (major, minor) >= (5, 0)
-    except (PackageNotFoundError, AttributeError, TypeError, ValueError):
+        spec = importlib.util.find_spec("transformers")
+        locations = list(spec.submodule_search_locations or []) if spec else []
+        return any((Path(location) / "models" / "deepseek_v4").is_dir() for location in locations)
+    except (ImportError, ModuleNotFoundError, AttributeError, TypeError, OSError):
         return False
 
 
@@ -427,11 +578,11 @@ def scan_models():
                     else:
                         record["available"] = False
                         record["status"] = "unsupported_runtime"
-                        record["reason"] = "DeepSeek-V4 需要 Transformers 5.0 或更高版本，请先更新本地模型依赖"
+                        record["reason"] = "当前 Transformers 未提供 DeepSeek-V4 模型实现；请安装包含 transformers/models/deepseek_v4 的版本"
                 else:
                     record["available"] = False
                     record["status"] = "metadata_only"
-                    record["reason"] = "无法根据权重结构匹配内置架构；请使用 Qwen3-8B 或 DeepSeek-V4 的完整模型配置"
+                    record["reason"] = "无法根据权重结构匹配内置架构；请使用 Qwen3、Mistral 的内置配置，或放入带 config.json 的完整 Transformers 模型目录"
             else:
                 try:
                     config = json.loads((path / "config.json").read_text(encoding="utf-8"))

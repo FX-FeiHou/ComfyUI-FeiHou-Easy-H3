@@ -17,6 +17,7 @@
 - 默认 24 FPS、10 秒；参考图尺寸可选短边 480、544、640、736、768、832、928、1024、1088；
 - 高级选项提供“强制卸载（含采样后缓存回收）”和可选“完整低显存分块（实验）”：前者在采样器结束、VAE 解码前回收未使用的缓存，后者对 H3 的 QKV、注意力、MLP/SwiGLU 和输出头执行完整分块；启用后不要再串联 `ModelAttentionBackend / comfy kitchen attention`；
 - 提示词优化支持智谱、xFlow-API 聚合、Ollama、阿里云、DeepSeek 和自定义 OpenAI/Gemini/Ollama 兼容 API；
+- 提示词优化也支持本地 GGUF、完整 Transformers 模型目录，以及带内置架构识别的裸 `.safetensors`；标准版内置 Qwen3 0.6B、1.7B、4B、8B、14B、32B 和 Mistral 7B Instruct v0.3 配置，改文件名不影响识别；
 - 内置提示词方案之外，还可创建、编辑和选择自定义方案。
 
 ## 节点
