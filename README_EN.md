@@ -35,6 +35,7 @@ Nodes appear under `FeiHou Easy H3`:
 - `FeiHou Easy H3 Model Adapter`
 - `FeiHou Easy H3 Output`
 - `FeiHou Easy H3 Prompt Preview`
+- `FeiHou Easy H3 接续合并` (`FeiHouEasyH3ContinueOut`): trims overlapping video/audio and provides the continuation tail. Connect `tail_latent` to [FeiHou Toolbox Video Combine V2](https://github.com/FX-FeiHou/ComfyUI-FeiHou-Toolbox) to save tails and merge completed segments.
 
 Place the LoRA stack to the left of `FeiHou Easy H3 Loader` and connect its `lora_stack` output to the loader's left-side `LoRA stack` input. The loader applies every enabled LoRA internally; the LoRA node is not inserted into the main node's downstream `MODEL` chain.
 

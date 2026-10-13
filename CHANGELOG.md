@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.4.20
+
+- Brings the Standard GitHub package into parity with the local installation, including the previously local-only `FeiHouEasyH3ContinueOut` continuation/merge node and its registration.
+- Includes the matching Setup continuation guidance, production-pack transition/context controls, continuation-video upload/selection, per-shot state, and frontend persistence.
+- Connect `tail_latent` to FeiHou Toolbox Video Combine V2 to save continuation tails and join the completed segments.
+- Includes the local face-refinement canvas presets from 360P through 1080P and preserves the v1.4.19 local LLM features. RH is unchanged.
+
 ## v1.4.19
 
 - Standard local prompt optimization adds embedded bare-safetensors profiles for Qwen3 0.6B, 1.7B, 4B, 14B, 32B, and Mistral 7B Instruct v0.3; existing Qwen3-8B support remains compatible.

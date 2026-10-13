@@ -5,7 +5,7 @@ import { applyProductionShotPreview } from "./feihou_easy_h3_ui.js";
 
 const CLASS = "FeiHouEasyH3ProductionPackLoader";
 // Original serialized positions: presentation-only buttons must never shift them.
-const SAVED_WIDGETS = ["source", "shotlist_file", "audio_file", "shot_index", "control_after_generate", "prompt_language", "package_id"];
+const SAVED_WIDGETS = ["source", "shotlist_file", "audio_file", "shot_index", "control_after_generate", "prompt_language", "package_id", "continuous_runtime_config", "continuation", "context_frames", "continue_video", "use_pack"];
 const zh = () => /^zh/i.test(String(app.ui?.settings?.getSettingValue?.("Comfy.Locale") || navigator.language));
 const tr = (en, cn) => zh() ? cn : en;
 const widget = (node, name) => node.widgets?.find((w) => w.name === name);
@@ -27,6 +27,77 @@ async function request(action, data, file) {
     const result = await response.json();
     if (!response.ok || result.error) throw new Error(result.error || `HTTP ${response.status}`);
     return result;
+}
+
+async function uploadContinueFile(file, batch) {
+    const response = await api.fetchApi("/feihou_easy_h3/production_pack/continue_upload", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+            "X-FeiHou-Pack": "1", "Content-Type": "application/octet-stream",
+            "X-FeiHou-Name": encodeURIComponent(file.name), "X-FeiHou-Batch": batch,
+        },
+        body: file,
+    });
+    const result = await response.json();
+    if (!response.ok || result.error) throw new Error(result.error || `HTTP ${response.status}`);
+    return result;
+}
+
+const AUTO = "自动";
+const baseName = (path) => String(path || "").split(/[\\/]/).pop();
+
+// The visible "接续视频" combo: 自动 plus the last chosen file (shown by its name).
+// The real value lives in the hidden continue_video string the backend reads.
+function syncContinue(node) {
+    const shown = widget(node, "continue_video_choice");
+    if (!shown) return;
+    const current = value(node, "continue_video") || AUTO;
+    node.properties ||= {};
+    if (current !== AUTO) node.properties.feihou_continue_selected = current;
+    const selected = node.properties.feihou_continue_selected;
+    shown.options ||= {};
+    shown.options.values = selected ? [AUTO, baseName(selected)] : [AUTO];
+    shown.value = current === AUTO ? AUTO : baseName(current);
+    node.setDirtyCanvas?.(true, true);
+}
+
+// Windows file dialog for the continuation video. A video already inside ComfyUI's
+// output/input folder (same name and size) is used in place, so its saved .latent is
+// found next to it; any other video (plus a .latent picked with it) is uploaded to input.
+function pickContinueVideo(node) {
+    const picker = document.createElement("input");
+    picker.type = "file";
+    picker.multiple = true;
+    picker.accept = "video/*,.mp4,.webm,.mov,.mkv,.m4v,.latent";
+    picker.onchange = async () => {
+        const files = [...(picker.files || [])];
+        if (!files.length) return;
+        const video = files.find((f) => !/\.latent$/i.test(f.name)) || files[0];
+        const stem = (name) => name.replace(/\.[^.]+$/, "");
+        try {
+            status(node, tr("Locating the continuation video…", "正在定位接续视频…"));
+            let chosen = (await request("continue_find", { name: video.name, size: video.size })).value;
+            if (!chosen) {
+                const batch = [...crypto.getRandomValues(new Uint8Array(6))].map((b) => b.toString(16).padStart(2, "0")).join("");
+                for (const file of files) {
+                    if (file !== video && !(/\.latent$/i.test(file.name) && stem(file.name) === stem(video.name))) continue;
+                    status(node, tr(`Uploading ${file.name}…`, `正在上传 ${file.name}…`));
+                    const result = await uploadContinueFile(file, batch);
+                    if (file === video) chosen = result.value;
+                }
+            }
+            set(node, "continue_video", chosen);
+            syncContinue(node);
+            status(node, tr(`Continuation video: ${chosen}\nThe first queued shot continues from it, then this returns to Auto.`,
+                `接续视频：${chosen}\n本次排队的第一个分镜会接着它生成，之后自动改回「自动」。`));
+            app.graph?.change?.();
+            node.setDirtyCanvas?.(true, true);
+        } catch (error) {
+            status(node, tr("Continuation video failed: ", "接续视频选择失败：") + error.message);
+        }
+    };
+    picker.click();
 }
 
 function sourcePath(node) {
@@ -75,7 +146,9 @@ function display(node, shot) {
         }
     };
     visit(node);
-    status(node, `${shot.index}/${shot.total} · ${shot.id} · ${shot.params.seconds}s\n${shot.range}\n${shot.refs.join(" → ")}\n`
+    const join = { continue: tr("continue", "接续"), cut: tr("hard cut", "硬切") }[shot.transition] || tr("unspecified", "未指定");
+    status(node, `${shot.index}/${shot.total} · ${shot.id} · ${shot.params.seconds}s · ${tr("transition", "衔接")}: ${join}`
+        + `${shot.continuation_frames ? " " + shot.continuation_frames : ""}\n${shot.range}\n${shot.refs.join(" → ")}\n`
         + shot.media.filter((m) => m.media_type === "audio").map((m) => `Audio ${m.ordinal}: ${m.filename} | ${m.audio_trim || "full"}\n`).join("")
         + (shot.media.filter((m) => m.media_type === "audio").length > 3
             ? tr("The gallery shows 3 audio slots; all package audio is supplied through the connected production-shot input.\n", "上传区仅显示 3 个音频格；全部制作包音频通过已连接的制作包分镜接口参与执行。\n") : "")
@@ -141,6 +214,12 @@ function localize(node) {
         preview_shot: ["Preview current shot", "预览当前分镜"],
         pack_report: ["Detection report", "检测信息"],
         generation_order: ["Generation order", "生成顺序控制"],
+        continuation: ["Shot transition", "分镜衔接"],
+        context_frames: ["Continuation frames (1st+2nd pass)", "接续帧数（一采+二采）"],
+        continue_video: ["Continue from video", "接续视频"],
+        pick_continue_video: ["Choose continuation video…", "选择接续视频…"],
+        continue_video_choice: ["Continue from video", "接续视频"],
+        use_pack: ["Run production pack in batch", "批量运行制作包"],
     };
     for (const w of node.widgets || []) if (names[w.name]) w.label = tr(...names[w.name]);
     const order = widget(node, "generation_order");
@@ -177,11 +256,46 @@ app.registerExtension({
             // onConfigure restores the user's saved fixed/increment choice later.
             const control = widget(this, "control_after_generate");
             if (control) control.value = "increment";
-            for (const name of ["shotlist_file", "audio_file", "package_id", "control_after_generate"]) hideInternal(widget(this, name));
+            // With the pack switched off the loader only continues videos: keep the shot index still.
+            for (const hook of ["beforeQueued", "afterQueued"]) {
+                const original = control?.[hook];
+                if (typeof original === "function") {
+                    control[hook] = (...args) => (value(this, "use_pack") === false ? undefined : original.apply(control, args));
+                }
+            }
+            // A chosen continuation video applies to the first queued shot only.
+            const chosen = widget(this, "continue_video");
+            if (chosen) {
+                const after = chosen.afterQueued;
+                chosen.afterQueued = (...args) => {
+                    after?.apply(chosen, args);
+                    if (chosen.value !== AUTO) { set(this, "continue_video", AUTO); syncContinue(this); }
+                };
+            }
+            for (const name of ["shotlist_file", "audio_file", "package_id", "control_after_generate", "continuous_runtime_config", "continue_video"]) hideInternal(widget(this, name));
             this.addWidget("combo", "generation_order", orderNames().increment, (label) => {
                 const entry = Object.entries(orderNames()).find(([, text]) => text === label);
                 if (entry) { set(this, "control_after_generate", entry[0]); app.graph?.change?.(); }
             }, { values: Object.values(orderNames()), serialize: false });
+            const usePack = widget(this, "use_pack");
+            if (usePack) {
+                this.widgets.splice(this.widgets.indexOf(usePack), 1);
+                this.widgets.unshift(usePack);
+                const toggled = usePack.callback;
+                usePack.callback = (...args) => {
+                    toggled?.apply(usePack, args);
+                    status(this, usePack.value
+                        ? tr("Batch production pack ON: shots run from the package.", "批量运行制作包：开，按制作包内容批量运行。")
+                        : tr("Batch production pack OFF: Setup uses its own prompt and media; choose a video below to continue from it.",
+                            "批量运行制作包：关，Setup 使用自己的提示词和素材，只作为接续加载器；在下面选择要接续的视频。"
+                            + "没选视频时，分镜衔接为「接续」会中止任务，「自动」/「硬切」正常生成（硬切）。"));
+                };
+            }
+            const order = widget(this, "generation_order"), language = widget(this, "prompt_language");
+            if (order && language) {
+                this.widgets.splice(this.widgets.indexOf(order), 1);
+                this.widgets.splice(this.widgets.indexOf(language) + 1, 0, order);
+            }
             this.addWidget("button", "upload_zip", null, () => {
                 const picker = document.createElement("input");
                 picker.type = "file";
@@ -192,6 +306,20 @@ app.registerExtension({
             const upload = widget(this, "upload_zip");
             this.widgets.splice(this.widgets.indexOf(upload), 1);
             this.widgets.splice(this.widgets.indexOf(widget(this, "source")) + 1, 0, upload);
+            this.addWidget("combo", "continue_video_choice", AUTO, (label) => {
+                const selected = this.properties?.feihou_continue_selected;
+                set(this, "continue_video", label !== AUTO && selected && label === baseName(selected) ? selected : AUTO);
+                syncContinue(this);
+                app.graph?.change?.();
+            }, { values: [AUTO], serialize: false });
+            this.addWidget("button", "pick_continue_video", null, () => pickContinueVideo(this), { serialize: false });
+            for (const name of ["pick_continue_video", "continue_video_choice"]) {
+                const button = widget(this, name), anchor = widget(this, "continue_video");
+                if (button && anchor) {
+                    this.widgets.splice(this.widgets.indexOf(button), 1);
+                    this.widgets.splice(this.widgets.indexOf(anchor) + 1, 0, button);
+                }
+            }
             this.addWidget("button", "preview_shot", null, () => preview(this).catch((e) => status(this, e.message)), { serialize: false });
             this.addWidget("button", "load_pack", null, () => prepare(this), { serialize: false });
             const report = document.createElement("textarea");
@@ -229,12 +357,21 @@ app.registerExtension({
         nodeType.prototype.onConfigure = function (info) {
             const result = configured?.apply(this, arguments);
             // Both older workflows and new saves use the same named schema.
-            if (Array.isArray(info?.widgets_values)) {
+            const restore = () => {
+                if (!Array.isArray(info?.widgets_values)) return;
                 SAVED_WIDGETS.forEach((name, i) => {
-                    if (i < info.widgets_values.length) set(this, name, info.widgets_values[i]);
+                    let saved = info.widgets_values[i];
+                    // Older saves stored the continuation switch as true/false.
+                    if (name === "continuation" && typeof saved === "boolean") saved = saved ? "自动" : "硬切";
+                    if (i < info.widgets_values.length && saved !== null && saved !== undefined) set(this, name, saved);
                 });
-            }
-            for (const name of ["shotlist_file", "audio_file", "package_id", "control_after_generate"]) hideInternal(widget(this, name));
+            };
+            restore();
+            syncContinue(this);
+            // Some frontends re-apply widgets_values by position after onConfigure,
+            // which would put the hidden slots (e.g. the package ID) on the wrong widgets.
+            setTimeout(() => { restore(); syncContinue(this); }, 0);
+            for (const name of ["shotlist_file", "audio_file", "package_id", "control_after_generate", "continuous_runtime_config", "continue_video"]) hideInternal(widget(this, name));
             const index = widget(this, "shot_index");
             if (index && this.properties?.feihou_pack_total > 0) {
                 index.options ||= {};

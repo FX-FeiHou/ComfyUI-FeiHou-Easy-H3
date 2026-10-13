@@ -7,6 +7,9 @@ const NODE_CLASS = "FeiHouEasyH3";
 // Split edition: media gallery node + setup node (all other behaviour shared).
 const MEDIA_CLASS = "FeiHouEasyH3Media";
 const CORE_CLASS = "FeiHouEasyH3Setup";
+// Setup has no widgets beyond the main node's; continuation lives in the
+// separate FeiHou Easy H3 Continuous node.
+const CONTINUOUS_SETUP_WIDGET_NAMES = [];
 const CORE_MEDIA_INPUT = "h3_media";
 const CORE_TITLE = "FeiHou Easy H3 Setup";
 const MEDIA_TITLE = "FeiHou Easy H3 Media";
@@ -5083,15 +5086,15 @@ export function applyProductionShotPreview(node, shot) {
     setPromptFromOptimizedText(node, shot.prompt);
     syncModeWidgets(node, { adjustHeight: false });
     renderEmbeddedMediaGallery(node);
-    renderEditorFromNode(node, true);
-    refreshVueNodeWidgets(node);
-    node.setDirtyCanvas?.(true, true);
     if (mediaStore && mediaStore !== node) {
         ensureEmbeddedMedia(mediaStore);
         renderEmbeddedMediaGallery(mediaStore);
         refreshVueNodeWidgets(mediaStore);
         mediaStore.setDirtyCanvas?.(true, true);
     }
+    renderEditorFromNode(node, true);
+    refreshVueNodeWidgets(node);
+    node.setDirtyCanvas?.(true, true);
 }
 
 function installPromptEditorSoon(node) {
@@ -5390,7 +5393,24 @@ function repairConfiguredWidgetValues(node, info) {
         prompt_optimizer_scene_guide: canonicalPromptGuide(values[15] ?? defaults.prompt_optimizer_scene_guide),
     };
     for (const name of names) setConfiguredWidgetValue(node, name, normalized[name]);
-    info.widgets_values = names.map((name) => normalized[name]);
+    if (isCoreNode(node)) {
+        // The optional plan socket is not a widget. Continuous controls are
+        // appended only for Setup, preserving the main-node legacy array.
+        const named = info?.widgets_values_named && typeof info.widgets_values_named === "object"
+            ? info.widgets_values_named : {};
+        CONTINUOUS_SETUP_WIDGET_NAMES.forEach((name, index) => {
+            const rawValue = Object.prototype.hasOwnProperty.call(named, name)
+                ? named[name]
+                : values[names.length + index];
+            if (rawValue !== undefined) setConfiguredWidgetValue(node, name, rawValue);
+        });
+        info.widgets_values = [
+            ...names.map((name) => normalized[name]),
+            ...CONTINUOUS_SETUP_WIDGET_NAMES.map((name) => getWidget(node, name)?.value ?? null),
+        ];
+    } else {
+        info.widgets_values = names.map((name) => normalized[name]);
+    }
 }
 
 function embeddedMediaCell(node, mediaType, ordinal) {
@@ -6151,6 +6171,7 @@ function installNode(nodeType, nodeData) {
                 "force_offload", "low_vram_streamed_attention",
                 "reference_text_only",
             ];
+            if (isCoreNode(this)) names.push(...CONTINUOUS_SETUP_WIDGET_NAMES);
             info.widgets_values = names.map((name) => getWidget(this, name)?.value ?? null);
             info.widgets_values_named = Object.fromEntries(names.map((name, i) => [name, info.widgets_values[i]]));
         }

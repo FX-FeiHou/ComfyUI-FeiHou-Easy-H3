@@ -14,6 +14,7 @@ main-node code path.  The original main node is not modified.
 from __future__ import annotations
 
 from .nodes import FeiHouEasyH3
+from .production_continuation import apply_guide, prepare_setup
 
 MEDIA_TYPE = "FEIHOU_H3_MEDIA"
 
@@ -36,7 +37,7 @@ class FeiHouEasyH3Media:
 
 
 class FeiHouEasyH3Setup(FeiHouEasyH3):
-    DESCRIPTION = "Easy H3 生成设置：与 ComfyUI-FeiHou-Easy-H3 主节点相同的输入输出，媒体由 FeiHou Easy H3 Media 节点提供。"
+    DESCRIPTION = "Easy H3 生成设置：与主节点相同，媒体由 FeiHou Easy H3 Media 提供。"
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -48,4 +49,8 @@ class FeiHouEasyH3Setup(FeiHouEasyH3):
 
     @classmethod
     def generate(cls, h3_media=None, **kwargs):
-        return super().generate(**kwargs)
+        # A production shot coming through "Continue In" carries the previous
+        # shot's tail; it is anchored at frame 0 as a native H3 guide.
+        kwargs, continuation = prepare_setup(kwargs)
+        model, second_model, context = super().generate(**kwargs)
+        return model, second_model, apply_guide(context, continuation)

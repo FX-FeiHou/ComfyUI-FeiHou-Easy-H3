@@ -87,6 +87,18 @@ def _lock_target_audio(latent, audio_vae, audio):
             'noise_mask': NestedTensor((torch.ones_like(video), torch.zeros_like(locked)))}
 
 
+# Same steps as the Setup node's resolution menu.
+CANVAS_SIZES = ('360P', '416P', '480P', '540P', '640P', '720P', '768P', '832P', '928P', '1024P', '1080P')
+
+
+def _canvas_edge(value) -> int:
+    """'540P' -> 544: the square crop edge, aligned to H3's 32-pixel grid (legacy '512'/'768' accepted)."""
+    digits = ''.join(ch for ch in str(value) if ch.isdigit())
+    if not digits:
+        raise ValueError(f'无效的精修画布尺寸：{value!r}')
+    return max(256, int(int(digits) / 32 + 0.5) * 32)
+
+
 def _prepare_reference_face(tr, image, detector, confidence, crop_factor, size):
     """Largest detected face, square crop without changing its aspect ratio."""
     if not isinstance(image, torch.Tensor) or image.ndim != 4 or not len(image) or image.shape[-1] < 3:
@@ -136,7 +148,7 @@ class FeiHouEasyH3FaceRefine:
             'steps': ('INT', {'default': 8, 'min': 1, 'max': 100}),
             'seed': ('INT', {'default': 0, 'min': 0, 'max': 0xffffffffffffffff}),
             'advanced': ('BOOLEAN', {'default': False}),
-            'canvas_size': (['512', '768'], {'default': '768'}),
+            'canvas_size': (list(CANVAS_SIZES), {'default': '768P', 'tooltip': '精修画布边长（正方形人脸裁剪），选项与 Setup 的分辨率档位一致；实际边长按 32 对齐。'}),
             'confidence': ('FLOAT', {'default': 0.35, 'min': 0.05, 'max': 0.95, 'step': 0.05}),
             'crop_factor': ('FLOAT', {'default': 2.5, 'min': 1.2, 'max': 5.0, 'step': 0.1}),
             'chunk_frames': (['不分段', '240', '192', '120', '72'], {'default': '不分段'}),
@@ -153,7 +165,7 @@ class FeiHouEasyH3FaceRefine:
 
     def refine(self, images, model, h3_context, enabled=True, detector='face_yolov8m.pt',
                target='largest_face', denoise=0.25, steps=8, seed=0, advanced=False,
-               canvas_size='768', confidence=0.35, crop_factor=2.5, chunk_frames='不分段',
+               canvas_size='768P', confidence=0.35, crop_factor=2.5, chunk_frames='不分段',
                sampler_name='euler', scheduler='simple', prompt='', force_offload=True,
                reference_face=None, audio=None, audio_lock=False, clean_second_model=True,
                face_mode='single', max_faces=2, reference_faces=None):
@@ -272,11 +284,10 @@ class FeiHouEasyH3FaceRefine:
             _release(model, context)
         # Fail clearly rather than silently smoothing across unknown cuts.
         import scenedetect  # noqa: F401 -- optional install, required for this all-in-one node
-        size = int(canvas_size)
+        size = _canvas_edge(canvas_size)
         limit = 0 if chunk_frames == '不分段' else int(chunk_frames)
-        # Keep numeric legacy API calls working; saved UI nodes migrate to presets.
-        if size not in (512, 768) or (limit != 0 and not 39 <= limit <= 362):
-            raise ValueError('精修画布须为 512/768；请选择有效的分段帧数。')
+        if limit != 0 and not 39 <= limit <= 362:
+            raise ValueError('请选择有效的分段帧数。')
         reference_report = '未提供图片参考，使用视频分段的人脸裁剪帧作为参考。'
         if reference_face is not None:
             source = 'H3 context 第一张原图' if reference_face is getattr(context, 'reference_image_1', None) else '外接参考图片'

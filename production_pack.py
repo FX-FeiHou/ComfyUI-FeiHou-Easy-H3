@@ -21,12 +21,53 @@ import zipfile
 from urllib.parse import urlsplit
 
 SHOT_TYPE = "FEIHOU_H3_PRODUCTION_SHOT"
+PLAN_TYPE = "FEIHOU_H3_PRODUCTION_PLAN"
 IMAGE_EXT = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
 AUDIO_EXT = {".mp3", ".wav", ".flac", ".ogg", ".m4a", ".aac"}
 VIDEO_EXT = {".mp4", ".mov", ".webm", ".mkv", ".avi"}
 MAX_FILES = 5000
 MAX_BYTES = 4 * 1024**3
 MAX_HTML = 16 * 1024**2
+
+# The browser-facing Setup node deliberately does not duplicate the sampling
+# controls already present in an Easy H3 workflow. A queue/API client can
+# still pass those values as a small JSON document on the production-pack
+# loader; the prepared plan carries the validated document to Setup.
+_CONTINUOUS_RUNTIME_KEYS = {
+    "two_pass", "first_total_steps", "first_steps", "first_sampler_name", "first_scheduler",
+    "second_steps", "second_sampler_name", "latent_upscaler", "upscale_by",
+    "steps", "sampler_name", "scheduler", "denoise", "cfg", "negative_prompt",
+    "semantic_bridge_on", "semantic_bridge", "bridge_strength", "default_trigger_words",
+    "seed", "seed_mode", "generation_order", "start_shot",
+}
+_CONTINUOUS_RUNTIME_ALIASES = {
+    "total_steps": "first_total_steps",
+    "first_pass_steps": "first_steps",
+    "second_pass_steps": "second_steps",
+    "upscaler": "latent_upscaler",
+    "scale": "upscale_by",
+}
+
+
+def normalize_continuous_runtime_config(value):
+    """Parse and whitelist the optional continuation runtime JSON."""
+    if value is None or value == "":
+        return {}
+    if isinstance(value, str):
+        if len(value.encode("utf-8")) > 64 * 1024:
+            raise ValueError("continuous_runtime_config exceeds 64 KiB")
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"continuous_runtime_config 不是有效 JSON：{exc.msg}") from exc
+    if not isinstance(value, dict):
+        raise ValueError("continuous_runtime_config 必须是 JSON 对象")
+    result = {}
+    for key, item in value.items():
+        name = _CONTINUOUS_RUNTIME_ALIASES.get(str(key), str(key))
+        if name in _CONTINUOUS_RUNTIME_KEYS:
+            result[name] = item
+    return result
 
 
 def _pack_request_allowed(request, is_local):
@@ -262,6 +303,36 @@ def asset_file_map(html, html_file, files):
     return mapping
 
 
+PAGE_META = re.compile(
+    r"""<meta\b[^>]*\bname\s*=\s*["']feihou-pack-page["'][^>]*>""", re.IGNORECASE)
+PAGE_CONTENT = re.compile(r"""\bcontent\s*=\s*["']\s*([A-Za-z_-]+)\s*["']""", re.IGNORECASE)
+SHOTLIST_NAMES = ("分镜列表", "shotlist")
+
+
+def _page_role(path: Path) -> str:
+    """The page's declared role (<meta name="feihou-pack-page" content="...">), "" when absent."""
+    try:
+        with path.open("rb") as stream:
+            head = stream.read(65536).decode("utf-8", errors="ignore")
+    except OSError:
+        return ""
+    tag = PAGE_META.search(head)
+    content = PAGE_CONTENT.search(tag.group(0)) if tag else None
+    return content.group(1).strip().lower() if content else ""
+
+
+def _shotlist_candidates(root: Path, files) -> list:
+    """Shotlist page(s): the declared role first, otherwise the file name (number prefixes are ignored)."""
+    pages = [f for f in files if Path(f).suffix.lower() in {".html", ".htm"}]
+    roles = {f: _page_role(contained(root, f)) for f in pages}
+    declared = [f for f in pages if roles[f] == "shotlist"]
+    if declared:
+        return declared
+    # Pages that declare another role (assets / prompts) are never the shotlist.
+    return [f for f in pages if not roles[f]
+            and any(name in Path(f).stem.lower() for name in SHOTLIST_NAMES)]
+
+
 def inspect_pack(source, shotlist_file=""):
     root = _resolve_pack_source(source)
     source = str(root)
@@ -277,7 +348,7 @@ def inspect_pack(source, shotlist_file=""):
     if not root.is_dir():
         raise ValueError("Package folder / ZIP does not exist on the ComfyUI machine")
     files = inventory(root)
-    candidates = [f for f in files if Path(f).suffix.lower() in {".html", ".htm"} and "shotlist" in Path(f).stem.lower()]
+    candidates = _shotlist_candidates(root, files)
     if shotlist_file:
         selected = contained(root, shotlist_file).relative_to(root).as_posix()
         if selected not in files or Path(selected).suffix.lower() not in {".html", ".htm"}:
@@ -285,7 +356,10 @@ def inspect_pack(source, shotlist_file=""):
     elif len(candidates) == 1:
         selected = candidates[0]
     else:
-        raise ValueError(f"Expected one Shotlist HTML; found {len(candidates)}. Keep one Shotlist in the selected package folder: {candidates}")
+        raise ValueError(
+            f"Expected one Shotlist HTML; found {len(candidates)}: {candidates}. "
+            f"制作包里需要且只能有一个分镜列表页面（页面开头 <meta name=\"feihou-pack-page\" content=\"shotlist\">，"
+            f"或文件名含「分镜列表」/ shotlist）。")
     page = contained(root, selected)
     if page.stat().st_size > MAX_HTML:
         raise ValueError("Shotlist HTML exceeds 16 MiB")
@@ -356,6 +430,36 @@ def _resolve_audio_references(data, raw, fallback, default_range):
             raise ValueError(f"{raw['id']}: Audio {ordinal} range must increase (end=0 means to end)")
         result.append({"file": matches[0], "range": f"{time_text(start)}–{time_text(end)}"})
     return result
+
+
+_CONTINUE_WORDS = {"continue", "continuation", "continuous", "seamless", "接续", "续接", "连续", "无缝"}
+_CUT_WORDS = {"cut", "hard_cut", "hardcut", "hard cut", "硬切", "切", "切镜", "剪切"}
+_FRAME_CHOICES = {"0+0", "0+5", "5+0", "5+5", "22+0", "22+5", "22+22", "39+0", "39+5", "39+22", "39+39"}
+
+
+def _shot_transition(value):
+    text = str(value or "").strip().casefold()
+    if not text:
+        return None
+    if text in _CONTINUE_WORDS:
+        return "continue"
+    if text in _CUT_WORDS:
+        return "cut"
+    return None
+
+
+def _shot_frames(value):
+    """'22+5', [22, 5], {'first': 22, 'second': 5} or a bare 0/5/22/39 (= 0+0 / 5+5 / 22+22 / 39+39)."""
+    if value in (None, ""):
+        return None
+    if isinstance(value, dict):
+        value = f"{value.get('first', value.get('1st', ''))}+{value.get('second', value.get('2nd', ''))}"
+    elif isinstance(value, (list, tuple)) and len(value) == 2:
+        value = f"{value[0]}+{value[1]}"
+    text = str(value).replace(" ", "").replace("＋", "+")
+    if text in ("0", "5", "22", "39"):  # 0 = no continuation frames (works like a hard cut)
+        text = f"{text}+{text}"
+    return text if text in _FRAME_CHOICES else None
 
 
 def validate_shots(data, shots, audio_file=""):
@@ -472,8 +576,16 @@ def validate_shots(data, shots, audio_file=""):
             if not math.isfinite(fps) or not 1 <= fps <= 120:
                 raise ValueError(f"{shot_id}: invalid FPS")
             params["fps"] = fps
+        transition = _shot_transition(raw.get("transition"))
+        continuation_frames = _shot_frames(raw.get("continuation_frames"))
+        if raw.get("transition") not in (None, "") and transition is None:
+            raise ValueError(f"{shot_id}: transition must be 接续/continue or 硬切/cut, got {raw.get('transition')!r}")
+        if raw.get("continuation_frames") not in (None, "") and continuation_frames is None:
+            raise ValueError(f"{shot_id}: continuation_frames must be 0 or one of 0+5/5+0/5+5/22+0/22+5/22+22/39+0/39+5/39+22/39+39, "
+                             f"got {raw.get('continuation_frames')!r}")
         # Ignore all package resolution declarations; generation uses manual settings.
-        result.append({"id": shot_id, "title": str(raw.get("title", shot_id)), "params": params,
+        result.append({"transition": transition, "continuation_frames": continuation_frames,
+                       "id": shot_id, "title": str(raw.get("title", shot_id)), "params": params,
                        "prompts": prompts, "refs": list(refs), "images": images, "videos": videos, "audio": selected_audio, "audios": audios,
                        "range": "00:00:000–00:00:000" if digital_human else f"{time_text(start)}–{time_text(end)}"})
     return result
@@ -495,7 +607,9 @@ def commit_shots(package_id, shots, audio_file="", diagnose=False, prompt_langua
                 if validated["id"] in ids:
                     raise ValueError(f"Duplicate shot ID: {validated['id']}")
                 ids.add(validated["id"])
-                report.append(f"OK {index}: {validated['id']} | {validated['params']['seconds']}s | images={len(validated['images'])}, videos={len(validated['videos'])}, audio={len(validated['audios'])}")
+                report.append(f"OK {index}: {validated['id']} | {validated['params']['seconds']}s | images={len(validated['images'])}, videos={len(validated['videos'])}, audio={len(validated['audios'])}"
+                              f" | 衔接={ {'continue': '接续', 'cut': '硬切'}.get(validated.get('transition'), '未指定')}"
+                              f"{' ' + validated['continuation_frames'] if validated.get('continuation_frames') else ''}")
                 report.extend(f"  Audio {n}: {a['file']} | {a['range']}" for n, a in enumerate(validated['audios'], 1))
                 report.extend(str(w) for w in shot.get("import_warnings", []))
             except (ValueError, TypeError, OSError) as exc:
@@ -563,7 +677,38 @@ def load_shot(source, package_id, shot_index, prompt_language, shotlist_file="",
                       "media_type": "audio", "ordinal": ordinal, "audio_trim": audio["range"]})
     return {"schema": 1, "id": shot["id"], "title": shot["title"], "index": index,
             "total": len(shots), "prompt": prompt, "params": shot["params"], "media": media,
-            "refs": shot["refs"], "range": shot["range"]}
+            "refs": shot["refs"], "range": shot["range"],
+            "transition": shot.get("transition"), "continuation_frames": shot.get("continuation_frames"),
+            # Stable across refreshes: identifies the pack for the saved continuation (.latent) files.
+            "pack_key": hashlib.sha256(f"{_resolve_pack_source(data['source'])}|{data['html_file']}".encode()).hexdigest()[:16]}
+
+
+def load_plan(source, package_id, prompt_language, shotlist_file="", audio_file="", runtime_config=None):
+    """Materialize every prepared shot for the in-node continuation runner.
+
+    The ordinary ``load_shot`` contract remains unchanged.  A plan is an
+    immutable snapshot of those same shot dictionaries, so the continuation
+    node can rebuild each H3 conditioning block without asking the browser to
+    queue a separate graph execution for every shot.
+    """
+    data = read_pack(package_id)
+    if _resolve_pack_source(source) != _resolve_pack_source(data["source"]):
+        raise ValueError("Source changed: load / refresh the production pack before queuing")
+    if shotlist_file and contained(data["root"], shotlist_file) != contained(data["root"], data["html_file"]):
+        raise ValueError("Shotlist selection changed: load / refresh the production pack")
+    page = contained(data["root"], data["html_file"])
+    if hashlib.sha256(page.read_text(encoding="utf-8-sig").encode()).hexdigest() != data["html_sha256"]:
+        raise ValueError("Shotlist HTML changed: load / refresh the production pack before queuing")
+    shots = [load_shot(source, package_id, index, prompt_language, shotlist_file, audio_file)
+             for index in range(1, len(data.get("shots", [])) + 1)]
+    return {"schema": 1, "source": str(source or ""), "package_id": str(package_id or ""),
+            "prompt_language": str(prompt_language or "zh"), "shots": shots,
+            "context_frames": 22, "runtime_config": normalize_continuous_runtime_config(runtime_config)}
+
+
+CONTEXT_CHOICES = ["自动", "0+5", "5+0", "5+5", "22+0", "22+5", "22+22", "39+0", "39+5", "39+22", "39+39"]
+CONTEXT_DEFAULT = "自动"
+TRANSITION_CHOICES = ["自动", "接续", "硬切"]
 
 
 class FeiHouEasyH3ProductionPackLoader:
@@ -571,7 +716,10 @@ class FeiHouEasyH3ProductionPackLoader:
     FUNCTION = "load"
     RETURN_TYPES = (SHOT_TYPE,)
     RETURN_NAMES = ("production_shot",)
-    DESCRIPTION = "Read one prepared Shotlist shot. Set shot_index to increment after generation, then queue the remaining shot count."
+    DESCRIPTION = (
+        "Read one prepared Shotlist shot. Set shot_index to increment after generation, then queue the remaining shot count. "
+        "视频接续开启时，分镜 2 起自动接上一个分镜的结尾（配合「FeiHou Easy H3 接续合并」输出完整视频）。"
+    )
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -582,16 +730,88 @@ class FeiHouEasyH3ProductionPackLoader:
             "shot_index": ("INT", {"default": 1, "min": 1, "max": 1000000, "control_after_generate": True}),
             "prompt_language": (["zh", "en"], {"default": "zh"}),
             "package_id": ("STRING", {"default": ""}),
+            # Legacy hidden slot, kept so saved widget positions do not shift.
+            "continuous_runtime_config": ("STRING", {"default": "", "multiline": True, "hidden": True}),
+            "continuation": (TRANSITION_CHOICES, {"default": "自动", "tooltip":
+                "分镜衔接方式。接续：每个分镜都接上一个分镜结尾；硬切：每个分镜独立生成、直接切换；"
+                "自动：按制作包分镜里的 transition（接续 / 硬切）决定，没写的按接续。"}),
+            "context_frames": (CONTEXT_CHOICES, {"default": CONTEXT_DEFAULT, "tooltip":
+                "接续帧数（一采+二采）：上一个分镜结尾多少帧引导本分镜。前一个数给一采（构图、动作），"
+                "后一个数给二采（细节），0 表示该阶段不用画面引导。自动：按制作包分镜里的 continuation_frames，没写的按 22+22。"}),
+            "use_pack": ("BOOLEAN", {"default": True, "label_on": "开", "label_off": "关", "tooltip":
+                "批量运行制作包。开：按制作包内容批量运行；关：不读制作包，只作为接续加载器——Setup 用自己的提示词和素材，"
+                "接着下面「接续视频」选的视频生成，复用接续帧数。没选视频时：分镜衔接为「接续」则中止，「自动」/「硬切」则正常生成（硬切）。"}),
+            "continue_video": ("STRING", {"default": "自动", "tooltip":
+                "接续视频：点下方「选择接续视频」按钮弹出窗口选上一段的视频（也可直接填视频完整路径），当前分镜就接着它往后生成；"
+                "视频旁边有同名 .latent 时用 .latent，没有就直接读视频结尾。只对本次排队的第一个分镜生效，之后自动回到「自动」。"
+                "自动：接内存里或已保存的上一分镜。分镜衔接选「硬切」时不接续。"}),
         }}
 
     @classmethod
     def IS_CHANGED(cls, **kwargs):
         return float("nan")
 
-    def load(self, source, shot_index, prompt_language, package_id, **kwargs):
+    def load(self, source, shot_index, prompt_language, package_id, continuation="自动", context_frames=CONTEXT_DEFAULT,
+             continue_video="自动", use_pack=True, **kwargs):
+        if use_pack is False or str(use_pack).strip().lower() in ("false", "0", "off"):
+            from .production_continuation import manual_continuation
+            return {"result": (manual_continuation(continuation, context_frames, continue_video),)}
         # Legacy path slots remain serializable but no longer override detection.
         shot = load_shot(source, package_id, shot_index, prompt_language)
-        return {"ui": {"production_shot": [shot]}, "result": (shot,)}
+        from .production_continuation import continue_shot
+        continued = continue_shot(shot, continuation, context_frames, continue_video)
+        return {"ui": {"production_shot": [shot]}, "result": (continued,)}
+
+
+CONTINUE_VIDEO_EXTENSIONS = (".mp4", ".webm", ".mov", ".mkv", ".m4v", ".latent")
+CONTINUE_UPLOAD_FOLDER = "feihou_h3_continue"
+
+
+def _continue_find(name: str, size: int) -> dict:
+    """A picked video that already lives in ComfyUI's output/input (same name and size): use it in place."""
+    import folder_paths
+    name = os.path.basename(name)
+    if not name.lower().endswith(CONTINUE_VIDEO_EXTENSIONS) or size < 0:
+        return {}
+    for label, root in (("output", folder_paths.get_output_directory()), ("input", folder_paths.get_input_directory())):
+        for folder, dirs, files in os.walk(root):
+            dirs[:] = [d for d in dirs if not d.startswith(".")]
+            if name in files:
+                path = os.path.join(folder, name)
+                try:
+                    if os.path.getsize(path) == size:
+                        return {"value": label + "/" + os.path.relpath(path, root).replace(os.sep, "/")}
+                except OSError:
+                    pass
+    return {}
+
+
+async def _continue_upload(request) -> dict:
+    """Store a picked video (or its .latent) under input/feihou_h3_continue/<batch>/."""
+    import folder_paths
+    from urllib.parse import unquote
+    name = os.path.basename(unquote(request.headers.get("X-FeiHou-Name", "")).replace("\\", "/"))
+    batch = request.headers.get("X-FeiHou-Batch", "")
+    if not name or not name.lower().endswith(CONTINUE_VIDEO_EXTENSIONS) or name.startswith("."):
+        raise ValueError("只能上传视频（mp4 / webm / mov / mkv）或 .latent 文件")
+    if not re.fullmatch(r"[a-f0-9]{12}", batch):
+        raise ValueError("Invalid upload batch")
+    folder = Path(folder_paths.get_input_directory()) / CONTINUE_UPLOAD_FOLDER / batch
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / name
+    temp = folder / f".{uuid.uuid4().hex}.part"
+    try:
+        size = 0
+        with temp.open("xb") as output:
+            async for chunk in request.content.iter_chunked(1024 * 1024):
+                size += len(chunk)
+                if size > MAX_BYTES:
+                    raise ValueError("文件超过 4 GiB")
+                output.write(chunk)
+        os.replace(temp, path)
+    finally:
+        temp.unlink(missing_ok=True)
+    return {"value": f"input/{CONTINUE_UPLOAD_FOLDER}/{batch}/{name}"}
 
 
 def register_routes(routes, is_local):
@@ -610,7 +830,9 @@ def register_routes(routes, is_local):
         try:
             local = _pack_request_is_local(request, is_local)
             action = request.match_info["action"]
-            if action == "upload":
+            if action == "continue_upload":
+                result = await _continue_upload(request)
+            elif action == "upload":
                 path = cache_root() / f"upload_{uuid.uuid4().hex}.zip"
                 try:
                     size = 0
@@ -637,6 +859,8 @@ def register_routes(routes, is_local):
                 elif action == "prepare":
                     _authorize_pack_source(read_pack(payload["package_id"])["source"], local)
                     result = await asyncio.to_thread(commit_shots, payload["package_id"], payload["shots"], payload.get("audio_file", ""), bool(payload.get("diagnose")), payload.get("prompt_language", ""))
+                elif action == "continue_find":
+                    result = await asyncio.to_thread(_continue_find, str(payload.get("name") or ""), int(payload.get("size") or -1))
                 elif action == "preview":
                     _authorize_pack_source(read_pack(payload["package_id"])["source"], local)
                     result = await asyncio.to_thread(load_shot, payload["source"], payload["package_id"], payload["shot_index"], payload["prompt_language"], payload.get("shotlist_file", ""), payload.get("audio_file", ""))

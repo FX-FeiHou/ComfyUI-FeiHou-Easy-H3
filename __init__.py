@@ -11,6 +11,7 @@ from .nodes import (
 )
 
 from .production_pack import FeiHouEasyH3ProductionPackLoader
+from .production_continuation import FeiHouEasyH3ContinueOut
 from .face_refine import FeiHouEasyH3FaceRefine
 from .split_nodes import FeiHouEasyH3Media, FeiHouEasyH3Setup
 from .dual_sample import FeiHouEasyH3SampleEnhancer1st, FeiHouEasyH3SampleEnhancer2nd
@@ -26,6 +27,7 @@ NODE_CLASS_MAPPINGS = {
     "FeiHouEasyH3": FeiHouEasyH3,
     "FeiHouEasyH3Media": FeiHouEasyH3Media,
     "FeiHouEasyH3Setup": FeiHouEasyH3Setup,
+    "FeiHouEasyH3ContinueOut": FeiHouEasyH3ContinueOut,
     "FeiHouEasyH3Output": FeiHouEasyH3Output,
     "FeiHouEasyH3DurationCrop": FeiHouEasyH3DurationCrop,
     "FeiHouEasyH3PromptPreview": FeiHouEasyH3PromptPreview,
@@ -44,6 +46,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "FeiHouEasyH3": "ComfyUI-FeiHou-Easy-H3",
     "FeiHouEasyH3Media": "FeiHou Easy H3 Media",
     "FeiHouEasyH3Setup": "FeiHou Easy H3 Setup",
+    "FeiHouEasyH3ContinueOut": "FeiHou Easy H3 接续合并",
     "FeiHouEasyH3Output": "FeiHou Easy H3 Output",
     "FeiHouEasyH3DurationCrop": "FeiHou Easy H3 Digital Human/MV Duration Crop",
     "FeiHouEasyH3PromptPreview": "FeiHou Easy H3 Prompt Preview",

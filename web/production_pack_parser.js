@@ -23,6 +23,9 @@ export function extractShotlist(doc) {
                 audio_file: shot.audio_file || project.master_audio || "",
                 aspect_ratio: shot.aspect_ratio || project.aspect_ratio || "",
                 fps: shot.fps ?? project.fps,
+                // How this shot joins the previous one (接续 / 硬切) and its 1st+2nd pass frames.
+                transition: shot.transition ?? project.transition,
+                continuation_frames: shot.continuation_frames ?? project.continuation_frames,
                 // Resolution belongs to the user's main node, not the package.
             };
         });
@@ -41,6 +44,8 @@ export function extractShotlist(doc) {
             video_refs: [...unit.querySelectorAll('[data-media-type="video"]')].map((el) => el.dataset.file || el.textContent.trim()),
             audio_file: unit.dataset.audioFile || "",
             aspect_ratio: meta.match(/\b(?:16:9|9:16|1:1|2:3|3:2|4:3|3:4|21:9)\b/)?.[0] || "",
+            transition: unit.dataset.transition || text(".transition-pill") || undefined,
+            continuation_frames: unit.dataset.continuationFrames || undefined,
         };
         const audioRefs = [...unit.querySelectorAll('[data-media-type="audio"]')];
         if (audioRefs.length) shots.audio_references = audioRefs.map((el) => ({
