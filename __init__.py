@@ -57,3 +57,13 @@ NODE_DISPLAY_NAME_MAPPINGS = {
 WEB_DIRECTORY = "./web"
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]
+
+# Manual ZIP installs do not execute install.py. Surface optional dependency
+# gaps without downloading packages or slowing ComfyUI startup with DLL probes.
+from . import local_dependencies
+import logging
+
+_dependency_summary = local_dependencies.light_status()
+if not _dependency_summary["gguf_installed"] or _dependency_summary["missing_transformers"]:
+    logging.info("[Easy H3] 本地模型依赖未完全安装。请到设置→Easy H3→本地模型→安装/修复依赖，"
+                 "或运行节点目录内 install-local-llm.bat。API 提示词模式不受影响。")

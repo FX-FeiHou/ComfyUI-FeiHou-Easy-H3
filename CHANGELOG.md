@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.4.21
+
+- Adds optional upstream `H3_REF_MODS` inputs to the main node and Setup, with joint text/vision presentation, direct reference latents, strengths/copies, independent gallery slots and an appended `Output.reference_map` output. RefMods survive high-resolution/trigger-word condition rebuilds in both sampling passes; image mode asks users to switch to reference mode.
+- Adds original RefMod Loader/Axis references to the main node and Setup's `@` menu, with metadata-only discovery, saved source binding, and strengths/copies/component filtering. RefMods lead each modality's numbering; ordinary uploads follow them. Removing ordinary media no longer invalidates RefMod mentions. Replace old placeholder-video mentions via the new menu; genuinely removed references still fail clearly. Both sampling passes and prompt optimization use the same ordering.
+- Saves continuation tails for independent manual segments when production-pack batching is off, including the first segment in Auto mode and hard cuts. Tail saving is independent of applying a previous-segment guide, in both manual and package runs.
+- Preserves zero overlap for independent segments and prefers the saved native tail when a later segment selects the previous video. Existing V7 wiring remains valid.
+- Adds local-model dependency checks and an install/repair button to Standard settings, including native GGUF import, GPU offload and Qwen/MTMD interface checks.
+- Adds a Manager install.py hook and Windows manual-ZIP install scripts that use ComfyUI's Python, choose matching GGUF binary wheels and retain existing Torch/NumPy versions.
+- Checks dependencies before unloading H3 models for local prompt optimization, and reports missing dependencies at startup without automatically installing during node import.
+- Supports the generic MTMD interface used by current official CPU wheels, and respects CPU mode for the vision projector. RH is unchanged.
+
 ## v1.4.20
 
 - Brings the Standard GitHub package into parity with the local installation, including the previously local-only `FeiHouEasyH3ContinueOut` continuation/merge node and its registration.

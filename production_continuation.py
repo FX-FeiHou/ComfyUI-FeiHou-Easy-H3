@@ -333,19 +333,23 @@ def manual_continuation(continuation=TRANSITION_DEFAULT, context_frames=CONTEXT_
     """The pack loader with batch runs switched off: a continuation-only "shot".
 
     Setup keeps its own prompt, media and settings and only receives the chosen
-    video's tail.  Without a chosen video (or with 硬切) the run is a plain hard
-    cut: None, so nothing is lengthened, trimmed or saved as .latent.
+    video's tail.  An independent first segment has zero overlap but still
+    carries save metadata, so its own tail is available to a later segment.
     """
     hard_cut = continuation is False or continuation == "硬切"
+    info = {"series": time.strftime("%Y%m%d_%H%M%S"), "index": 1, "total": 1,
+            "overlap": 0, "first": 0, "second": 0,
+            "pack_key": None, "context_frames": MAX_TAIL_FRAMES, "manual": True,
+            "transition": "cut", "save": True, "previous": None, "title": ""}
     chosen = resolve_continue_video(continue_video)
     if hard_cut:
         LOGGER.info("Easy H3 接续：%s", "前序视频接续不生效，执行硬切" if chosen else "执行硬切")
-        return None
+        return {"schema": MANUAL_SCHEMA, CONTINUATION_KEY: info}
     if not chosen:
         if continuation is True or continuation == "接续":
             raise ValueError("未选择前序视频，接续任务中止。请在「接续视频」选择要接续的视频，或把分镜衔接改为「自动」/「硬切」。")
         LOGGER.info("Easy H3 接续：未选择前序视频，执行硬切")
-        return None
+        return {"schema": MANUAL_SCHEMA, CONTINUATION_KEY: info}
     last = _explicit_tail(chosen)
     frames = context_frames
     if str(frames).strip() in ("自动", "auto"):
@@ -353,10 +357,8 @@ def manual_continuation(continuation=TRANSITION_DEFAULT, context_frames=CONTEXT_
     first, second = parse_context(frames)
     longest = max(first, second)
     overlap = min(max(longest, MIN_OVERLAP_FRAMES) if longest else 0, int(last["frames"]))
-    info = {"series": last.get("series") or time.strftime("%Y%m%d_%H%M%S"), "index": 1, "total": 1,
-            "overlap": overlap, "first": min(first, overlap), "second": min(second, overlap), "tail": last,
-            "pack_key": None, "context_frames": MAX_TAIL_FRAMES, "manual": True,
-            "transition": "continue", "save": True, "previous": None, "title": ""}
+    info.update(series=last.get("series") or info["series"], overlap=overlap,
+                first=min(first, overlap), second=min(second, overlap), tail=last, transition="continue")
     LOGGER.info("Easy H3 接续：接续前序视频 %s（%d+%d）", chosen, info["first"], info["second"])
     return {"schema": MANUAL_SCHEMA, CONTINUATION_KEY: info}
 
@@ -422,8 +424,8 @@ def continue_shot(production_shot, continuation=TRANSITION_DEFAULT, context_fram
 
     The previous tail comes from memory (the last queue run) or, failing that,
     from the .latent file Video Combine V2 saved for the previous shot.  A hard
-    cut ("硬切") gets no overlap and no guide; with the loader set to 硬切 no
-    .latent files are saved either.  A video chosen in the loader ("接续视频")
+    cut ("硬切") gets no overlap and no guide, but its own tail is still saved
+    for future continuation.  A video chosen in the loader ("接续视频")
     overrides all of that for this shot: the shot continues from that video.
     """
     if not isinstance(production_shot, dict) or production_shot.get("schema") != 1:
@@ -455,7 +457,7 @@ def continue_shot(production_shot, continuation=TRANSITION_DEFAULT, context_fram
     first, second = parse_context(frames)
     info = {"series": series, "index": index, "total": total, "overlap": 0, "pack_key": pack_key,
             "context_frames": MAX_TAIL_FRAMES, "transition": transition,
-            "save": not hard_cut,
+            "save": True,
             "previous": {"index": index - 1, "video": _sibling_video(chosen) if chosen.lower().endswith(".latent") else chosen}
             if chosen and index > 1 else None,
             "title": production_shot.get("title") or production_shot.get("id") or ""}
@@ -511,7 +513,8 @@ class FeiHouEasyH3ContinueOut:
         "视频接续（合并）：接在最终画面/音频之后，latent 接二采采样器输出。images/audio 每段都输出（已去掉开头重叠帧）；"
         "tail_latent 接 Video Combine V2 的 latent：保存与视频同名的 .latent（本段结尾，视频与音频在同一个文件），"
         "最后一段跑完后由 V2 把各段视频拼成完整视频。重跑或重启后，下一段从上一段的 .latent 接续。"
-        "加载器选「硬切」时不保存 .latent。不是制作包分镜时 images/audio 原样输出，tail_latent 为空（不保存 .latent）。"
+        "连接制作包读取节点时，每段都保存尾部，第一段或硬切也会保存；硬切只是不使用前序引导。"
+        "未连接制作包读取节点时 images/audio 原样输出，tail_latent 为空（不保存 .latent）。"
     )
 
     @classmethod

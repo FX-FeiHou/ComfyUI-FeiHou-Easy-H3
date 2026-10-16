@@ -158,6 +158,7 @@
     "inputs": {
       "h3_bundle": { "name": "H3 模型组合" },
       "production_shot": { "name": "制作包分镜" },
+      "refmods": { "name": "RefMod", "tooltip": "接 Load H3 RefMods 的 mods 输出，使用参考生视频模式；@ 菜单可直接选择参考包。RefMod 优先编号，普通素材顺延，不占内嵌素材槽位。编号见 Output.reference_map。" },
       "mode": {
         "name": "模式",
         "options": {
@@ -217,7 +218,8 @@
       "5": { "name": "提示词反推输出" },
       "6": { "name": "CLIP" },
       "7": { "name": "音频 1" },
-      "8": { "name": "时长控制" }
+      "8": { "name": "时长控制" },
+      "9": { "name": "RefMod 编号对应表" }
     }
   },
   "FeiHouEasyH3DurationCrop": {

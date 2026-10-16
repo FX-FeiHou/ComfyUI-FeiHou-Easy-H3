@@ -604,11 +604,12 @@ def scan_models():
 
 def catalog():
     models, projectors = scan_models()
-    required = ("torch", "transformers", "accelerate", "PIL", "safetensors")
+    from . import local_dependencies
+    dependencies = local_dependencies.light_status()
     return {"models": [{k: v for k, v in m.items() if k != "path"} for m in models],
             "projectors": [{k: v for k, v in m.items() if k != "path"} for m in projectors],
-            "missing_transformers": [n for n in required if importlib.util.find_spec(n) is None],
-            "gguf_available": importlib.util.find_spec("llama_cpp") is not None}
+            "missing_transformers": dependencies["missing_transformers"],
+            "gguf_available": dependencies["gguf_installed"]}
 
 
 def provider(config):
@@ -770,27 +771,31 @@ def _gguf_generate(record, config, projector, system, prompt, media_parts):
     try:
         from llama_cpp import Llama
     except ImportError as exc:
-        raise RuntimeError("GGUF 需要与当前 Python/CUDA 匹配的 llama-cpp-python；未安装不会影响 API 模式") from exc
+        raise RuntimeError("GGUF 依赖未安装或无法加载。请到 Easy H3 设置→本地模型→安装/修复依赖，或用 ComfyUI 的 Python 运行 install.py --profile gguf。安装后重启 ComfyUI；API 模式不受影响。") from exc
     handler = model = None
     try:
-        if record["vision"]:
-            import llama_cpp.llama_chat_format as formats
-            handler_name = _handler(record.get("architecture", "") or Path(record["path"]).name)
-            handler_class = getattr(formats, handler_name, None)
-            if handler_class is None:
-                raise RuntimeError("当前 llama-cpp-python 不支持此 Qwen 视觉模型，请安装带对应 Qwen handler 的版本")
-            if projector is None:
-                raise ValueError("GGUF 视觉模型需要匹配的 mmproj，请在本地模型设置中选择")
-            kwargs = {"clip_model_path": projector["path"], "verbose": False}
-            if handler_name == "Qwen35ChatHandler":
-                kwargs["enable_thinking"] = False
-            else:
-                kwargs["force_reasoning"] = False
-            handler = handler_class(**kwargs)
         use_gpu = config["device"] != "cpu"
         if config["device"] == "auto":
             import torch
             use_gpu = torch.cuda.is_available()
+        if record["vision"]:
+            import llama_cpp.llama_chat_format as formats
+            handler_name = _handler(record.get("architecture", "") or Path(record["path"]).name)
+            handler_class = getattr(formats, handler_name, None)
+            if handler_class is None and handler_name:
+                # Current official CPU wheels use one MTMD handler for Qwen vision models.
+                handler_class = getattr(formats, "MTMDChatHandler", None) or getattr(formats, "GenericMTMDChatHandler", None)
+                handler_name = "MTMDChatHandler"
+            if handler_class is None:
+                raise RuntimeError("当前 llama-cpp-python 不支持此 Qwen 视觉模型，请安装带对应 Qwen handler 的版本")
+            if projector is None:
+                raise ValueError("GGUF 视觉模型需要匹配的 mmproj，请在本地模型设置中选择")
+            kwargs = {"clip_model_path": projector["path"], "verbose": False, "use_gpu": use_gpu}
+            if handler_name == "Qwen35ChatHandler":
+                kwargs["enable_thinking"] = False
+            elif handler_name != "MTMDChatHandler":
+                kwargs["force_reasoning"] = False
+            handler = handler_class(**kwargs)
         model = Llama(model_path=record["path"], chat_handler=handler,
                       n_gpu_layers=-1 if use_gpu else 0, n_ctx=config["context_length"], verbose=False)
         content = [{"type": "text", "text": prompt}]
@@ -826,6 +831,10 @@ def generate(config, selected, system, prompt, media_parts, *, manual=False):
     try:
         if manual and workflow_running():
             raise RuntimeError("工作流正在执行，请完成后再使用本地提示词优化")
+        from . import local_dependencies
+        dependency_status = local_dependencies.check("gguf" if record["format"] == "gguf" else "transformers", config["device"])
+        if not dependency_status["ready"]:
+            raise RuntimeError("; ".join(dependency_status["errors"]) + "。请到 Easy H3 设置→本地模型→安装/修复依赖，安装后重启 ComfyUI。")
         from comfy import model_management
         model_management.unload_all_models()
         gc.collect()

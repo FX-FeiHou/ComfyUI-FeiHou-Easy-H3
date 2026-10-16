@@ -2,11 +2,12 @@
 # API-based prompt optimization does not require these packages.
 # Built-in Qwen3/Mistral and DeepSeek-V4 safetensors profiles use these native model classes.
 # DeepSeek-V4 is provided by the native Transformers 5.x model registry.
-transformers>=5.0.0
+transformers>=4.51.0
 accelerate
 safetensors
 sentencepiece
 Pillow
 imageio-ffmpeg>=0.6.0
-# Optional GGUF backend (install a build matching the active Python/CUDA stack):
-# llama-cpp-python
+# DeepSeek-V4 additionally needs Transformers 5.x containing models/deepseek_v4.
+# GGUF is installed by install.py, which selects a binary for the current Python/CUDA.
+# Run with ComfyUI's Python: install.py --profile gguf

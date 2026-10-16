@@ -158,6 +158,7 @@
     "inputs": {
       "h3_bundle": { "name": "H3 model bundle" },
       "production_shot": { "name": "Production shot" },
+      "refmods": { "name": "RefMod", "tooltip": "Connect Load H3 RefMods.mods in Reference Video mode. Select RefMods directly in @. RefMods lead each type; ordinary media follow. Independent of gallery slots; see Output.reference_map." },
       "mode": {
         "name": "Mode",
         "options": {
@@ -217,7 +218,8 @@
       "5": { "name": "Prompt inference output" },
       "6": { "name": "CLIP" },
       "7": { "name": "Audio 1" },
-      "8": { "name": "Duration control" }
+      "8": { "name": "Duration control" },
+      "9": { "name": "RefMod reference map" }
     }
   },
   "FeiHouEasyH3DurationCrop": {

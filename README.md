@@ -44,6 +44,10 @@
 
 提示词配置位于 ComfyUI“设置”左侧的 `🐵Easy H3` 独立插件分组。API 设置和“提示词优化规则”直接显示在右侧设置页，不再打开二级窗口；Base URL 可修改，API Key 粘贴后自动保存，预置服务不附带 Key 或模型。主节点关闭“高级选项”时不显示、也不执行 API 和提示词方案；打开后先选择已配置的 API 接口，再选择方案。API 未启用时方案不生效。API 密钥保存在 ComfyUI 用户目录下的本插件配置文件中，不随工作流导出。
 
+### 本地模型依赖
+
+Manager 安装时会执行依赖安装入口；手动解压后可在 Easy H3 设置→本地模型使用“检查依赖”和“安装/修复依赖”，或双击节点目录中的 `install-local-llm.bat`。安装器使用 ComfyUI 的 Python，按环境选择 GGUF 包；安装完成后按提示重启。详细步骤和支持范围见[本地模型依赖安装说明](docs/local-model-dependencies.md)。
+
 ### 自定义 API
 
 自定义 API 可直接填写完整的 HTTPS 地址，例如 https://api.example.com/v1，不需要维护域名白名单文件。API Key 和模型仍在 Easy H3 设置页中配置，并保存在本机 ComfyUI 用户目录中，不随工作流导出。
@@ -53,6 +57,18 @@
 开发时可自行维护本机的同步配置；本仓库不会提交本机路径、API Key、上传媒体或输出元数据。
 
 在“图生或首尾帧”模式下，只使用九宫格前两个图片槽：一张图按高级选项作为首帧或尾帧，两张图作为首尾帧。切换模式不会删除已选的其他参考素材，返回参考模式后可继续使用。
+
+### RefMod 参考包接入
+
+主节点 `ComfyUI-FeiHou-Easy-H3` 和拆分的 `FeiHou Easy H3 Setup` 均提供可选的 `refmods` 输入。安装 [ComfyUI-MiniMaxH3Mod](https://github.com/Luisacaotica/ComfyUI-MiniMaxH3Mod)，将其 `Load H3 RefMods` 的 `mods` 输出直接接入，选择 Easy H3 的“参考生成视频”模式；一采、二采仍按原来的方式连接。也可直接连接其 Create / Master 的 `mods` 输出。无需再对同一份参考执行 Apply 或 Text Encode，否则会重复注入。
+
+RefMod 不占媒体面板的 9 图 / 3 视频 / 3 音频槽位，但会增加总参考 token 和显存开销。加载器的强度、copies、模态选择由上游处理；Easy H3 保留其处理后的 latent，并解码视觉参考供 H3 文本视觉编码器识别，不对参考 latent 再编码。保存的 Apply / Step Curve 配置不会自动应用。高级“仅文本参考”开启时，同普通素材一样，只保留文本视觉呈现，不注入 RefMod latent。
+
+编号规则为 RefMod 在前、普通素材在后，图片 / 视频 / 音频各自连续编号。连接原版 Load H3 RefMods / Axis 后，主节点和 Setup 的 `@` 菜单会直接显示已启用参考包的类型、编号和名称，无需上传占位素材。例如 Kirara 为 video 类型时，直接选“视频1 · Kirara”；再上传普通视频则顺延为“视频2”。8 份 image 类型 RefMod 对应 `<Picture 1>`～`<Picture 8>`，随后 9 张普通图片对应 `<Picture 9>`～`<Picture 17>`；8 份 video 类型 RefMod 则对应 `<Video 1>`～`<Video 8>`，普通图片仍从 `<Picture 1>` 开始。copies 和包内模态成员分别占编号，强度为 0 或被过滤的参考不占编号。
+
+RefMod 引用随工作流保存并绑定参考包来源，删除普通上传素材不会破坏它；关闭或移除所引用的包会提示引用失效，避免错误绑定到普通视频。之前用临时视频创建的旧引用仍绑定临时素材，需删除旧引用并从新 `@` 菜单重新选择 RefMod。多张照片堆叠成的包可能属于 video 类型。将 `Easy H3 Output.reference_map` 接到提示词预览或文本显示节点可查看实际编号，日志也会输出该表。菜单只读取包的元数据，不加载模型或解码视频；直接连接 Create / Master 时仍可手写官方标签。不同人物建议分别制作参考包；多参考身份保持和生成质量仍需实测。
+
+只接视觉 RefMod、不上传普通素材也可使用参考模式；只接音频仍需补充图片、视频或视觉 RefMod。视频 RefMod 的文本视觉呈现按 24 FPS 重建、2 FPS 取样，与上游 Text Encode 默认规则一致，不还原原始时间戳。图生 / 首尾帧模式接入有效 RefMod 会提示切换参考模式。新增输入与 Output 编号表输出均追加到原有接口，旧工作流连接保持不变。
 
 ## 媒体限制
 
@@ -70,6 +86,6 @@
 
 “完整低显存分块（实验）”包含来自 [matlowai/ComfyUI-MAINodes](https://github.com/matlowai/ComfyUI-MAINodes) 的 `H3 Streamed Blocks` 衍生实现，版权归 `MATLOWAI`，采用 GPL-3.0-or-later。保留的源文件、完整许可证与改动说明见 [NOTICE](NOTICE)、`third_party/mainodes_h3_streamed_blocks.py` 和 `LICENSES/GPL-3.0-or-later-ComfyUI-MAINodes.txt`。
 
-FeiHou 的改动包括：固定 9 图 / 3 视频 / 3 音频的内嵌媒体面板、上传与工作流持久化、FeiHou LoRA Stack 接入、ComfyUI 设置页内的 API 与提示词规则管理、服务/模型选择、运行时提示词扩写/反推，以及提示词预览输出。参考素材的 conditioning 规则及数量限制仍遵循 ComfyUI 官方 `MiniMax H3 Reference to Video` 行为。
+FeiHou 的改动包括：固定 9 图 / 3 视频 / 3 音频的内嵌媒体面板、上传与工作流持久化、FeiHou LoRA Stack 接入、ComfyUI 设置页内的 API 与提示词规则管理、服务/模型选择、运行时提示词扩写/反推、提示词预览输出，以及独立的 RefMod 接口。普通素材的 conditioning 遵循 ComfyUI 官方 `MiniMax H3 Reference to Video` 行为；内嵌面板的数量限制不包括外部 RefMod。
 
 完整许可证和保留声明见 [LICENSE](LICENSE) 与 [NOTICE](NOTICE)。软件按“现状”提供，不附带任何担保。

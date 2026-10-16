@@ -1,0 +1,7 @@
+# ComfyUI provides torch/numpy. GGUF is selected by install.py for the active Python/CUDA.
+transformers>=4.51.0
+accelerate
+safetensors
+sentencepiece
+Pillow
+imageio-ffmpeg>=0.6.0

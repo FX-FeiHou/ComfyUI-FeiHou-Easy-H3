@@ -286,9 +286,9 @@ app.registerExtension({
                     toggled?.apply(usePack, args);
                     status(this, usePack.value
                         ? tr("Batch production pack ON: shots run from the package.", "批量运行制作包：开，按制作包内容批量运行。")
-                        : tr("Batch production pack OFF: Setup uses its own prompt and media; choose a video below to continue from it.",
+                        : tr("Batch production pack OFF: Setup uses its own prompt and media. Auto/hard cut without a previous video generates an independent segment and saves its tail; explicit continuation requires a previous video.",
                             "批量运行制作包：关，Setup 使用自己的提示词和素材，只作为接续加载器；在下面选择要接续的视频。"
-                            + "没选视频时，分镜衔接为「接续」会中止任务，「自动」/「硬切」正常生成（硬切）。"));
+                            + "没选视频时，分镜衔接为「接续」会中止任务，「自动」/「硬切」独立生成并保存结尾 latent，供下一段接续。"));
                 };
             }
             const order = widget(this, "generation_order"), language = widget(this, "prompt_language");

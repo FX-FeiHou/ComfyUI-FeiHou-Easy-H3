@@ -734,13 +734,13 @@ class FeiHouEasyH3ProductionPackLoader:
             "continuous_runtime_config": ("STRING", {"default": "", "multiline": True, "hidden": True}),
             "continuation": (TRANSITION_CHOICES, {"default": "自动", "tooltip":
                 "分镜衔接方式。接续：每个分镜都接上一个分镜结尾；硬切：每个分镜独立生成、直接切换；"
-                "自动：按制作包分镜里的 transition（接续 / 硬切）决定，没写的按接续。"}),
+                "自动：按制作包分镜里的 transition（接续 / 硬切）决定，没写的按接续。每段结尾都会保存，硬切也可作为后续接续来源。"}),
             "context_frames": (CONTEXT_CHOICES, {"default": CONTEXT_DEFAULT, "tooltip":
                 "接续帧数（一采+二采）：上一个分镜结尾多少帧引导本分镜。前一个数给一采（构图、动作），"
                 "后一个数给二采（细节），0 表示该阶段不用画面引导。自动：按制作包分镜里的 continuation_frames，没写的按 22+22。"}),
             "use_pack": ("BOOLEAN", {"default": True, "label_on": "开", "label_off": "关", "tooltip":
                 "批量运行制作包。开：按制作包内容批量运行；关：不读制作包，只作为接续加载器——Setup 用自己的提示词和素材，"
-                "接着下面「接续视频」选的视频生成，复用接续帧数。没选视频时：分镜衔接为「接续」则中止，「自动」/「硬切」则正常生成（硬切）。"}),
+                "接着下面「接续视频」选的视频生成，复用接续帧数。没选视频时：分镜衔接为「接续」则中止，「自动」/「硬切」则独立生成并保存结尾 latent，供下一段接续。"}),
             "continue_video": ("STRING", {"default": "自动", "tooltip":
                 "接续视频：点下方「选择接续视频」按钮弹出窗口选上一段的视频（也可直接填视频完整路径），当前分镜就接着它往后生成；"
                 "视频旁边有同名 .latent 时用 .latent，没有就直接读视频结尾。只对本次排队的第一个分镜生效，之后自动回到「自动」。"
