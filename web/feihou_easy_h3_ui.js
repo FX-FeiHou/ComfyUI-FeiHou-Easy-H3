@@ -42,6 +42,7 @@ const DIALOGUE_CLASS = "h3-dialogue-block";
 const PROMPT_VIEW_STRUCTURED = "structured";
 const PROMPT_VIEW_RAW = "raw";
 const PROMPT_GUIDES = [
+    { value: "refmod", zh: "RefMod", en: "RefMod" },
     { value: "none", zh: "\u4ec5\u901a\u7528\u65b9\u6848", en: "General only" },
     { value: "r2va_enhanced", zh: "R2VA \u52a0\u5f3a\u7248", en: "R2VA Enhanced" },
     { value: "3d_animation_short", zh: "3D \u52a8\u753b\u77ed\u7247", en: "3D Animation Short" },
@@ -4043,6 +4044,16 @@ function updatePromptGuideCatalog(settings) {
         zh: String(item.name_zh || item.name || item.id),
         en: String(item.name || item.name_zh || item.id),
     }));
+    // Built-in names stay short; distinguish editable rules with the same name.
+    for (const locale of ["zh", "en"]) {
+        const used = new Set(next.filter((item) => !item.value.startsWith("custom_")).map((item) => item[locale]));
+        for (const item of next.filter((entry) => entry.value.startsWith("custom_"))) {
+            const base = item[locale];
+            if (used.has(item[locale])) item[locale] = `${base}${locale === "zh" ? "（自定义）" : " (Custom)"}`;
+            if (used.has(item[locale])) item[locale] = `${item[locale]} [${item.value}]`;
+            used.add(item[locale]);
+        }
+    }
     PROMPT_GUIDES.splice(0, PROMPT_GUIDES.length, ...next);
 }
 
@@ -6863,6 +6874,16 @@ app.registerExtension({
     name: "FeiHouEasyH3",
     setup() {
         install();
+    },
+    async refreshComboInNodes() {
+        // ComfyUI's R refresh overwrites localized combo options with backend IDs.
+        // Reload the catalog so rules saved in another page also become selectable.
+        try {
+            await loadPromptOptimizerSettings({ force: true });
+        } catch (error) {
+            console.warn("Easy H3: could not refresh prompt rules; using cached names", error);
+            syncPromptOptimizerNodes();
+        }
     },
     beforeRegisterNodeDef(nodeType, nodeData) {
         installRefmodMentionRefresh(nodeType, nodeData);

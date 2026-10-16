@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.4.22
+
+- Distinguishes identically named custom rules from built-in rules so selecting RefMod keeps the intended rule binding.
+
+- Adds the saved RefMod filmmaking prompt rule, unchanged, as the read-only built-in `refmod` template (`RefMod`). Main and Setup can select it without creating a custom rule; existing custom rules remain intact.
+- Restores prompt-optimization rule names after ComfyUI's R / Refresh Node Definitions command. Custom rules such as RefMod stay selectable by name in the main node and Setup, preserving the selected rule's ID and reloading rules saved in another page.
+
 ## v1.4.21
 
 - Adds optional upstream `H3_REF_MODS` inputs to the main node and Setup, with joint text/vision presentation, direct reference latents, strengths/copies, independent gallery slots and an appended `Output.reference_map` output. RefMods survive high-resolution/trigger-word condition rebuilds in both sampling passes; image mode asks users to switch to reference mode.
