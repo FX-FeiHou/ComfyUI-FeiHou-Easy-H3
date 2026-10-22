@@ -173,7 +173,7 @@
       "height": { "name": "高度" },
       "audio_duration_auto": {
       "name": "自动时长对齐",
-      "options": {"off": "关闭", "audio": "参考音频对齐", "video": "参考视频对齐"}
+      "options": {"off": "关闭", "video1": "对齐Video1", "video2": "对齐Video2", "video3": "对齐Video3", "audio1": "对齐Audio1", "audio2": "对齐Audio2", "audio3": "对齐Audio3"}
     },
     "seconds": { "name": "秒数" },
       "advanced": { "name": "高级选项" },
@@ -217,14 +217,14 @@
       "4": { "name": "FPS" },
       "5": { "name": "提示词反推输出" },
       "6": { "name": "CLIP" },
-      "7": { "name": "音频 1" },
+      "7": { "name": "音频输出" },
       "8": { "name": "时长控制" },
       "9": { "name": "RefMod 编号对应表" }
     }
   },
   "FeiHouEasyH3DurationCrop": {
     "display_name": "FeiHou Easy H3 数字人/MV 时长裁剪",
-    "description": "使用 Easy H3 的时长控制输出还原 Audio 1 的精确时长；控制关闭时，媒体不作修改直接透传。",
+    "description": "使用 Easy H3 的时长控制输出还原所选参考视频/音频的精确时长；控制关闭时，媒体不作修改直接透传。",
     "inputs": {
       "images": { "name": "图像" },
       "fps": { "name": "FPS" },

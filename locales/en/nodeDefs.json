@@ -173,7 +173,7 @@
       "height": { "name": "Height" },
       "audio_duration_auto": {
       "name": "Automatic duration alignment",
-      "options": {"off": "Off", "audio": "Reference audio", "video": "Reference video"}
+      "options": {"off": "Off", "video1": "Align Video 1", "video2": "Align Video 2", "video3": "Align Video 3", "audio1": "Align Audio 1", "audio2": "Align Audio 2", "audio3": "Align Audio 3"}
     },
     "seconds": { "name": "Seconds" },
       "advanced": { "name": "Advanced options" },
@@ -217,14 +217,14 @@
       "4": { "name": "FPS" },
       "5": { "name": "Prompt inference output" },
       "6": { "name": "CLIP" },
-      "7": { "name": "Audio 1" },
+      "7": { "name": "Audio output" },
       "8": { "name": "Duration control" },
       "9": { "name": "RefMod reference map" }
     }
   },
   "FeiHouEasyH3DurationCrop": {
     "display_name": "FeiHou Easy H3 Digital Human/MV Duration Crop",
-    "description": "Uses the Easy H3 duration-control output to restore the exact Audio 1 duration. Disabled control passes media through unchanged.",
+    "description": "Uses the Easy H3 duration-control output to restore the selected video/audio duration. Disabled control passes media through unchanged.",
     "inputs": {
       "images": { "name": "Images" },
       "fps": { "name": "FPS" },

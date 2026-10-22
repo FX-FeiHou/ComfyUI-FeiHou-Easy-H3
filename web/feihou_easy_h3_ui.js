@@ -168,7 +168,7 @@ const TEXT = {
     outputClip: "CLIP",
     outputVideoVae: "Video VAE",
     outputAudioVae: "Audio VAE",
-    outputAudio1: ZH_BROWSER ? "Audio 1 \u97f3\u9891" : "Audio 1",
+    outputAudio1: ZH_BROWSER ? "\u97f3\u9891\u8f93\u51fa" : "Audio output",
     outputFps: "FPS",
     outputPromptPreview: ZH_BROWSER ? "\u63d0\u793a\u8bcd\u53cd\u63a8\u8f93\u51fa" : "Prompt inference output",
     outputContext: "H3 Context",
@@ -190,8 +190,12 @@ const TEXT = {
 const OPTION_DEFS = {
     audio_duration_auto: {
         off: ZH_BROWSER ? "关闭" : "Off",
-        audio: ZH_BROWSER ? "参考音频对齐" : "Reference audio",
-        video: ZH_BROWSER ? "参考视频对齐" : "Reference video",
+        video1: ZH_BROWSER ? "对齐Video1" : "Align Video 1",
+        video2: ZH_BROWSER ? "对齐Video2" : "Align Video 2",
+        video3: ZH_BROWSER ? "对齐Video3" : "Align Video 3",
+        audio1: ZH_BROWSER ? "对齐Audio1" : "Align Audio 1",
+        audio2: ZH_BROWSER ? "对齐Audio2" : "Align Audio 2",
+        audio3: ZH_BROWSER ? "对齐Audio3" : "Align Audio 3",
     },
     mode: {
         [MODE_IMAGE]: ZH_BROWSER ? "\u56fe\u751f\u6216\u9996\u5c3e\u5e27" : "I2V or First/Last Frame",
@@ -3849,8 +3853,17 @@ function syncModeWidgets(node, { adjustHeight = true } = {}) {
 }
 
 function durationAlignment(value) {
-    if (value === true || ["true", "1", "audio", "参考音频对齐", "Reference audio"].includes(String(value))) return "audio";
-    if (["video", "参考视频对齐", "Reference video"].includes(String(value))) return "video";
+    if (value === true) return "audio1";
+    if (value === false || value == null) return "off";
+    const compact = String(value).trim().toLowerCase().replace(/[\s_-]+/g, "");
+    if (["", "off", "none", "false", "0", "关闭", "关闭对齐"].includes(compact)) return "off";
+    const legacy = {
+        "true": "audio1", "1": "audio1", audio: "audio1", "参考音频对齐": "audio1", referenceaudio: "audio1",
+        video: "video1", "参考视频对齐": "video1", referencevideo: "video1",
+    };
+    if (legacy[compact]) return legacy[compact];
+    const match = compact.match(/^(?:对齐|align)?(video|视频|audio|音频)([123])$/);
+    if (match) return `${["video", "视频"].includes(match[1]) ? "video" : "audio"}${match[2]}`;
     return "off";
 }
 
@@ -3872,16 +3885,18 @@ function syncAudioDurationAuto(node) {
     }
     let valueChanged = false;
     if (enabled) {
-        const [startRaw, endRaw] = normalizeAudioTrimRange(audioTrimForSlot(node, 1, alignment)).split("-", 2);
+        const sourceKind = alignment.startsWith("video") ? "video" : "audio";
+        const sourceOrdinal = Number(alignment.slice(-1)) || 1;
+        const [startRaw, endRaw] = normalizeAudioTrimRange(audioTrimForSlot(node, sourceOrdinal, sourceKind)).split("-", 2);
         const start = parseAudioTrimPart(startRaw);
         const end = parseAudioTrimPart(endRaw);
-        const record = ensureEmbeddedMedia(node).find(item => item.media_type === alignment && item.ordinal === 1);
+        const record = ensureEmbeddedMedia(node).find(item => item.media_type === sourceKind && item.ordinal === sourceOrdinal);
         if (record) {
             const url = embeddedMediaViewUrl(record);
             const cache = node.__h3MediaDurationCache ||= new Map();
             if (!cache.has(url)) {
                 cache.set(url, null);
-                const probe = document.createElement(alignment === "video" ? "video" : "audio");
+                const probe = document.createElement(sourceKind === "video" ? "video" : "audio");
                 const release = () => { probe.removeAttribute("src"); probe.load(); };
                 probe.addEventListener("loadedmetadata", () => {
                     cache.set(url, Number(probe.duration));
@@ -5465,8 +5480,13 @@ function repairConfiguredWidgetValues(node, info) {
     if (values.length <= 14) values.splice(12, 0, false);
     // v1.4 adds an always-visible toggle immediately above Seconds. Old
     // workflows have a numeric Seconds value in slot 6, so insert the safe
-    // disabled default only when that slot is not already the new boolean.
-    if (typeof values[6] !== "boolean" && !["off", "audio", "video", "关闭", "参考音频对齐", "参考视频对齐", "Off", "Reference audio", "Reference video"].includes(values[6])) values.splice(6, 0, "off");
+    // disabled default only when that slot is not already an alignment value.
+    const alignmentValue = values[6];
+    const isAlignmentValue = typeof alignmentValue === "boolean"
+        || (typeof alignmentValue === "string"
+            && (durationAlignment(alignmentValue) !== "off"
+                || ["off", "none", "false", "0", "关闭", "关闭对齐"].includes(alignmentValue.trim().toLowerCase())));
+    if (!isAlignmentValue) values.splice(6, 0, "off");
 
     // v1.4.0 briefly wrote the final nine values in defaults-object order:
     // force offload, low VRAM, FPS, keyframe, reference size, mention mode,

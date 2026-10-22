@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.4.23
+
+- Expands automatic duration alignment to Video 1-3 and Audio 1-3, using each selected source's trimmed duration.
+- Changes the Output node's audio output to emit the selected alignment source's audio: the video soundtrack when aligning to a video, or the trimmed audio when aligning to an audio reference. Off keeps the previous Audio 1 behaviour.
+- Keeps legacy `audio`/`video`, Boolean and localized alignment values working in saved workflows.
+
 ## v1.4.22
 
 - Distinguishes identically named custom rules from built-in rules so selecting RefMod keeps the intended rule binding.
