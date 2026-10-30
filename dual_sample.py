@@ -31,6 +31,7 @@ import folder_paths
 from comfy_extras import nodes_custom_sampler as custom_sampler
 from comfy_extras import nodes_minimax_h3 as h3
 
+from . import h3_context_windows as context_windows
 from .third_party import h3_dual_clock as dual_clock
 from .third_party import h3_learned_upscale as learned
 from .third_party import h3_semantic_bridge as bridge
@@ -149,7 +150,13 @@ CANVAS_KEYS = ("minimax_refs", "minimax_keyframes", "minimax_frame_count")
 
 
 def _guider(model, conditioning, cfg: float = 1.0, negative=None):
-    """cfg 1 = BasicGuider (distilled/turbo); cfg > 1 = CFGGuider with a negative."""
+    """cfg 1 = BasicGuider (distilled/turbo); cfg > 1 = CFGGuider with a negative.
+
+    Conditioning that carries a context-window set (Motion Segment 上下文窗口)
+    gets the windowed guider, which samples all windows jointly.
+    """
+    if context_windows.window_set_of(conditioning) is not None:
+        return context_windows.make_guider(model, conditioning, cfg, negative, CANVAS_KEYS, _with_canvas)
     if negative is None or float(cfg) <= 1.0:
         return _node_value(custom_sampler.BasicGuider.execute(model, conditioning))
     guider = comfy.samplers.CFGGuider(model)

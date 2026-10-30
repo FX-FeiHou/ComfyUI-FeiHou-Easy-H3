@@ -1,5 +1,9 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
+import {
+    VIDEO_SIZES, DEFAULT_VIDEO_OPTS, normalizeVideoOpts, applyVideoChange, windowSeconds,
+    formatClockRange, parseClockRange, describeWindow, effectiveFps,
+} from "./feihou_easy_h3_media_settings.js";
 
 // FeiHou Easy H3 frontend: embedded media gallery and prompt references.
 
@@ -13,6 +17,17 @@ const CONTINUOUS_SETUP_WIDGET_NAMES = [];
 const CORE_MEDIA_INPUT = "h3_media";
 const CORE_TITLE = "FeiHou Easy H3 Setup";
 const MEDIA_TITLE = "FeiHou Easy H3 Media";
+const BRIDGE_CLASS = "FeiHouEasyH3MediaBridge";
+// Media Bridge sockets and the fixed media_* slot each one fills on Setup.
+// A video's synchronized soundtrack (video_N_audio) becomes the next <Audio N>
+// after any RefMod audio and before standalone audio, exactly like the backend;
+// it has no media_* slot of its own, so its @ reference stays the literal tag.
+const BRIDGE_SLOTS = [
+    ...Array.from({ length: 9 }, (_, i) => ({ name: `image_${i + 1}`, media_type: "image", slot: i + 1 })),
+    ...Array.from({ length: 3 }, (_, i) => ({ name: `video_${i + 1}`, media_type: "video", slot: 10 + i })),
+    ...Array.from({ length: 3 }, (_, i) => ({ name: `video_${i + 1}_audio`, media_type: "audio", soundtrack_of: `video_${i + 1}`, slot: 16 + i })),
+    ...Array.from({ length: 3 }, (_, i) => ({ name: `audio_${i + 1}`, media_type: "audio", slot: 13 + i })),
+];
 const LOADER_CLASS = "FeiHouEasyH3Loader";
 const REMIX_LOADER_CLASS = "FeiHouEasyH3RemixLoader";
 const ADAPTER_CLASS = "FeiHouEasyH3ModelAdapter";
@@ -43,6 +58,12 @@ const PROMPT_VIEW_STRUCTURED = "structured";
 const PROMPT_VIEW_RAW = "raw";
 const PROMPT_GUIDES = [
     { value: "refmod", zh: "RefMod", en: "RefMod" },
+    // Saved workflows may hold the old display names: keep them as aliases.
+    { value: "feihou_h3_swap", zh: "小肥猴H3人物替换（英文）", en: "FeiHou H3 Person Swap (English)" },
+    { value: "feihou_h3_swap_zh", zh: "小肥猴H3人物替换（中文）", en: "FeiHou H3 Person Swap (Chinese)" },
+    { value: "feihou_h3_motion", zh: "小肥猴H3动作迁移（英文）", en: "FeiHou H3 Motion Transfer (English)",
+      aliases: ["小肥猴H3动作迁移", "FeiHou H3 Motion Transfer"] },
+    { value: "feihou_h3_motion_zh", zh: "小肥猴H3动作迁移（中文）", en: "FeiHou H3 Motion Transfer (Chinese)" },
     { value: "none", zh: "\u4ec5\u901a\u7528\u65b9\u6848", en: "General only" },
     { value: "r2va_enhanced", zh: "R2VA \u52a0\u5f3a\u7248", en: "R2VA Enhanced" },
     { value: "3d_animation_short", zh: "3D \u52a8\u753b\u77ed\u7247", en: "3D Animation Short" },
@@ -183,6 +204,8 @@ const TEXT = {
     audioPreviewStop: ZH_BROWSER ? "\u505c\u6b62\u64ad\u653e" : "Stop playback",
     audioPreviewMissing: ZH_BROWSER ? "\u8bf7\u5148\u4e0a\u4f20\u5bf9\u5e94\u7684\u53c2\u8003\u97f3\u9891" : "Upload the reference audio first",
     embeddedPick: ZH_BROWSER ? "\u70b9\u51fb\u6216\u62d6\u5165\u6587\u4ef6" : "Click or drop a file",
+    mediaSettings: ZH_BROWSER ? "媒体设置" : "Media settings",
+    mediaSettingsEmpty: ZH_BROWSER ? "先载入视频再设置" : "Load a video first",
     embeddedReorder: ZH_BROWSER ? "\u6309\u4f4f\u5e76\u62d6\u52a8\u4ee5\u8c03\u6574\u987a\u5e8f" : "Drag to reorder",
     embeddedDisabled: ZH_BROWSER ? "\u56fe\u751f\u89c6\u9891\u6a21\u5f0f\u4ec5\u4f7f\u7528\u524d 2 \u5f20\u56fe" : "Image mode uses the first 2 images",
     embeddedUploading: ZH_BROWSER ? "\u4e0a\u4f20\u4e2d\u2026" : "Uploading\u2026",
@@ -355,10 +378,14 @@ function isMediaNode(node) {
     return nodeMatchesClass(node, MEDIA_CLASS, MEDIA_TITLE, "__feihouStandardH3MediaNodeInstalled");
 }
 
+function isBridgeNode(node) {
+    return nodeMatchesClass(node, BRIDGE_CLASS, "", "");
+}
+
 // The Media node that feeds a Core node (direct link, Reroute, or KJ Set/Get).
-function mediaHostNode(node, depth = 0) {
+function mediaHostNode(node, depth = 0, matches = isMediaNode) {
     if (!node || depth > 8) return null;
-    if (isMediaNode(node)) return node;
+    if (matches(node)) return node;
     const graph = node.graph || app.graph;
     let input = null;
     if (isCoreNode(node)) input = (node.inputs || []).find((item) => String(item?.name || "") === CORE_MEDIA_INPUT);
@@ -366,13 +393,18 @@ function mediaHostNode(node, depth = 0) {
     else if (String(node.type || "") === "GetNode") {
         const name = node.widgets?.[0]?.value;
         const setter = (graph?._nodes || []).find((item) => String(item?.type || "") === "SetNode" && item.widgets?.[0]?.value === name);
-        return setter ? mediaHostNode(setter, depth + 1) : null;
+        return setter ? mediaHostNode(setter, depth + 1, matches) : null;
     } else if (String(node.type || "") === "SetNode") input = node.inputs?.[0];
     if (!input || input.link == null) return null;
     const link = getNativeGraphLink(graph, input.link);
     const originId = link?.origin_id ?? link?.originId;
     const origin = originId == null ? null : graph?.getNodeById?.(originId);
-    return origin ? mediaHostNode(origin, depth + 1) : null;
+    return origin ? mediaHostNode(origin, depth + 1, matches) : null;
+}
+
+// The Media Bridge that feeds a Core node, found the same way.
+function bridgeHostNode(node) {
+    return isCoreNode(node) ? mediaHostNode(node, 0, isBridgeNode) : null;
 }
 
 // Where media edits for this node are stored (Core -> its Media node).
@@ -382,7 +414,7 @@ function mediaStoreNode(node) {
 
 function notifyMediaConsumers(mediaNode) {
     for (const node of app.graph?._nodes || []) {
-        if (!isCoreNode(node) || mediaHostNode(node) !== mediaNode) continue;
+        if (!isCoreNode(node) || (mediaHostNode(node) !== mediaNode && bridgeHostNode(node) !== mediaNode)) continue;
         syncAudioDurationAuto(node);
         renderEditorFromNode(node);
     }
@@ -421,7 +453,8 @@ function canonicalOption(name, value) {
 
 function canonicalPromptGuide(value) {
     const raw = String(value ?? "");
-    const found = PROMPT_GUIDES.find((item) => raw === item.value || raw === item.zh || raw === item.en);
+    const found = PROMPT_GUIDES.find((item) => raw === item.value || raw === item.zh || raw === item.en
+        || (item.aliases || []).includes(raw));
     if (found) return found.value;
     // Preserve a custom scheme while the global settings are still loading.
     // Once settings arrive, localizeComboWidget replaces it with its display name.
@@ -762,6 +795,7 @@ function ensureEmbeddedMedia(node) {
             subfolder: String(item?.subfolder || ""),
             storage: String(item?.storage || item?.type_name || "input"),
             audio_trim: ["audio", "video"].includes(mediaType) ? normalizeAudioTrimRange(item?.audio_trim || item?.trim_range || AUDIO_TRIM_DEFAULT) : "",
+            ...(mediaType === "video" && item?.video_opts ? { video_opts: normalizeVideoOpts(item.video_opts) } : {}),
         });
     }
     normalized.sort((left, right) => (
@@ -772,15 +806,164 @@ function ensureEmbeddedMedia(node) {
     return normalized;
 }
 
+// Cards sit on fixed media_* slots like the Media Bridge sockets: image card N
+// is slot N (<Picture N>), video cards 10-12, audio cards 13-15.  An empty card
+// keeps its number.
+function embeddedMediaSlot(mediaType, ordinal) {
+    const offset = { image: 0, video: EMBEDDED_MEDIA_LIMITS.image, audio: EMBEDDED_MEDIA_LIMITS.image + EMBEDDED_MEDIA_LIMITS.video }[mediaType] ?? 0;
+    return offset + Number(ordinal);
+}
+
 function embeddedMediaRecords(node, { activeOnly = true } = {}) {
     const reference = isReferenceMode(node);
     return ensureEmbeddedMedia(node)
         .filter((item) => !activeOnly || reference || (item.media_type === "image" && item.ordinal <= 2))
         .map((item) => ({
             ...item,
+            runtime_slot: embeddedMediaSlot(item.media_type, item.ordinal),
             source_id: embeddedSyntheticSourceId(item.media_type, item.ordinal),
             source_slot: 0,
         }));
+}
+
+// Connected Media Bridge sockets, in Setup's fixed slot order.  `runtime_slot`
+// is the media_* index the backend fills, so @ references resolve by slot.
+function bridgeMediaRecords(node) {
+    const bridge = bridgeHostNode(node);
+    if (!bridge) return [];
+    const graph = bridge.graph || app.graph;
+    const reference = isReferenceMode(node);
+    const counts = { image: 0, video: 0, audio: 0 };
+    const records = [];
+    const linked = (name) => (bridge.inputs || []).find((entry) => String(entry?.name || "") === name)?.link != null;
+    for (const item of BRIDGE_SLOTS) {
+        const input = (bridge.inputs || []).find((entry) => String(entry?.name || "") === item.name);
+        if (input?.link == null) continue;
+        if (item.soundtrack_of && !linked(item.soundtrack_of)) continue;
+        const loaded = ++counts[item.media_type];
+        if (!reference && (item.media_type !== "image" || loaded > 2)) continue;
+        // Reference mode numbers pictures and videos by socket, like the Media
+        // cards: image_3 is @图片3 even when image_1/image_2 are empty.
+        const ordinal = !reference || item.soundtrack_of || item.media_type === "audio" ? loaded
+            : item.media_type === "image" ? item.slot : item.slot - EMBEDDED_MEDIA_LIMITS.image;
+        const link = getNativeGraphLink(graph, input.link);
+        const originId = link?.origin_id ?? link?.originId;
+        const origin = originId == null ? null : graph?.getNodeById?.(originId);
+        const title = String(origin?.title || origin?.type || item.name);
+        records.push({
+            media_type: item.media_type,
+            ordinal,
+            label: `${title} → ${item.name}`,
+            // Bridge media are node outputs, not files: preview the source node
+            // (or the LoadImage/VHS it came through) so @ chips show a thumbnail.
+            preview_url: upstreamPreviewUrl(origin, item.media_type) || "",
+            runtime_slot: item.soundtrack_of ? null : item.slot,
+            literal_tag: Boolean(item.soundtrack_of),
+            source_id: -(1000 + item.slot),
+            source_slot: 0,
+        });
+    }
+    return records;
+}
+
+// The file a loader node shows (LoadImage "image", VHS "video", ...), or "".
+function sourceMediaFilename(origin) {
+    for (const name of ["image", "video", "audio", "file", "filename"]) {
+        const value = getWidget(origin, name)?.value;
+        const filename = typeof value === "object" ? value?.filename : value;
+        if (filename && typeof filename === "string") return filename.split(/[\\/]/).pop();
+    }
+    return "";
+}
+
+// Media node sockets wired to other nodes (LoadImage, VHS ...).  Each replaces
+// the card with its number (split_nodes._linked_items), so it takes that card's
+// slot and source id and shows the source's file name and preview.
+function mediaLinkRecords(node) {
+    const host = isCoreNode(node) ? mediaHostNode(node) : isMediaNode(node) ? node : null;
+    if (!host || !Array.isArray(host.inputs)) return [];
+    const graph = host.graph || app.graph;
+    const reference = isReferenceMode(node);
+    const records = [];
+    for (const group of MEDIA_LINK_GROUPS) {
+        for (const input of host.inputs) {
+            const ordinal = mediaLinkNumber(input?.name, group.prefix);
+            if (ordinal <= 0 || input.link == null) continue;
+            if (!reference && (group.mediaType !== "image" || ordinal > 2)) continue;
+            const link = getNativeGraphLink(graph, input.link);
+            const originId = link?.origin_id ?? link?.originId;
+            const origin = originId == null ? null : graph?.getNodeById?.(originId);
+            records.push({
+                media_type: group.mediaType,
+                ordinal,
+                label: sourceMediaFilename(origin) || String(origin?.title || origin?.type || input.name),
+                preview_url: upstreamPreviewUrl(origin, group.mediaType) || "",
+                runtime_slot: embeddedMediaSlot(group.mediaType, ordinal),
+                source_id: embeddedSyntheticSourceId(group.mediaType, ordinal),
+                source_slot: 0,
+            });
+        }
+    }
+    // A linked video_N_audio rides inside video N; the backend numbers it as
+    // the next <Audio N> after the videos and before standalone audio, with no
+    // media_* slot of its own, so its @ reference stays the literal tag.
+    if (reference) {
+        for (const input of host.inputs) {
+            const match = /^video_(\d+)_audio$/.exec(String(input?.name || ""));
+            if (!match || input.link == null) continue;
+            const number = Number(match[1]);
+            const video = host.inputs.find((item) => item?.name === `video_${number}`);
+            if (video?.link == null) continue;
+            records.push({
+                media_type: "audio",
+                ordinal: number,
+                label: `视频${number}音轨`,
+                preview_url: "",
+                runtime_slot: null,
+                order_slot: embeddedMediaSlot("audio", 0) + number / 100,
+                literal_tag: true,
+                source_id: -(1100 + number),
+                source_slot: 0,
+            });
+        }
+    }
+    return records;
+}
+
+// A video card's own soundtrack, numbered by the backend like a linked
+// video_N_audio (same source id, so a chip made for one resolves to the other).
+// Skipped only when the probe already knows the file is silent.
+function cardSoundtrackRecord(item) {
+    if (videoProbe(item)?.has_audio === false) return null;
+    return {
+        media_type: "audio",
+        ordinal: item.ordinal,
+        label: `视频${item.ordinal}音轨`,
+        preview_url: "",
+        runtime_slot: null,
+        order_slot: embeddedMediaSlot("audio", 0) + item.ordinal / 100,
+        literal_tag: true,
+        source_id: -(1100 + item.ordinal),
+        source_slot: 0,
+    };
+}
+
+// Media cards as Setup sees them: a linked socket wins over its card's file.
+function cardMediaRecords(node) {
+    const linked = mediaLinkRecords(node);
+    const taken = new Set(linked.map((item) => item.runtime_slot));
+    const cards = embeddedMediaRecords(node).filter((item) => !taken.has(item.runtime_slot));
+    const soundtracks = isReferenceMode(node)
+        ? cards.filter((item) => item.media_type === "video").map(cardSoundtrackRecord).filter(Boolean)
+        : [];
+    const position = (item) => item.order_slot ?? item.runtime_slot;
+    return [...cards, ...soundtracks, ...linked]
+        .sort((left, right) => position(left) - position(right));
+}
+
+// Everything Setup can reference: the Media gallery or the Media Bridge.
+function referenceMediaRecords(node) {
+    return [...cardMediaRecords(node), ...bridgeMediaRecords(node)];
 }
 
 function embeddedMediaViewUrl(item) {
@@ -818,9 +1001,13 @@ function setEmbeddedMedia(node, mediaType, ordinal, value) {
             audio_trim: ["audio", "video"].includes(mediaType)
                 ? normalizeAudioTrimRange(value.audio_trim || previous?.audio_trim || AUDIO_TRIM_DEFAULT)
                 : "",
+            ...(mediaType === "video" && (value.video_opts || previous?.video_opts)
+                ? { video_opts: normalizeVideoOpts(value.video_opts || previous.video_opts) } : {}),
         });
     }
     node.properties[EMBEDDED_MEDIA_PROP] = next;
+    // A newly loaded video plays in full until a shot block runs on it.
+    if (mediaType === "video" && value?.filename !== previous?.filename) delete node.properties[PREVIEW_BLOCK_PROP];
     ensureEmbeddedMedia(node);
     syncAudioDurationAuto(node);
     renderEmbeddedMediaGallery(node);
@@ -832,7 +1019,74 @@ function setEmbeddedMedia(node, mediaType, ordinal, value) {
 
 function audioTrimForSlot(node, ordinal, mediaType = "audio") {
     const record = ensureEmbeddedMedia(node).find((item) => item.media_type === mediaType && item.ordinal === ordinal);
-    return record ? normalizeAudioTrimRange(record.audio_trim) : AUDIO_TRIM_DEFAULT;
+    return mediaTrimText(record);
+}
+
+// Card trim row: a video with 媒体设置 shows its exact frame window.
+function mediaTrimText(record) {
+    if (!record) return AUDIO_TRIM_DEFAULT;
+    if (record.media_type === "video" && record.video_opts) {
+        return formatClockRange(windowSeconds(record.video_opts, videoProbe(record)));
+    }
+    return normalizeAudioTrimRange(record.audio_trim);
+}
+
+// Source facts (frame rate, length, size) of a card's video, fetched once per file.
+const VIDEO_PROBES = new Map();
+
+function embeddedMediaPath(record) {
+    const path = record?.subfolder ? `${record.subfolder}/${record.filename}` : String(record?.filename || "");
+    return record?.storage && record.storage !== "input" ? `${path} [${record.storage}]` : path;
+}
+
+function videoProbe(record) {
+    const entry = VIDEO_PROBES.get(embeddedMediaPath(record));
+    return entry && !(entry instanceof Promise) ? entry : null;
+}
+
+async function loadVideoProbe(record) {
+    const key = embeddedMediaPath(record);
+    const cached = VIDEO_PROBES.get(key);
+    if (cached) return cached;
+    const pending = api.fetchApi(`/feihou_easy_h3/media/probe?${new URLSearchParams({ file: key })}`)
+        .then((response) => response.json())
+        .then((data) => {
+            const info = data?.ok ? data : null;
+            if (info) VIDEO_PROBES.set(key, info); else VIDEO_PROBES.delete(key);
+            return info;
+        })
+        .catch(() => { VIDEO_PROBES.delete(key); return null; });
+    VIDEO_PROBES.set(key, pending);
+    return pending;
+}
+
+// Store a card's 媒体设置; the legacy time trim follows so older readers agree.
+function setEmbeddedVideoOpts(node, ordinal, opts) {
+    if (isCoreNode(node)) {
+        const host = mediaHostNode(node);
+        return host ? setEmbeddedVideoOpts(host, ordinal, opts) : null;
+    }
+    const records = ensureEmbeddedMedia(node);
+    const index = records.findIndex((item) => item.media_type === "video" && item.ordinal === ordinal);
+    if (index < 0) return null;
+    const normalized = normalizeVideoOpts(opts);
+    const window = windowSeconds(normalized, videoProbe(records[index]));
+    records[index] = { ...records[index], video_opts: normalized, audio_trim: normalizeAudioTrimRange(formatClockRange(window)) };
+    node.properties[EMBEDDED_MEDIA_PROP] = records;
+    syncAudioDurationAuto(node);
+    const input = node.__feihouMediaGallery?.querySelector?.(`.fh-h3-audio-trim-input[data-trim-media-type="video"][data-audio-trim-ordinal="${ordinal}"]`);
+    if (input) input.value = mediaTrimText(records[index]);
+    syncOpenVideoSettings(records[index], normalized);
+    refreshVideoPreviews();
+    node.setDirtyCanvas?.(true, true);
+    app.graph?.change?.();
+    return records[index];
+}
+
+// An open 媒体设置 popup of this card follows edits made on the card.
+function syncOpenVideoSettings(record, opts) {
+    const open = globalThis.__feihouVideoSettings;
+    if (open && open.key === `${embeddedMediaPath(record)}#${record.ordinal}`) open.sync(opts);
 }
 
 function audioTrimParts(value) {
@@ -851,9 +1105,23 @@ function setEmbeddedAudioTrim(node, ordinal, value, mediaType = "audio") {
     const records = ensureEmbeddedMedia(node);
     const index = records.findIndex((item) => item.media_type === mediaType && item.ordinal === ordinal);
     if (index < 0) return normalized;
+    if (mediaType === "video" && records[index].video_opts) {
+        const window = parseClockRange(value);
+        if (!window) return mediaTrimText(records[index]);
+        const opts = applyVideoChange(records[index].video_opts, window, videoProbe(records[index]));
+        return mediaTrimText(setEmbeddedVideoOpts(node, ordinal, opts));
+    }
+    if (mediaType === "video") {
+        const window = parseClockRange(normalized);
+        const open = globalThis.__feihouVideoSettings;
+        if (window && open) {
+            syncOpenVideoSettings(records[index], applyVideoChange(open.opts(), window, videoProbe(records[index])));
+        }
+    }
     records[index] = { ...records[index], audio_trim: normalized };
     node.properties[EMBEDDED_MEDIA_PROP] = records;
     syncAudioDurationAuto(node);
+    if (mediaType === "video") refreshVideoPreviews();
     node.setDirtyCanvas?.(true, true);
     app.graph?.change?.();
     return normalized;
@@ -884,17 +1152,15 @@ function reorderEmbeddedMedia(node, mediaType, sourceOrdinal, targetOrdinal) {
     const typedRecords = allRecords.filter((item) => item.media_type === mediaType);
     const sourceIndex = typedRecords.findIndex((item) => item.ordinal === sourceOrdinal);
     if (sourceIndex < 0) return false;
-    const targetIndex = typedRecords.findIndex((item) => item.ordinal === targetOrdinal);
-    const insertAt = targetIndex >= 0
-        ? targetIndex
-        : typedRecords.filter((item) => item.ordinal < targetOrdinal).length;
-    const reordered = [...typedRecords];
-    const [moved] = reordered.splice(sourceIndex, 1);
-    reordered.splice(Math.min(insertAt, reordered.length), 0, moved);
+    // Cards keep fixed numbers (<Picture N> = card N), so a drop swaps the two
+    // cards (or moves onto an empty one) instead of renumbering the rest.
     const otherRecords = allRecords.filter((item) => item.media_type !== mediaType);
     node.properties[EMBEDDED_MEDIA_PROP] = [
         ...otherRecords,
-        ...reordered.map((item, index) => ({ ...item, ordinal: index + 1 })),
+        ...typedRecords.map((item) => ({
+            ...item,
+            ordinal: item.ordinal === sourceOrdinal ? targetOrdinal : item.ordinal === targetOrdinal ? sourceOrdinal : item.ordinal,
+        })),
     ];
     ensureEmbeddedMedia(node);
     renderEmbeddedMediaGallery(node);
@@ -1973,7 +2239,8 @@ function buildRuntimePrompt(node, runtimeLinks) {
                 && String(link.media_type || "image").toLowerCase() === mediaType
             );
         }
-        if (index >= 0) return `${RUNTIME_REF_PREFIX}${index + 1}__`;
+        if (index >= 0 && runtimeLinks[index].literal_tag) return option?.tag || promptMentionTag(mediaType, Number(part.ordinal));
+        if (index >= 0) return `${RUNTIME_REF_PREFIX}${runtimeLinks[index].runtime_slot ?? index + 1}__`;
         if (!isReferenceMode(node)) return String(part.tag || part.token || "");
         // Direct official tags can also come from connected Create/Master nodes.
         if (refmodsInputIsConnected(node) && partSourceId == null && Number.isInteger(partOrdinal) && partOrdinal > 0) {
@@ -2003,21 +2270,24 @@ function patchGraphToPrompt() {
                 delete promptNode.inputs[`media_${index}`];
                 delete promptNode.inputs[`media_type_${index}`];
                 delete promptNode.inputs[`media_trim_${index}`];
+                delete promptNode.inputs[`media_opts_${index}`];
             }
             if (node.__h3Editor) syncPromptFromEditor(node, false);
             const runtimeLinks = embeddedMediaRecords(node);
-            runtimeLinks.forEach((link, index) => {
+            runtimeLinks.forEach((link) => {
+                const slot = link.runtime_slot;
                 const path = link.subfolder ? `${link.subfolder}/${link.filename}` : link.filename;
-                promptNode.inputs[`media_${index + 1}`] = path;
-                promptNode.inputs[`media_type_${index + 1}`] = String(link.media_type || "image");
-                promptNode.inputs[`media_trim_${index + 1}`] = ["audio", "video"].includes(link.media_type) ? normalizeAudioTrimRange(link.audio_trim) : "";
+                promptNode.inputs[`media_${slot}`] = path;
+                promptNode.inputs[`media_type_${slot}`] = String(link.media_type || "image");
+                promptNode.inputs[`media_trim_${slot}`] = ["audio", "video"].includes(link.media_type) ? normalizeAudioTrimRange(link.audio_trim) : "";
+                if (link.media_type === "video" && link.video_opts) promptNode.inputs[`media_opts_${slot}`] = JSON.stringify(link.video_opts);
             });
             const promptInput = promptInputSlot(node);
             const promptLinkId = promptInput?.link;
             const existingPromptLink = promptNode.inputs.prompt;
             const hasPromptConnection = promptLinkId != null || Array.isArray(existingPromptLink);
             if (!hasPromptConnection) {
-                promptNode.inputs.prompt = buildRuntimePrompt(node, runtimeLinks);
+                promptNode.inputs.prompt = buildRuntimePrompt(node, referenceMediaRecords(node));
             } else if (promptLinkId != null && (!Array.isArray(existingPromptLink) || existingPromptLink.length < 2)) {
                 // ComfyUI normally preserves connected widget inputs in graphToPrompt.
                 // Reconstruct the link as a fallback for frontends that omit it after
@@ -2159,7 +2429,7 @@ function truncateMentionLabel(value, maxLength = 22) {
 function mentionOptions(node) {
     if (!isReferenceMode(node)) return [];
     if (refmodsInputIsConnected(node)) void refreshRefmodCatalog();
-    const orderedLinks = embeddedMediaRecords(node);
+    const orderedLinks = referenceMediaRecords(node);
     const counts = { image: 0, video: 0, audio: 0 };
     const mode = referenceMentionMode(node);
     const mods = refmodReferences(node).map(ref => {
@@ -2173,9 +2443,9 @@ function mentionOptions(node) {
         counts[type] = (counts[type] || 0) + 1;
         const ordinal = counts[type];
         const tag = type === "image" ? `<Picture ${ordinal}>` : type === "video" ? `<Video ${ordinal}>` : `<Audio ${ordinal}>`;
-        const fullLabel = embeddedMediaFilename(link) || tag;
+        const fullLabel = link.label || embeddedMediaFilename(link) || tag;
         const label = mode === "index" ? `${LABELS[type] || type}${ordinal}` : truncateMentionLabel(fullLabel);
-        const viewUrl = embeddedMediaViewUrl(link);
+        const viewUrl = link.filename ? embeddedMediaViewUrl(link) : String(link.preview_url || "");
         return {
             type,
             tag,
@@ -2187,7 +2457,8 @@ function mentionOptions(node) {
             source: TEXT.embeddedMedia,
             sourceId: Number(link.source_id),
             sourceSlot: Number(link.source_slot) || 0,
-            previewUrl: type === "image" ? viewUrl : type === "video" ? getVideoFrameThumbnail(viewUrl) : "",
+            previewUrl: !viewUrl ? "" : type === "image" ? viewUrl
+                : type === "video" ? (getVideoFrameThumbnail(viewUrl) || viewUrl) : "",
         };
     })];
 }
@@ -2512,6 +2783,27 @@ function getVideoFrameThumbnail(videoUrl) {
     video.addEventListener("error", fail, { once: true });
     video.src = videoUrl;
     video.load?.();
+    return "";
+}
+
+// A media can reach the bridge through a chain (LoadImage -> RMBG -> bridge),
+// so walk a few links upstream until a node that can show a preview is found.
+function upstreamPreviewUrl(node, mediaType, depth = 4, seen = null) {
+    if (!node || depth <= 0) return "";
+    const direct = sourcePreviewUrl(node, mediaType);
+    if (direct) return direct;
+    const visited = seen || new Set([node.id]);
+    for (const input of node.inputs || []) {
+        if (input?.link == null) continue;
+        const link = getNativeGraphLink(node.graph || app.graph, input.link);
+        const originId = link?.origin_id ?? link?.originId;
+        if (originId == null || visited.has(originId)) continue;
+        const origin = (node.graph || app.graph)?.getNodeById?.(originId);
+        if (!origin) continue;
+        visited.add(originId);
+        const found = upstreamPreviewUrl(origin, mediaType, depth - 1, visited);
+        if (found) return found;
+    }
     return "";
 }
 
@@ -4058,6 +4350,8 @@ function updatePromptGuideCatalog(settings) {
         value: String(item.id),
         zh: String(item.name_zh || item.name || item.id),
         en: String(item.name || item.name_zh || item.id),
+        // Old display names saved in workflows (e.g. before 「（英文）」 was added).
+        aliases: PROMPT_GUIDES.find((known) => known.value === String(item.id))?.aliases || [],
     }));
     // Built-in names stay short; distinguish editable rules with the same name.
     for (const locale of ["zh", "en"]) {
@@ -4256,10 +4550,12 @@ function promptOptimizerResources(node) {
         const ordinal = ++counts[ref.type];
         return { type: ref.type, tag: promptMentionTag(ref.type, ordinal), name: ref.fullLabel };
     });
-    return [...mods, ...embeddedMediaRecords(node).map((link) => {
+    return [...mods, ...cardMediaRecords(node).map((link) => {
         const type = String(link.media_type || "image").toLowerCase();
         counts[type] = (counts[type] || 0) + 1;
         const ordinal = counts[type];
+        // A linked socket is a node output, not a file: tag and source name only.
+        if (!link.filename) return { type, tag: promptMentionTag(type, ordinal), name: link.label || "" };
         return {
             type,
             tag: promptMentionTag(type, ordinal),
@@ -4270,7 +4566,19 @@ function promptOptimizerResources(node) {
                 storage: link.storage || "input",
             },
         };
+    }), ...bridgeMediaRecords(node).map((link) => {
+        // Media Bridge inputs exist only while the graph runs: the optimizer gets
+        // their tags and source names (no pixels) so it knows every reference.
+        const type = String(link.media_type || "image").toLowerCase();
+        counts[type] = (counts[type] || 0) + 1;
+        return { type, tag: promptMentionTag(type, counts[type]), name: link.label || "" };
     })];
+}
+
+// "@图片1" / "@Video 2" typed as plain text -> the official <Picture 1> / <Video 2> tags.
+function officialMentionText(text) {
+    const kinds = [["Picture", /@(?:图片|图像|image|picture)\s*(\d+)/gi], ["Video", /@(?:视频|video)\s*(\d+)/gi], ["Audio", /@(?:音频|audio)\s*(\d+)/gi]];
+    return kinds.reduce((value, [tag, pattern]) => value.replace(pattern, (_match, index) => `<${tag} ${index}>`), String(text || ""));
 }
 
 function setPromptFromOptimizedText(node, value) {
@@ -4321,6 +4629,7 @@ async function optimizePromptFromEditor(node) {
         ? node.__h3OptimizerSourcePrompt
         : currentPrompt;
     if (!sourcePrompt.trim()) return;
+    const requestPrompt = officialMentionText(sourcePrompt);
     const mediaCounts = { image: 0, video: 0, audio: 0 };
     resources.forEach((item) => { mediaCounts[item.type] = (mediaCounts[item.type] || 0) + 1; });
     node.__h3OptimizerPending = true;
@@ -4332,7 +4641,7 @@ async function optimizePromptFromEditor(node) {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-                prompt: sourcePrompt,
+                prompt: requestPrompt,
                 mode: canonicalOption("mode", getWidgetValue(node, "mode", MODE_IMAGE)),
                 seconds: Math.min(MAX_SECONDS, Math.max(MIN_SECONDS, Number(getWidgetValue(node, "seconds", 10)) || 10)),
                 ref_image_size: canonicalOption("ref_image_size", getWidgetValue(node, "ref_image_size", REF_IMAGE_DEFAULT)),
@@ -5020,6 +5329,13 @@ function ensurePromptEditor(node) {
     }, true);
     editor.addEventListener("keydown", (event) => {
         const key = String(event.key || "").toLowerCase();
+        // Ctrl+Enter is ComfyUI's Queue Prompt: store the text and let the key
+        // reach ComfyUI instead of inserting a line break.
+        if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+            closeMentionMenu(node);
+            syncPromptFromEditor(node);
+            return;
+        }
         if ((event.ctrlKey || event.metaKey) && key === "s") {
             syncPromptFromEditor(node);
             event.preventDefault();
@@ -5192,7 +5508,11 @@ function productionFallbackValues(node) {
     for (const name of ["fps", "aspect_ratio"]) {
         const current = getWidgetValue(node, name);
         // A manual edit after a preview deliberately becomes the new fallback.
-        if (!Object.hasOwn(state.fallback, name) || (Object.hasOwn(state.shown, name) && current !== state.shown[name])) {
+        // `shown` is empty when the node was saved by an older build (or by a
+        // preview that never completed), and a stale fallback would then keep
+        // overwriting the user's own choice on every queued shot.
+        const applied = Object.hasOwn(state.shown, name) ? state.shown[name] : undefined;
+        if (!Object.hasOwn(state.fallback, name) || applied === undefined || current !== applied) {
             state.fallback[name] = current;
         }
     }
@@ -5297,6 +5617,7 @@ function isTransportInputName(name) {
         || /^media_[0-9]+$/i.test(String(name || ""))
         || /^media_type_[0-9]+$/i.test(String(name || ""))
         || /^media_trim_[0-9]+$/i.test(String(name || ""))
+        || /^media_opts_[0-9]+$/i.test(String(name || ""))
         || /^prompt_optimizer_applied$/i.test(String(name || ""))
         || /^second_sampling_output_connected$/i.test(String(name || ""));
 }
@@ -5791,13 +6112,355 @@ function createEmbeddedAudioTrimControls(node, mediaType = "audio") {
     return wrap;
 }
 
-function embeddedGalleryHeight(reference, imageSlotHeight) {
+function createVideoSettingsButton(node, ordinal, enabled) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "fh-h3-media-settings-button";
+    button.textContent = TEXT.mediaSettings;
+    button.disabled = !enabled;
+    button.title = enabled ? TEXT.mediaSettings : TEXT.mediaSettingsEmpty;
+    const record = ensureEmbeddedMedia(node).find((item) => item.media_type === "video" && item.ordinal === ordinal);
+    button.classList.toggle("is-set", Boolean(record?.video_opts));
+    for (const type of ["pointerdown", "mousedown", "dblclick"]) button.addEventListener(type, (event) => event.stopPropagation());
+    button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const linked = linkedVideoSource(node, ordinal);
+        if (linked) notifyLinkedVideoSettings(ordinal, linked);
+        else if (enabled) openVideoSettings(node, ordinal, button);
+    });
+    return button;
+}
+
+// The node wired into the Media node's video_N socket, or null.  A linked
+// video replaces card N, so the card's 媒体设置 would not reach it.
+function linkedVideoSource(node, ordinal) {
+    const host = isCoreNode(node) ? mediaHostNode(node) : isMediaNode(node) ? node : null;
+    const input = (host?.inputs || []).find((item) => item?.name === `video_${ordinal}`);
+    if (input?.link == null) return null;
+    const graph = host.graph || app.graph;
+    const link = getNativeGraphLink(graph, input.link);
+    const originId = link?.origin_id ?? link?.originId;
+    return (originId == null ? null : graph?.getNodeById?.(originId)) || { title: `video_${ordinal}` };
+}
+
+function notifyLinkedVideoSettings(ordinal, origin) {
+    const source = String(origin?.title || origin?.type || `video_${ordinal}`);
+    const detail = ZH_BROWSER
+        ? `视频 ${ordinal} 是外接的（${source}），媒体设置对它不起作用。请在来源节点上设置：帧率（force_rate）、跳过前 X 帧（skip_first_frames）、读取帧上限（frame_load_cap）、尺寸（custom_width / custom_height）。`
+        : `Video ${ordinal} is linked from ${source}; Media settings do not apply to it. Set frame rate, skipped frames, frame cap and size on that node.`;
+    const toast = app.extensionManager?.toast;
+    if (toast?.add) {
+        toast.add({ severity: "info", summary: TEXT.mediaSettings, detail, life: 8000 });
+        return;
+    }
+    globalThis.alert?.(detail);
+}
+
+function closeVideoSettings() {
+    const open = globalThis.__feihouVideoSettings;
+    globalThis.__feihouVideoSettings = null;
+    if (!open) return;
+    open.panel.remove();
+    document.removeEventListener("pointerdown", open.outside, true);
+    document.removeEventListener("keydown", open.escape, true);
+}
+
+// 「媒体设置」 popup of one video card.  Every change is stored at once; frame
+// rate, frame cap, skipped frames and duration follow each other.
+function openVideoSettings(node, ordinal, anchor) {
+    closeVideoSettings();
+    const find = () => ensureEmbeddedMedia(node).find((item) => item.media_type === "video" && item.ordinal === ordinal);
+    const record = find();
+    if (!record) return;
+    const panel = document.createElement("div");
+    panel.className = "fh-h3-video-settings";
+    panel.addEventListener("pointerdown", (event) => event.stopPropagation());
+    panel.addEventListener("wheel", (event) => event.stopPropagation(), { passive: true });
+    const title = document.createElement("div");
+    title.className = "fh-h3-video-settings-title";
+    title.textContent = `${TEXT.mediaSettings} · ${ZH_BROWSER ? "视频" : "Video"} ${ordinal}`;
+    const fileLine = document.createElement("div");
+    fileLine.className = "fh-h3-video-settings-note";
+    fileLine.textContent = embeddedMediaFilename(record);
+    const sourceLine = document.createElement("div");
+    sourceLine.className = "fh-h3-video-settings-note";
+    sourceLine.textContent = ZH_BROWSER ? "正在读取原片信息…" : "Reading the source…";
+    const rows = document.createElement("div");
+    rows.className = "fh-h3-video-settings-rows";
+    const field = (label, hint, control) => {
+        const row = document.createElement("label");
+        row.className = "fh-h3-video-settings-row";
+        const name = document.createElement("span");
+        name.textContent = label;
+        const help = document.createElement("small");
+        help.textContent = hint;
+        row.append(name, control, help);
+        rows.append(row);
+        control.addEventListener("keydown", (event) => event.stopPropagation());
+        return control;
+    };
+    const numberInput = (step) => {
+        const input = document.createElement("input");
+        input.type = "number";
+        input.min = "0";
+        input.step = String(step);
+        return input;
+    };
+    const fps = field(ZH_BROWSER ? "帧率" : "Frame rate", ZH_BROWSER ? "0 = 原始帧率" : "0 = source rate", numberInput(1));
+    fps.max = "120";
+    const size = field(ZH_BROWSER ? "短边长" : "Short edge", ZH_BROWSER ? "保持比例，只缩小" : "Keeps aspect, only shrinks", document.createElement("select"));
+    for (const value of VIDEO_SIZES) size.append(new Option(value, value));
+    const cap = field(ZH_BROWSER ? "读取帧上限" : "Frame load cap", ZH_BROWSER ? "0 = 读到结尾" : "0 = to the end", numberInput(1));
+    const skip = field(ZH_BROWSER ? "跳过前 X 帧" : "Skip first frames", ZH_BROWSER ? "按上面的帧率计" : "At the frame rate above", numberInput(1));
+    const duration = field(ZH_BROWSER ? "时长" : "Duration", ZH_BROWSER ? "起-止，结束 00:00:000 = 到结尾" : "start-end; end 00:00:000 = to the end", document.createElement("input"));
+    duration.type = "text";
+    duration.placeholder = "00:00:000-00:00:000";
+    const summary = document.createElement("div");
+    summary.className = "fh-h3-video-settings-summary";
+    const actions = document.createElement("div");
+    actions.className = "fh-h3-video-settings-actions";
+    const reset = document.createElement("button");
+    reset.type = "button";
+    reset.textContent = ZH_BROWSER ? "恢复默认" : "Reset";
+    const done = document.createElement("button");
+    done.type = "button";
+    done.textContent = ZH_BROWSER ? "完成" : "Done";
+    actions.append(reset, done);
+    panel.append(title, fileLine, sourceLine, rows, summary, actions);
+
+    let opts = normalizeVideoOpts(record.video_opts || DEFAULT_VIDEO_OPTS);
+    if (!record.video_opts) {
+        // First open: start from the card's time trim.
+        const window = parseClockRange(record.audio_trim);
+        if (window) opts = applyVideoChange(opts, window, videoProbe(record));
+    }
+    const show = () => {
+        const probe = videoProbe(find() || record);
+        fps.value = String(opts.fps);
+        size.value = opts.size;
+        cap.value = String(opts.cap);
+        skip.value = String(opts.skip);
+        if (document.activeElement !== duration) duration.value = formatClockRange(windowSeconds(opts, probe));
+        const { fps: rate, frames, seconds } = describeWindow(opts, probe);
+        summary.textContent = frames == null
+            ? (ZH_BROWSER ? `按 ${rate} fps 读取` : `Read at ${rate} fps`)
+            : (ZH_BROWSER ? `将读取 ${frames} 帧 ≈ ${seconds.toFixed(3)} 秒（${rate} fps）`
+                : `Reads ${frames} frames ≈ ${seconds.toFixed(3)} s (${rate} fps)`);
+    };
+    const commit = (change) => {
+        opts = applyVideoChange(opts, change, videoProbe(find() || record));
+        setEmbeddedVideoOpts(node, ordinal, opts);
+        anchor?.classList?.add("is-set");
+        show();
+    };
+    fps.addEventListener("change", () => commit({ fps: Number(fps.value) }));
+    size.addEventListener("change", () => commit({ size: size.value }));
+    cap.addEventListener("change", () => commit({ cap: Number(cap.value) }));
+    skip.addEventListener("change", () => commit({ skip: Number(skip.value) }));
+    duration.addEventListener("change", () => {
+        const window = parseClockRange(duration.value);
+        if (window) commit(window); else show();
+    });
+    duration.addEventListener("blur", show);
+    reset.addEventListener("click", () => {
+        opts = normalizeVideoOpts(DEFAULT_VIDEO_OPTS);
+        commit({});
+    });
+    done.addEventListener("click", closeVideoSettings);
+
+    document.body.append(panel);
+    const place = () => {
+        const box = anchor.getBoundingClientRect();
+        const width = panel.offsetWidth, height = panel.offsetHeight;
+        const left = Math.min(Math.max(8, box.left), window.innerWidth - width - 8);
+        const below = box.bottom + 6;
+        const top = below + height <= window.innerHeight - 8 ? below : Math.max(8, box.top - height - 6);
+        panel.style.left = `${Math.round(left)}px`;
+        panel.style.top = `${Math.round(top)}px`;
+    };
+    show();
+    place();
+    loadVideoProbe(record).then((info) => {
+        if (globalThis.__feihouVideoSettings?.panel !== panel) return;
+        if (!info) {
+            sourceLine.textContent = ZH_BROWSER ? "读不到原片信息，按填写的帧率计算" : "Source info unavailable";
+            return;
+        }
+        sourceLine.textContent = ZH_BROWSER
+            ? `原片 ${info.width}×${info.height} · ${info.fps} fps · ${info.duration} 秒 · ${info.frames} 帧${info.has_audio ? " · 有声" : " · 无声"}`
+            : `Source ${info.width}×${info.height} · ${info.fps} fps · ${info.duration} s · ${info.frames} frames`;
+        // Clamp a window that runs past the end of this file.
+        opts = applyVideoChange(opts, {}, info);
+        show();
+        place();
+    });
+    const outside = (event) => {
+        if (!panel.contains(event.target) && event.target !== anchor) closeVideoSettings();
+    };
+    const escape = (event) => {
+        if (event.key === "Escape") { event.stopPropagation(); closeVideoSettings(); }
+    };
+    document.addEventListener("pointerdown", outside, true);
+    document.addEventListener("keydown", escape, true);
+    globalThis.__feihouVideoSettings = {
+        panel, outside, escape,
+        key: `${embeddedMediaPath(record)}#${ordinal}`,
+        opts: () => opts,
+        sync: (next) => { opts = normalizeVideoOpts(next); show(); },
+    };
+}
+
+// ---- Video card preview -------------------------------------------------
+// A loaded video plays muted on a loop; hovering the card turns the sound on.
+// Once a 分镜提示词 node has run a block, every video card plays that block's
+// part of the source (on a loop) until the next block runs.
+const PREVIEW_BLOCK_PROP = "feihou_h3_preview_block";
+const SHOT_PROMPTS_CLASS = "FeiHouEasyH3ShotPrompts";
+
+function shotPromptsActive() {
+    // Enabled = present and neither muted (2) nor bypassed (4).
+    return (app.graph?._nodes || []).some((node) => node?.type === SHOT_PROMPTS_CLASS && (node.mode ?? 0) === 0);
+}
+
+// Where reference video 1's timeline starts in the file: the 媒体设置 window or the card's time trim.
+function videoTimelineStart(record) {
+    if (record?.video_opts) return windowSeconds(record.video_opts, videoProbe(record)).start;
+    return parseClockRange(record?.audio_trim)?.start || 0;
+}
+
+// The file range a card should play now, or null for the whole video.
+function videoPreviewRange(node, record) {
+    const host = isCoreNode(node) ? mediaHostNode(node) : node;
+    const block = host?.properties?.[PREVIEW_BLOCK_PROP];
+    if (!block || !shotPromptsActive()) return null;
+    const range = parseClockRange(block.range);
+    if (!range || !(range.end > range.start)) return null;
+    const origin = videoTimelineStart(record);
+    return { start: origin + range.start, end: origin + range.end };
+}
+
+function applyPreviewRange(video, range) {
+    video.__h3Range = range;
+    video.loop = !range;
+    if (range && video.readyState >= 1 && (video.currentTime < range.start - 0.05 || video.currentTime >= range.end)) {
+        video.currentTime = range.start;
+    }
+}
+
+function createVideoCardPreview(node, cell, record, viewUrl) {
+    const preview = document.createElement("video");
+    preview.className = "fh-h3-media-preview fh-h3-card-player";
+    preview.muted = true;
+    preview.autoplay = true;
+    preview.playsInline = true;
+    preview.preload = "auto";
+    preview.dataset.mediaKey = embeddedMediaPath(record);
+    applyPreviewRange(preview, videoPreviewRange(node, record));
+    const keepInRange = () => {
+        const range = preview.__h3Range;
+        if (range && (preview.currentTime >= range.end || preview.currentTime < range.start - 0.25)) {
+            preview.currentTime = range.start;
+            preview.play().catch(() => {});
+        }
+    };
+    const watch = () => {
+        if (!preview.isConnected) return;
+        keepInRange();
+        if (typeof preview.requestVideoFrameCallback === "function") preview.requestVideoFrameCallback(watch);
+    };
+    preview.addEventListener("loadedmetadata", () => {
+        applyPreviewRange(preview, preview.__h3Range);
+        preview.play().catch(() => {});
+        if (typeof preview.requestVideoFrameCallback === "function") preview.requestVideoFrameCallback(watch);
+    });
+    preview.addEventListener("timeupdate", () => {
+        // Follow a bypassed/enabled 分镜提示词 node or edited settings while playing.
+        const ordinal = Number(cell.dataset.ordinal);
+        const current = ensureEmbeddedMedia(node).find((item) => item.media_type === "video" && item.ordinal === ordinal);
+        const range = current ? videoPreviewRange(node, current) : null;
+        if (JSON.stringify(range) !== JSON.stringify(preview.__h3Range)) applyPreviewRange(preview, range);
+        keepInRange();
+    });
+    preview.addEventListener("ended", () => {
+        if (preview.__h3Range) { preview.currentTime = preview.__h3Range.start; preview.play().catch(() => {}); }
+    });
+    cell.addEventListener("mouseenter", () => {
+        preview.muted = false;
+        preview.play().catch(() => { preview.muted = true; preview.play().catch(() => {}); });
+    });
+    cell.addEventListener("mouseleave", () => { preview.muted = true; });
+    preview.src = viewUrl;
+    // A frame window counted at the file's own rate needs that rate for the range.
+    if (record.video_opts && !videoProbe(record)) {
+        loadVideoProbe(record).then(() => applyPreviewRange(preview, videoPreviewRange(node, record)));
+    }
+    return preview;
+}
+
+// Re-aim every video card at the current block (after a run or a settings change).
+function refreshVideoPreviews() {
+    for (const node of app.graph?._nodes || []) {
+        const gallery = node?.__feihouMediaGallery;
+        if (!gallery) continue;
+        const records = ensureEmbeddedMedia(node);
+        gallery.querySelectorAll(".fh-h3-card-player").forEach((video) => {
+            const cell = video.closest("[data-ordinal]");
+            const record = records.find((item) => item.media_type === "video" && item.ordinal === Number(cell?.dataset.ordinal));
+            if (record) applyPreviewRange(video, videoPreviewRange(node, record));
+        });
+    }
+}
+
+function installVideoPreviewFollower() {
+    api.addEventListener("executed", (event) => {
+        const shot = event?.detail?.output?.feihou_shot?.[0];
+        if (!shot?.range) return;
+        const block = { index: Number(shot.index) || 0, range: String(shot.range) };
+        for (const node of app.graph?._nodes || []) {
+            if (!isMediaNode(node) && !(node?.type === NODE_CLASS && node.__feihouMediaGallery)) continue;
+            node.properties ||= {};
+            node.properties[PREVIEW_BLOCK_PROP] = block;
+        }
+        // Saved with the workflow, so a reload keeps playing the last block.
+        app.extensionManager?.workflow?.activeWorkflow?.changeTracker?.checkState?.();
+        refreshVideoPreviews();
+    });
+}
+
+// Audio cards start at this height (it is part of referenceModeChrome).
+const AUDIO_SLOT_MIN = 54;
+
+function embeddedGalleryHeight(reference, imageSlotHeight, videoSlotHeight = null, audioSlotHeight = AUDIO_SLOT_MIN) {
     const layout = EMBEDDED_MEDIA_LAYOUT;
     const imageHeight = Math.round(Number(imageSlotHeight) || layout.imageSlotBase);
     if (!reference) return imageHeight * 3 + layout.imageModeChrome + layout.widgetRowOffset;
-    const videoHeight = Math.round(imageHeight * layout.videoToImageRatio);
-    return imageHeight * 3 + videoHeight + layout.referenceModeChrome + layout.widgetRowOffset;
+    const videoHeight = Math.round(videoSlotHeight ?? imageHeight * layout.videoToImageRatio);
+    const audioHeight = Math.round(audioSlotHeight ?? AUDIO_SLOT_MIN);
+    return imageHeight * 3 + videoHeight + audioHeight - AUDIO_SLOT_MIN + layout.referenceModeChrome + layout.widgetRowOffset;
 }
+
+// Card heights grow together as the node grows taller (growth 0..1):
+// pictures from imageSlotMin up to 2:3 portrait, videos from square up to 2:3,
+// audio from AUDIO_SLOT_MIN up to 4:3 landscape.  All three are linear in growth.
+function cardHeightsAt(cellWidth, growth) {
+    const minimumImage = EMBEDDED_MEDIA_LAYOUT.imageSlotMin;
+    const lerp = (low, high) => low + growth * Math.max(0, high - low);
+    return {
+        image: lerp(minimumImage, cellWidth * 1.5),
+        video: lerp(cellWidth, cellWidth * 1.5),
+        audio: lerp(AUDIO_SLOT_MIN, cellWidth * 0.75),
+    };
+}
+
+function videoCellWidth(node) {
+    const measured = Number(node?.__feihouMediaGallery?.clientWidth);
+    const width = measured > 0 ? measured : Math.max(120, (Number(node?.size?.[0]) || 420) - 20);
+    const cell = (width - 2 * 4) / 3;
+    node.__h3VideoCellWidth = cell;
+    return cell;
+}
+
 
 function syncEmbeddedMediaResponsiveLayout(node, { resetBaseline = false } = {}) {
     const gallery = node?.__feihouMediaGallery;
@@ -5829,7 +6492,11 @@ function syncEmbeddedMediaResponsiveLayout(node, { resetBaseline = false } = {})
         ? { ...EMBEDDED_MEDIA_LAYOUT, promptMin: 0, promptBase: 0, galleryPromptGap: 0 }
         : EMBEDDED_MEDIA_LAYOUT;
     const modeKey = reference ? "reference" : "image";
-    const minGalleryHeight = embeddedGalleryHeight(reference, layout.imageSlotMin);
+    const cellWidth = videoCellWidth(node);
+    const minimumScale = layout.imageSlotMin / layout.imageSlotBase;
+    const maximumScale = layout.imageSlotMax / layout.imageSlotBase;
+    const lowest = cardHeightsAt(cellWidth, 0);
+    const minGalleryHeight = embeddedGalleryHeight(reference, lowest.image, lowest.video, lowest.audio);
     const padding = layout.workbenchPaddingTop + layout.promptBottomGap;
     const hostMinHeight = minGalleryHeight + layout.promptMin + layout.galleryPromptGap + padding;
     const nodeHeight = Number(node?.size?.[1]);
@@ -5856,21 +6523,26 @@ function syncEmbeddedMediaResponsiveLayout(node, { resetBaseline = false } = {})
             ? allocatedHeight
             : state.hostHeight + delta,
     );
-    const minimumScale = layout.imageSlotMin / layout.imageSlotBase;
-    const maximumScale = layout.imageSlotMax / layout.imageSlotBase;
-    const galleryVariableHeight = (reference ? 3 + layout.videoToImageRatio : 3) * layout.imageSlotBase;
-    const galleryChromeHeight = reference ? layout.referenceModeChrome : layout.imageModeChrome;
-    const rawScale = (hostHeight - padding - layout.galleryPromptGap - galleryChromeHeight - layout.widgetRowOffset) / (galleryVariableHeight + layout.promptBase);
-    const proportionalScale = Math.max(minimumScale, Math.min(maximumScale, rawScale));
-    const imageSlotHeight = layout.imageSlotBase * proportionalScale;
-    const galleryHeight = embeddedGalleryHeight(reference, imageSlotHeight);
-    const previewAtMax = proportionalScale >= maximumScale;
+    // Cards and the prompt grow linearly with one growth value: solve for it.
+    const highest = cardHeightsAt(cellWidth, 1);
+    const cardsAt = (heights) => embeddedGalleryHeight(reference, heights.image, heights.video, heights.audio);
+    const promptAt = (growth) => layout.promptBase * (minimumScale + growth * (maximumScale - minimumScale));
+    const low = cardsAt(lowest) + promptAt(0);
+    const high = cardsAt(highest) + promptAt(1);
+    const available = hostHeight - padding - layout.galleryPromptGap;
+    const growth = high > low ? Math.max(0, Math.min(1, (available - low) / (high - low))) : 0;
+    const cards = cardHeightsAt(cellWidth, growth);
+    const imageSlotHeight = cards.image;
+    const videoSlotHeight = Math.round(cards.video);
+    const audioSlotHeight = Math.round(cards.audio);
+    const galleryHeight = embeddedGalleryHeight(reference, imageSlotHeight, videoSlotHeight, audioSlotHeight);
+    const previewAtMax = growth >= 1;
     // Reserve the footer inside the allocated host, not as an external margin.
     // Use the exact remainder after rounded preview rows to avoid overflow.
     const promptHeight = Math.max(layout.promptMin, hostHeight - galleryHeight - layout.galleryPromptGap - padding);
-    const videoSlotHeight = Math.round(imageSlotHeight * layout.videoToImageRatio);
     gallery.style.setProperty("--fh-h3-image-slot-height", `${Math.round(imageSlotHeight)}px`);
     gallery.style.setProperty("--fh-h3-video-slot-height", `${videoSlotHeight}px`);
+    gallery.style.setProperty("--fh-h3-audio-slot-height", `${audioSlotHeight}px`);
     workbench.style.setProperty("--fh-h3-gallery-height", `${Math.round(galleryHeight)}px`);
     workbench.style.setProperty("--fh-h3-prompt-height", `${Math.round(promptHeight)}px`);
     workbench.classList.toggle("is-preview-capped", previewAtMax);
@@ -5927,13 +6599,7 @@ function renderEmbeddedMediaGallery(node) {
                     preview.src = viewUrl;
                     cell.append(preview);
                 } else if (mediaType === "video") {
-                    const preview = document.createElement("video");
-                    preview.className = "fh-h3-media-preview";
-                    preview.muted = true;
-                    preview.playsInline = true;
-                    preview.preload = "metadata";
-                    preview.src = viewUrl;
-                    cell.append(preview);
+                    cell.append(createVideoCardPreview(node, cell, record, viewUrl));
                 } else {
                     const icon = makeAudioIcon("fh-h3-media-audio-icon");
                     cell.append(icon);
@@ -5947,6 +6613,7 @@ function renderEmbeddedMediaGallery(node) {
             status.className = "fh-h3-media-slot-status";
             status.textContent = record ? embeddedMediaFilename(record) : disabled ? TEXT.embeddedDisabled : TEXT.embeddedPick;
             cell.append(badge, status);
+            if (mediaType === "video") cell.append(createVideoSettingsButton(node, ordinal, !disabled && (Boolean(record) || Boolean(linkedVideoSource(node, ordinal)))));
             if (record) {
                 const clear = document.createElement("button");
                 clear.type = "button";
@@ -5969,8 +6636,16 @@ function renderEmbeddedMediaGallery(node) {
     gallery.querySelectorAll(".fh-h3-audio-trim-input").forEach((input) => {
         const record = records.find((item) => item.media_type === input.dataset.trimMediaType && item.ordinal === Number(input.dataset.audioTrimOrdinal));
         input.disabled = !reference || !record;
-        input.value = normalizeAudioTrimRange(record?.audio_trim || AUDIO_TRIM_DEFAULT);
+        input.value = mediaTrimText(record);
     });
+    // A frame window counted at the file's own rate needs that rate.
+    for (const record of records) {
+        if (record.media_type !== "video" || !record.video_opts || videoProbe(record)) continue;
+        loadVideoProbe(record).then((info) => {
+            const input = gallery.querySelector?.(`.fh-h3-audio-trim-input[data-trim-media-type="video"][data-audio-trim-ordinal="${record.ordinal}"]`);
+            if (info && input && document.activeElement !== input) input.value = mediaTrimText(record);
+        });
+    }
     syncEmbeddedMediaResponsiveLayout(node);
     node._widgetSlotsDirty = true;
     repairNodeLayout(node);
@@ -6047,6 +6722,7 @@ function ensureEmbeddedMediaGallery(node) {
         // every extra pixel is then partitioned inside the workbench.
         getMinHeight: () => embeddedGalleryHeight(
             isReferenceMode(node), EMBEDDED_MEDIA_LAYOUT.imageSlotMin,
+            node.__h3VideoCellWidth ?? null,
         ) + (isMediaNode(node) ? 0 : EMBEDDED_MEDIA_LAYOUT.promptMin + EMBEDDED_MEDIA_LAYOUT.galleryPromptGap)
             + EMBEDDED_MEDIA_LAYOUT.workbenchPaddingTop + EMBEDDED_MEDIA_LAYOUT.promptBottomGap,
         afterResize: () => {
@@ -6490,7 +7166,39 @@ function install() {
         transition: border-color .12s ease, background-color .12s ease, opacity .12s ease, transform .12s ease;
       }
       .fh-h3-media-grid.is-video .fh-h3-media-slot { height: var(--fh-h3-video-slot-height); }
-      .fh-h3-media-grid.is-audio .fh-h3-media-slot { height: 54px; }
+      .fh-h3-media-gallery .fh-h3-media-grid.is-audio .fh-h3-media-slot { height: var(--fh-h3-audio-slot-height, 54px); }
+      .fh-h3-media-settings-button {
+        position: absolute; left: 4px; right: 4px; bottom: 4px; z-index: 3; height: 20px; padding: 0 4px; box-sizing: border-box;
+        border: 1px solid rgba(255,255,255,.22); border-radius: 4px; background: rgba(0,0,0,.62); color: rgba(255,255,255,.9);
+        font: 600 10px/18px system-ui, -apple-system, "Segoe UI", sans-serif; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      }
+      .fh-h3-media-settings-button:hover:not(:disabled), .fh-h3-media-settings-button:focus-visible { border-color: rgba(79,150,255,.9); background: rgba(30,60,110,.85); outline: none; }
+      .fh-h3-media-settings-button.is-set { border-color: rgba(0,226,187,.7); color: rgb(120,240,215); }
+      .fh-h3-media-settings-button:disabled { opacity: .38; cursor: not-allowed; }
+      .fh-h3-media-grid.is-video .fh-h3-media-slot-status { bottom: 28px; }
+      .fh-h3-video-settings {
+        position: fixed; z-index: 10000; width: 300px; max-width: calc(100vw - 16px); box-sizing: border-box; padding: 10px 12px;
+        border: 1px solid rgba(255,255,255,.18); border-radius: 8px; background: #1f2126; color: rgba(255,255,255,.9);
+        box-shadow: 0 10px 30px rgba(0,0,0,.45); font: 12px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      .fh-h3-video-settings-title { font-weight: 700; font-size: 13px; margin-bottom: 2px; }
+      .fh-h3-video-settings-note { color: rgba(255,255,255,.55); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .fh-h3-video-settings-rows { display: grid; gap: 6px; margin: 8px 0; }
+      .fh-h3-video-settings-row { display: grid; grid-template-columns: 78px minmax(0, 1fr); align-items: center; column-gap: 8px; }
+      .fh-h3-video-settings-row small { grid-column: 2; color: rgba(255,255,255,.45); font-size: 10px; }
+      .fh-h3-video-settings-row input, .fh-h3-video-settings-row select {
+        width: 100%; min-width: 0; height: 24px; box-sizing: border-box; padding: 1px 6px; border: 1px solid rgba(255,255,255,.2);
+        border-radius: 4px; background: rgba(0,0,0,.3); color: inherit; font: 500 11px/1 Consolas, "Courier New", monospace; outline: none;
+      }
+      .fh-h3-video-settings-row select { font-family: inherit; }
+      .fh-h3-video-settings-row input:focus, .fh-h3-video-settings-row select:focus { border-color: rgba(79,150,255,.9); }
+      .fh-h3-video-settings-summary { padding: 5px 7px; border-radius: 4px; background: rgba(0,226,187,.08); color: rgb(150,235,215); font-size: 11px; }
+      .fh-h3-video-settings-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 8px; }
+      .fh-h3-video-settings-actions button {
+        height: 24px; padding: 0 12px; border: 1px solid rgba(255,255,255,.22); border-radius: 4px; background: rgba(255,255,255,.06);
+        color: inherit; cursor: pointer; font: 600 11px/1 system-ui, sans-serif;
+      }
+      .fh-h3-video-settings-actions button:last-child { border-color: rgba(79,150,255,.8); background: rgba(79,150,255,.22); }
       .fh-h3-audio-trim-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; min-width: 0; }
       .fh-h3-audio-trim-control { display: flex; min-width: 0; gap: 3px; }
       .fh-h3-audio-trim-input {
@@ -6515,6 +7223,8 @@ function install() {
       .fh-h3-media-slot.is-disabled { opacity: .24; cursor: not-allowed; filter: grayscale(.8); }
       .fh-h3-media-slot.is-uploading { cursor: wait; opacity: .68; }
       .fh-h3-media-preview { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: #111; pointer-events: none; }
+      /* Image cards show the top of the picture (faces / heads), centred horizontally. */
+      img.fh-h3-media-preview { object-position: center top; }
       .fh-h3-media-audio-icon { width: 40px; height: 40px; object-fit: contain; opacity: .86; pointer-events: none; }
       .fh-h3-media-slot-badge {
         position: absolute; left: 4px; top: 4px; z-index: 2; display: inline-flex; align-items: center; justify-content: center; width: 17px; height: 17px;
@@ -6792,6 +7502,264 @@ function installFaceRefineNode(nodeType, nodeData) {
     };
 }
 
+// Media node sockets: one socket point per card section. Every wire dropped on
+// it lands on the section's next free socket, numbered in connection order
+// (images 1-9, videos 1-3, audio 1-3); unplugging one renumbers the rest. The
+// sockets of a section are stacked on the same point, so it reads as one
+// socket. A linked socket overrides the card with the same number (the backend
+// merges it into Setup). IMAGE videos (e.g. VHS frames) also take a soundtrack
+// on a second point just below the video point.
+const MEDIA_LINK_GROUPS = [
+    { mediaType: "image", prefix: "image_", max: 9, type: "IMAGE", label: "图片" },
+    { mediaType: "video", prefix: "video_", max: 3, type: "IMAGE,VIDEO", label: "视频" },
+    { mediaType: "audio", prefix: "audio_", max: 3, type: "AUDIO", label: "音频" },
+];
+const MEDIA_LINK_SPACING = 20;
+const MEDIA_NODE_DEFAULT_WIDTH = 480;
+// Left/right gutter of the Media node: room to grab the socket and its wires.
+const MEDIA_NODE_GUTTER = 28;
+
+function mediaLinkNumber(name, prefix) {
+    const match = new RegExp(`^${prefix}(\\d+)$`).exec(String(name || ""));
+    return match ? Number(match[1]) : 0;
+}
+
+function mediaLinkSourceType(node, input) {
+    const link = input?.link != null ? (node.graph || app.graph)?.links?.[input.link] : null;
+    return String(link?.type || "").toUpperCase();
+}
+
+// The sockets sit on the section headings: no text (it would overprint them);
+// a linked card shows 已外接 instead. The real name is kept for the tooltip.
+const MEDIA_LINK_LABEL = " ";
+
+function setMediaLinkName(input, name, label) {
+    input.name = name;
+    input.label = MEDIA_LINK_LABEL;
+    input.localized_name = label;
+    input.tooltip = label;
+}
+
+function syncMediaLinkInputs(node) {
+    if (!isMediaNode(node) || node.__h3SyncingMediaLinks || !Array.isArray(node.inputs)) return;
+    pinMediaWidgetStart(node);
+    node.__h3SyncingMediaLinks = true;
+    try {
+        for (const group of MEDIA_LINK_GROUPS) {
+            const sockets = () => node.inputs
+                .map((input, index) => ({ input, index, number: mediaLinkNumber(input?.name, group.prefix) }))
+                .filter((item) => item.number > 0);
+            // Pair each video with its soundtrack socket before renumbering.
+            const audioOf = new Map();
+            if (group.mediaType === "video") {
+                for (const input of node.inputs) {
+                    const match = /^video_(\d+)_audio$/.exec(String(input?.name || ""));
+                    if (match) audioOf.set(Number(match[1]), input);
+                }
+            }
+            // Drop free sockets (and the soundtrack of a video that is gone).
+            for (const item of sockets().reverse()) {
+                if (item.input.link != null) continue;
+                const soundtrack = audioOf.get(item.number);
+                if (soundtrack) {
+                    const index = node.inputs.indexOf(soundtrack);
+                    if (index >= 0) node.removeInput(index);
+                    audioOf.delete(item.number);
+                }
+                node.removeInput(node.inputs.indexOf(item.input));
+            }
+            for (const [number, soundtrack] of [...audioOf]) {
+                if (sockets().some((item) => item.number === number)) continue;
+                const index = node.inputs.indexOf(soundtrack);
+                if (index >= 0) node.removeInput(index);
+                audioOf.delete(number);
+            }
+            // Renumber the linked sockets in order: 1, 2, 3...
+            const linked = sockets().sort((a, b) => a.number - b.number);
+            linked.forEach((item, position) => {
+                const number = position + 1;
+                const soundtrack = audioOf.get(item.number);
+                setMediaLinkName(item.input, `${group.prefix}${number}`, `${group.label}${number}`);
+                if (soundtrack) setMediaLinkName(soundtrack, `video_${number}_audio`, `视频${number}音轨`);
+            });
+            if (group.mediaType === "video") {
+                linked.forEach((item, position) => {
+                    const number = position + 1;
+                    const name = `video_${number}_audio`;
+                    const soundtrack = node.inputs.find((input) => input?.name === name);
+                    const wantsSoundtrack = mediaLinkSourceType(node, item.input) === "IMAGE";
+                    if (wantsSoundtrack && !soundtrack) {
+                        node.addInput(name, "AUDIO", { label: MEDIA_LINK_LABEL, tooltip: `视频${number}音轨` });
+                    }
+                    if (!wantsSoundtrack && soundtrack && soundtrack.link == null) node.removeInput(node.inputs.indexOf(soundtrack));
+                });
+            }
+            if (linked.length < group.max) {
+                const number = linked.length + 1;
+                node.addInput(`${group.prefix}${number}`, group.type,
+                    { label: MEDIA_LINK_LABEL, tooltip: `${group.label}${number}` });
+            }
+        }
+    } finally {
+        node.__h3SyncingMediaLinks = false;
+    }
+    for (const input of node.inputs) {
+        if (MEDIA_LINK_GROUPS.some((group) => mediaLinkNumber(input?.name, group.prefix) > 0)
+            || /^video_\d+_audio$/.test(String(input?.name || ""))) input.label = MEDIA_LINK_LABEL;
+    }
+    node.__h3MediaLinkLayoutKey = "";
+    layoutMediaLinkInputs(node);
+    markMediaLinkCards(node);
+    // Linked sockets are @ references on Setup: refresh its menu and chips.
+    requestMentionPreviewRefresh();
+    node.setDirtyCanvas?.(true, true);
+}
+
+function mediaSectionOffset(node, mediaType) {
+    const workbench = node.__feihouMediaWorkbench;
+    const widget = node.__feihouMediaGalleryWidget;
+    const section = workbench?.querySelector?.(`.fh-h3-media-section.is-${mediaType}`);
+    if (!workbench || !widget || !section) return null;
+    const scale = Number(app.canvas?.ds?.scale) || 1;
+    const top = section.getBoundingClientRect?.().top;
+    const base = workbench.getBoundingClientRect?.().top;
+    const height = section.getBoundingClientRect?.().height;
+    // Hidden DOM (low zoom, collapsed, image-only mode) has no geometry.
+    if (!Number.isFinite(top) || !Number.isFinite(base) || !height) return null;
+    const widgetY = Number(widget.y ?? widget.last_y);
+    if (!Number.isFinite(widgetY)) return null;
+    return widgetY + (top - base) / scale;
+}
+
+function pinMediaWidgetStart(node) {
+    // Widgets normally start below the lowest input slot. The sockets sit next
+    // to the cards (inside the gallery), so without a fixed start every socket
+    // move pushed the gallery down, which moved the sockets again: endless growth.
+    const rows = Math.max(1, node.outputs?.length || 0);
+    node.widgets_start_y = rows * (globalThis.LiteGraph?.NODE_SLOT_HEIGHT || 20) + 6;
+}
+
+function layoutMediaLinkInputs(node) {
+    if (!isMediaNode(node) || !Array.isArray(node.inputs)) return;
+    pinMediaWidgetStart(node);
+    const offsets = MEDIA_LINK_GROUPS.map((group) => mediaSectionOffset(node, group.mediaType));
+    const key = `${offsets.map((y) => (y == null ? "-" : Math.round(y))).join(",")}|${node.inputs.map((i) => i?.name).join(",")}`;
+    if (key === node.__h3MediaLinkLayoutKey) return;
+    node.__h3MediaLinkLayoutKey = key;
+    // Centered in the node's left gutter.
+    const x = MEDIA_NODE_GUTTER / 2;
+    MEDIA_LINK_GROUPS.forEach((group, groupIndex) => {
+        const top = offsets[groupIndex];
+        if (top == null) return;
+        const ordered = node.inputs
+            .filter((input) => mediaLinkNumber(input?.name, group.prefix) > 0)
+            .sort((a, b) => mediaLinkNumber(a.name, group.prefix) - mediaLinkNumber(b.name, group.prefix));
+        for (const input of ordered) {
+            input.pos = [x, top + 8];
+            if (group.mediaType !== "video") continue;
+            const soundtrack = node.inputs.find((item) => item?.name === `${input.name}_audio`);
+            if (soundtrack) soundtrack.pos = [x, top + 8 + MEDIA_LINK_SPACING];
+        }
+    });
+    node.setDirtyCanvas?.(true, false);
+}
+
+function markMediaLinkCards(node) {
+    for (const group of MEDIA_LINK_GROUPS) {
+        for (let number = 1; number <= group.max; number += 1) {
+            const input = node.inputs?.find((item) => item?.name === `${group.prefix}${number}`);
+            const cell = embeddedMediaCell(node, group.mediaType, number);
+            if (!cell) continue;
+            const linked = input?.link != null;
+            cell.classList.toggle("is-linked", linked);
+            cell.dataset.linkedLabel = linked ? "已外接" : "";
+            // A linked video's 媒体设置 button explains where to set it instead.
+            const settings = group.mediaType === "video" ? cell.querySelector(".fh-h3-media-settings-button") : null;
+            if (settings && linked) settings.disabled = false;
+        }
+    }
+}
+
+function installMediaLinkStyles() {
+    if (typeof document === "undefined" || document.getElementById("fh-h3-media-link-style")) return;
+    const style = document.createElement("style");
+    style.id = "fh-h3-media-link-style";
+    style.textContent = `
+      .fh-h3-media-slot.is-linked { border-style: solid; border-color: rgba(120, 200, 120, .75); }
+      .fh-h3-embedded-workbench.is-media-only { margin: 0 ${MEDIA_NODE_GUTTER}px; }
+      /* ComfyUI's DOM-widget wrapper spans the whole node width and would swallow
+         clicks on the sockets in the gutter; only the gallery itself takes the pointer. */
+      .dom-widget:has(> .fh-h3-embedded-workbench.is-media-only) { pointer-events: none !important; }
+      .fh-h3-media-slot.is-linked::after {
+        content: attr(data-linked-label); position: absolute; top: 4px; right: 4px; z-index: 4; padding: 0 5px;
+        border-radius: 4px; background: rgba(40, 120, 40, .85); color: #fff; font: 600 10px/16px system-ui, sans-serif;
+      }`;
+    document.head.append(style);
+}
+
+function freeMediaSocket(node, input) {
+    const name = String(input?.name || "");
+    if (/^video_\d+_audio$/.test(name)) {
+        return node.inputs.findIndex((item) => /^video_\d+_audio$/.test(String(item?.name || "")) && item.link == null);
+    }
+    const group = MEDIA_LINK_GROUPS.find((item) => mediaLinkNumber(name, item.prefix) > 0);
+    if (!group) return -1;
+    return node.inputs.findIndex((item) => mediaLinkNumber(item?.name, group.prefix) > 0 && item.link == null);
+}
+
+function installMediaLinkHooks(nodeType) {
+    installMediaLinkStyles();
+    // Pin the widget start before a workflow (or a tab switch) restores the
+    // node: otherwise the restored sockets push the gallery down while loading
+    // and the node keeps the taller size.
+    const created = nodeType.prototype.onNodeCreated;
+    nodeType.prototype.onNodeCreated = function onNodeCreatedH3MediaLinks() {
+        pinMediaWidgetStart(this);
+        return created?.apply(this, arguments);
+    };
+    const configuring = nodeType.prototype.onConfigure;
+    nodeType.prototype.onConfigure = function onConfigureH3MediaLinks(info) {
+        pinMediaWidgetStart(this);
+        for (const input of this.inputs || []) delete input.pos;
+        const result = configuring?.apply(this, arguments);
+        pinMediaWidgetStart(this);
+        this.__h3MediaLinkLayoutKey = "";
+        return result;
+    };
+    // Socket positions follow the cards at draw time; never save them.
+    const serializing = nodeType.prototype.onSerialize;
+    nodeType.prototype.onSerialize = function onSerializeH3MediaLinks(info) {
+        const result = serializing?.apply(this, arguments);
+        for (const input of info?.inputs || []) delete input.pos;
+        return result;
+    };
+    const connecting = nodeType.prototype.onConnectInput;
+    nodeType.prototype.onConnectInput = function onConnectInputH3MediaLinks(slot, type, output, origin, originSlot) {
+        const input = this.inputs?.[slot];
+        if (input?.link != null && origin && Number.isInteger(originSlot) && originSlot >= 0) {
+            const free = freeMediaSocket(this, input);
+            if (free < 0) return false; // the section is full: keep the existing wires
+            if (free !== slot) {
+                setTimeout(() => origin.connect(originSlot, this, free), 0);
+                return false;
+            }
+        }
+        return connecting ? connecting.apply(this, arguments) : true;
+    };
+    const changed = nodeType.prototype.onConnectionsChange;
+    nodeType.prototype.onConnectionsChange = function onConnectionsChangeH3MediaLinks() {
+        const result = changed?.apply(this, arguments);
+        if (!this.__h3SyncingMediaLinks) setTimeout(() => syncMediaLinkInputs(this), 0);
+        return result;
+    };
+    const drawn = nodeType.prototype.onDrawForeground;
+    nodeType.prototype.onDrawForeground = function onDrawForegroundH3MediaLinks() {
+        const result = drawn?.apply(this, arguments);
+        layoutMediaLinkInputs(this);
+        return result;
+    };
+}
+
 function installMediaNode(nodeType, nodeData) {
     if (nodeData?.name !== MEDIA_CLASS) return;
     if (nodeType.prototype.__feihouStandardH3MediaNodeInstalled) return;
@@ -6816,17 +7784,32 @@ function installMediaNode(nodeType, nodeData) {
         applyNativeEditorTheme(node.__feihouMediaWorkbench);
         renderEmbeddedMediaGallery(node);
         syncEmbeddedMediaResponsiveLayout(node, { resetBaseline: true });
+        setTimeout(() => syncMediaLinkInputs(node), 0);
     };
     const created = nodeType.prototype.onNodeCreated;
     nodeType.prototype.onNodeCreated = function onNodeCreatedH3Media() {
         const result = created?.apply(this, arguments);
         this.title = MEDIA_TITLE;
         setup(this);
+        // ComfyUI sets a new node's size to its computed minimum after this
+        // hook; widen it afterwards. A node loaded from a workflow (onConfigure)
+        // keeps its saved size.
+        this.__h3FreshMediaNode = true;
+        setTimeout(() => {
+            if (!this.__h3FreshMediaNode) return;
+            this.__h3FreshMediaNode = false;
+            if (Number(this.size?.[0]) >= MEDIA_NODE_DEFAULT_WIDTH) return;
+            this.setSize?.([MEDIA_NODE_DEFAULT_WIDTH, this.size[1]]);
+            this.setSize?.([MEDIA_NODE_DEFAULT_WIDTH, this.computeSize?.()[1] ?? this.size[1]]);
+            syncEmbeddedMediaResponsiveLayout(this, { resetBaseline: true });
+            this.setDirtyCanvas?.(true, true);
+        }, 0);
         return result;
     };
     const configured = nodeType.prototype.onConfigure;
     nodeType.prototype.onConfigure = function onConfigureH3Media(info) {
         const result = configured?.apply(this, arguments);
+        this.__h3FreshMediaNode = false;
         if (Array.isArray(info?.properties?.[EMBEDDED_MEDIA_PROP])) {
             this.properties ||= {};
             this.properties[EMBEDDED_MEDIA_PROP] = info.properties[EMBEDDED_MEDIA_PROP];
@@ -6834,6 +7817,7 @@ function installMediaNode(nodeType, nodeData) {
         setup(this);
         return result;
     };
+    installMediaLinkHooks(nodeType);
     const resized = nodeType.prototype.onResize;
     nodeType.prototype.onResize = function onResizeH3Media() {
         const result = resized?.apply(this, arguments);
@@ -6863,6 +7847,18 @@ function installMediaNode(nodeType, nodeData) {
     };
 }
 
+function installMediaBridgeNode(nodeType, nodeData) {
+    if (nodeData?.name !== BRIDGE_CLASS) return;
+    for (const hook of ["onConfigure", "onConnectionsChange", "onRemoved"]) {
+        const previous = nodeType.prototype[hook];
+        nodeType.prototype[hook] = function () {
+            const result = previous?.apply(this, arguments);
+            setTimeout(() => notifyMediaConsumers(this), 0);
+            return result;
+        };
+    }
+}
+
 function installRefmodMentionRefresh(nodeType, nodeData) {
     if (!["MiniMaxH3RefModsLoader", "MiniMaxH3RefModsAxis"].includes(nodeData?.name)) return;
     const created = nodeType.prototype.onNodeCreated;
@@ -6890,10 +7886,38 @@ function installRefmodMentionRefresh(nodeType, nodeData) {
     }
 }
 
+// Runtime prompt hand-off: a shot-list node can show which prompt is running
+// inside the connected Setup node.  The editor renders from the doc property,
+// so setting only the widget value would leave the old text on screen.
+window.addEventListener("feihou-h3-set-prompt", (event) => {
+    const detail = event?.detail || {};
+    const text = String(detail.text ?? "");
+    if (!text) return;
+    const nodes = app.graph?._nodes || [];
+    const target = detail.nodeId != null && Number.isFinite(Number(detail.nodeId))
+        ? nodes.find((node) => Number(node?.id) === Number(detail.nodeId))
+        : nodes.find((node) => node?.type === "FeiHouEasyH3Setup");
+    if (!target) return;
+    const widget = getWidget(target, "prompt");
+    if (!widget) return;
+    // Rebuild the rich document: official tags (<Picture 1>, <Video 1>, <Audio 1>)
+    // become mention chips again, resolved against the media this node receives.
+    const parts = promptPartsFromText(target, text);
+    const doc = { version: 1, text: promptDocTextFromParts(parts), parts };
+    target.properties ||= {};
+    target.properties[PROMPT_DOC_PROP] = doc;
+    widget.value = doc.text;
+    if (widget._state) widget._state.value = doc.text;
+    renderEditorFromNode(target, true);
+    target.setDirtyCanvas?.(true, true);
+    app.graph?.setDirtyCanvas?.(true, true);
+});
+
 app.registerExtension({
     name: "FeiHouEasyH3",
     setup() {
         install();
+        installVideoPreviewFollower();
     },
     async refreshComboInNodes() {
         // ComfyUI's R refresh overwrites localized combo options with backend IDs.
@@ -6916,5 +7940,6 @@ app.registerExtension({
         installOutputNode(nodeType, nodeData);
         installNode(nodeType, nodeData);
         installMediaNode(nodeType, nodeData);
+        installMediaBridgeNode(nodeType, nodeData);
     },
 });

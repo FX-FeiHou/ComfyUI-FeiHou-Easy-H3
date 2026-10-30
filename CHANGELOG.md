@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.4.24
+
+- Adds motion transfer / person swap from a shot md: **FeiHou Easy H3 Shot Prompts** (drop or pick a md, `start` 自动续接 / 从头开始 / 手动设置, 镜号 widget, md path remembered), **Motion Segment** and **Motion Collect**. One queue runs every block, saves each block and joins the film; interrupted runs resume. Run state lives in `input/feihou_h3_motion` (with an in-memory fallback); a finished film drops its tails and state, and files older than 48 h are pruned (`segment_*.mp4` are never deleted).
+- Shot md directives: `@range`, `@pictures`, `@continue`, `@split` (in-block segments of at most 15 s), `@passthrough` / `@原片` (source frames, no sampling), `@sound 原声/生成`, `@video none`, header `@hold` (hold the reference video's first frame, silent) and `@first N`.
+- Motion Segment: one or two passes is detected from the graph (its `h3_context` output feeding a 2nd Sample Enhancer means two-pass, with `first_steps`); `frame_window` switch (off = the whole video in one run); `segment_frames` shown with seconds; `reference_soundtrack` 送入模型 / 不送入模型; seed removed (noise comes from the workflow). Context-window sampling is in the code but switched off for now.
+- Motion Collect outputs the joined film audio at 48 kHz stereo and can colour-match to the source per shot.
+- Media node: per-type external sockets (`image_N`, `video_N` + `video_N_audio`, `audio_N`) that grow as you connect and renumber on disconnect; a connected input overrides the card of the same number. Video cards get 媒体设置 (frame window, frame rate); image previews are top-aligned; the node no longer grows on tab switches.
+- Prompt templates: the motion template is split into 小肥猴H3人物替换 (background stays the video's and is described explicitly) and 小肥猴H3动作迁移 (background from the scene picture, the user's text or the person picture, described in detail; the video's framing and camera move are copied), each in English and Chinese.
+- Windows: serves files without aiohttp sendfile, which stalls on some machines (Media cards stuck at 上传中, previews and scripts never arriving).
+
+- Adds the shot-md directive `@first N` (`@首帧 N`): picture card N becomes the block's first frame (a keyframe at frame 0, kept in the output) when the block has no previous tail, e.g. a dance block run on its own. The card is only a keyframe, not a reference picture, so it need not be in `@pictures`. A continued block with a tail keeps the tail; both passes and context windows (first window) get the anchor.
+- Adds Motion Segment `segmentation` (分段方式) = 上下文窗口 with `context_window_frames` / `context_overlap_frames`: a long shot block with reference video is denoised in one sampler run; at every step overlapping 17-frame-aligned windows are predicted with their own reference-video window (pictures and prompt in every window) and blended over the overlaps, so no window continues from decoded frames. Works for single sampling and for both passes of the two-pass chain (2nd Sample Enhancer rebuilds the same windows at its canvas). Talk blocks without reference video keep 接续; the default stays 接续.
+- Motion Collect decodes such a block in clip-aligned pieces (identical frames) and keeps 8-bit frames meanwhile.
+
 ## v1.4.23
 
 - Expands automatic duration alignment to Video 1-3 and Audio 1-3, using each selected source's trimmed duration.
