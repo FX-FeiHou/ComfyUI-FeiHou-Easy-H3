@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.4.25
+
+- Adds two example workflows: **Two-Stage Sampling v8** and **One-Click Long Video Replacement v1**. Reference media and previews are cleared; each workflow has notes for node and model downloads and for usage.
+- Updates the workflow guide with the required nodes, the KJNodes version note, and the cloud drive, Bilibili and YouTube links.
+
 ## v1.4.24
 
 - Adds motion transfer / person swap from a shot md: **FeiHou Easy H3 Shot Prompts** (drop or pick a md, `start` 自动续接 / 从头开始 / 手动设置, 镜号 widget, md path remembered), **Motion Segment** and **Motion Collect**. One queue runs every block, saves each block and joins the film; interrupted runs resume. Run state lives in `input/feihou_h3_motion` (with an in-memory fallback); a finished film drops its tails and state, and files older than 48 h are pruned (`segment_*.mp4` are never deleted).
