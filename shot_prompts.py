@@ -81,6 +81,10 @@ HOLD_KEYS = {"hold", "定格", "开头定格"}
 # @video none: this block encodes no reference video (e.g. a talk block).
 VIDEO_KEYS = {"video", "视频", "参考视频"}
 VIDEO_OFF = {"none", "no", "off", "0", "false", "-", "无", "空", "不送", "不用", "关"}
+# @audio 分块 (md header): every audio card follows each block's @range, so a talk
+# block sends only its own seconds of the recording as <Audio N>.
+AUDIO_WINDOW_KEYS = {"audio", "音频", "音频卡"}
+AUDIO_WINDOW_ON = {"分块", "按分块", "跟随分镜", "跟随分块", "window", "slice", "range", "block", "blocks"}
 # @first 4: picture card 4 is the block's first frame (keyframe at frame 0), so a
 # block run on its own still starts from the right person when no previous tail exists.
 FIRST_KEYS = {"first", "首帧", "首帧图"}
@@ -108,6 +112,8 @@ class Shot:
     video: bool = True
     # @first N: picture card N anchors the block's first frame (0 = none).
     first_picture: int = 0
+    # @audio 分块 (md header): audio cards are cut to this block's @range.
+    audio_window: bool = False
 
     @property
     def seconds(self) -> float:
@@ -265,6 +271,7 @@ def parse_shot_prompts(text: str) -> list[Shot]:
     blocks: list[tuple[int, list[tuple[int, str]], int]] = []
     current: list[tuple[int, str]] | None = None
     hold = 0.0
+    audio_window = False
     for number, line in enumerate(lines, 1):
         match = SENTINEL.match(line.strip())
         if match:
@@ -277,6 +284,11 @@ def parse_shot_prompts(text: str) -> list[Shot]:
         header = DIRECTIVE.match(line.strip())
         if header and header.group(1).lower() in HOLD_KEYS:
             hold = _hold_seconds(header.group(2), number)
+        elif header and header.group(1).lower() in AUDIO_WINDOW_KEYS:
+            value = str(header.group(2) or "").strip().lower()
+            if value not in AUDIO_WINDOW_ON:
+                raise ValueError(f"第 {number} 行：@audio 只能写 分块（音频卡按每块的 @range 截取），实际是「{header.group(2) or ''}」")
+            audio_window = True
     if not blocks:
         raise ValueError(
             "没有找到分镜分隔行。请用 skills 生成的 md，每个分镜以「===== FEIHOU_SHOT 01 =====」开头。")
@@ -351,11 +363,12 @@ def parse_shot_prompts(text: str) -> list[Shot]:
         shots.append(Shot(index=index, start=start, end=end, prompt=normalize_prompt_tags(prompt, index),
                           pictures=pictures, pictures_explicit=pictures_explicit, continues=continues,
                           passthrough=passthrough, splits=splits, sound=sound, hold=hold, video=video,
-                          first_picture=first_picture))
+                          first_picture=first_picture, audio_window=audio_window))
         previous_end = end
         expected += 1
-    LOGGER.info("Easy H3 shot prompts: %d 个分镜，共 %.2f 秒%s", len(shots), sum(shot.seconds for shot in shots),
-                f"（参考视频 1 前面定格首帧 {hold:.2f} 秒）" if hold else "")
+    LOGGER.info("Easy H3 shot prompts: %d 个分镜，共 %.2f 秒%s%s", len(shots), sum(shot.seconds for shot in shots),
+                f"（参考视频 1 前面定格首帧 {hold:.2f} 秒）" if hold else "",
+                "，音频卡按每块 @range 截取" if audio_window else "")
     return shots
 
 
@@ -779,6 +792,8 @@ def shot_payload(shot: Shot, total: int, markdown_fingerprint: str, series: str,
             "video": bool(shot.video),
             # @first: picture card number of the block's first frame (0 = none).
             "first_picture": int(shot.first_picture),
+            # @audio 分块: Setup cuts every audio card to this block's range.
+            "audio_window": bool(shot.audio_window),
         },
     }
 

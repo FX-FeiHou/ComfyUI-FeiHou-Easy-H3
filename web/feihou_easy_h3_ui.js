@@ -6348,8 +6348,27 @@ function applyPreviewRange(video, range) {
     }
 }
 
+// A card cell is re-rendered in place: stop its old player and drop its hover
+// listeners, or a removed/replaced video keeps playing detached and every old
+// player is unmuted again on hover (overlapping sound).
+function releaseCardPreview(cell) {
+    cell.__h3PreviewListeners?.abort();
+    cell.__h3PreviewListeners = null;
+    const old = cell.__h3Preview;
+    cell.__h3Preview = null;
+    if (!old) return;
+    old.pause();
+    old.muted = true;
+    old.removeAttribute("src");
+    old.load();
+}
+
 function createVideoCardPreview(node, cell, record, viewUrl) {
+    releaseCardPreview(cell);
+    const listeners = new AbortController();
     const preview = document.createElement("video");
+    cell.__h3Preview = preview;
+    cell.__h3PreviewListeners = listeners;
     preview.className = "fh-h3-media-preview fh-h3-card-player";
     preview.muted = true;
     preview.autoplay = true;
@@ -6388,8 +6407,8 @@ function createVideoCardPreview(node, cell, record, viewUrl) {
     cell.addEventListener("mouseenter", () => {
         preview.muted = false;
         preview.play().catch(() => { preview.muted = true; preview.play().catch(() => {}); });
-    });
-    cell.addEventListener("mouseleave", () => { preview.muted = true; });
+    }, { signal: listeners.signal });
+    cell.addEventListener("mouseleave", () => { preview.muted = true; }, { signal: listeners.signal });
     preview.src = viewUrl;
     // A frame window counted at the file's own rate needs that rate for the range.
     if (record.video_opts && !videoProbe(record)) {
@@ -6587,6 +6606,7 @@ function renderEmbeddedMediaGallery(node) {
             cell.title = record && !disabled ? TEXT.embeddedReorder : "";
             cell.tabIndex = disabled ? -1 : 0;
             cell.setAttribute("aria-disabled", disabled ? "true" : "false");
+            releaseCardPreview(cell);
             cell.replaceChildren();
 
             if (record) {

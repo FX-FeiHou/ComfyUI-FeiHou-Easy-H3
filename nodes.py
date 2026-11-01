@@ -15,7 +15,6 @@ import logging
 import math
 import os
 import re
-import sys
 import threading
 import uuid
 import hashlib
@@ -259,7 +258,7 @@ def _reference_aligned_size(image_w: int, image_h: int, scale: float) -> tuple[i
 _PROMPT_OPTIMIZER_CONFIG_LOCK = threading.RLock()
 REFERENCE_PLACEHOLDER_RE = re.compile(r"__MINIMAX_H3_REF_(\d+)__")
 UNRESOLVED_REFERENCE_RE = re.compile(r"__MINIMAX_H3_UNRESOLVED_REF_[^_]+__")
-MODEL_FILE_EXTENSIONS = {".safetensors", ".gguf"}
+MODEL_FILE_EXTENSIONS = {".safetensors"}
 
 
 def _normalise_model_name(name: str) -> str:
@@ -290,49 +289,12 @@ def _is_weight_file(name: str) -> bool:
     return os.path.splitext(str(name or ""))[1].lower() in MODEL_FILE_EXTENSIONS
 
 
-def _is_gguf_file(name: str) -> bool:
-    return str(name or "").lower().endswith(".gguf")
-
-
 def _category_names(category: str) -> list[str]:
     """Read a ComfyUI filename category without assuming it exists."""
     try:
         return [str(name) for name in folder_paths.get_filename_list(category)]
     except Exception:
         return []
-
-
-def _category_paths(category: str) -> list[str]:
-    try:
-        entry = folder_paths.folder_names_and_paths.get(category)
-        if not entry:
-            return []
-        paths = entry[0]
-        if isinstance(paths, (str, os.PathLike)):
-            paths = [paths]
-        return [os.fspath(path) for path in paths]
-    except Exception:
-        return []
-
-
-def _filesystem_weight_names(categories: tuple[str, ...]) -> list[str]:
-    """Find GGUF files even when ComfyUI has no GGUF extension category yet."""
-    names: list[str] = []
-    for category in categories:
-        for base in _category_paths(category):
-            if not os.path.isdir(base):
-                continue
-            try:
-                for root, _dirs, files in os.walk(base):
-                    for filename in files:
-                        if os.path.splitext(filename)[1].lower() not in MODEL_FILE_EXTENSIONS:
-                            continue
-                        full_path = os.path.join(root, filename)
-                        relative = os.path.relpath(full_path, base).replace(os.sep, "/")
-                        names.append(relative)
-            except OSError:
-                continue
-    return names
 
 
 def _collect_weight_names(categories: tuple[str, ...]) -> list[str]:
@@ -353,13 +315,6 @@ def _collect_weight_names(categories: tuple[str, ...]) -> list[str]:
             if key not in seen:
                 seen.add(key)
                 names.append(key)
-    # The normal ComfyUI categories may not advertise .gguf until the optional
-    # GGUF node is loaded, so supplement them from the actual model folders.
-    for name in _filesystem_weight_names(categories):
-        key = name.replace("\\", "/")
-        if key not in seen:
-            seen.add(key)
-            names.append(key)
     return names
 
 
@@ -416,13 +371,11 @@ def _has_role(name: str, role: str) -> bool:
 
 
 def _sort_model_names(names: list[str]) -> list[str]:
-    def sort_key(name: str) -> tuple[int, int, str]:
+    def sort_key(name: str) -> tuple[int, str]:
         normalised = _normalise_model_name(name)
-        # Keep safetensors first for the native path, followed by GGUF. Within
-        # each group use a deterministic name order for stable workflows.
-        extension_rank = 1 if _is_gguf_file(name) else 0
+        # Use a deterministic name order for stable workflows.
         official_rank = 0 if "minimax" in normalised and "h3" in normalised else 1
-        return extension_rank, official_rank, normalised
+        return official_rank, normalised
 
     return sorted(names, key=sort_key)
 
@@ -2074,12 +2027,12 @@ def _filtered_choices(category: str, needles: tuple[str, ...], fallback: str) ->
 
 
 def _model_choices() -> list[str]:
-    return _all_weight_choices(("diffusion_models", "unet", "unet_gguf"), "", optional=True)
+    return _all_weight_choices(("diffusion_models", "unet"), "", optional=True)
 
 
 def _required_model_choices() -> list[str]:
     """Transformer choices for a mandatory selector, without the None sentinel."""
-    return _all_weight_choices(("diffusion_models", "unet", "unet_gguf"), "", optional=False)
+    return _all_weight_choices(("diffusion_models", "unet"), "", optional=False)
 
 
 def _second_sampling_model_choices() -> list[str]:
@@ -2089,64 +2042,19 @@ def _second_sampling_model_choices() -> list[str]:
 
 
 def _ref_model_choices() -> list[str]:
-    return _all_weight_choices(("diffusion_models", "unet", "unet_gguf"), "", optional=True)
+    return _all_weight_choices(("diffusion_models", "unet"), "", optional=True)
 
 
 def _clip_choices() -> list[str]:
-    return _all_weight_choices(("text_encoders", "clip", "clip_gguf"), "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors")
+    return _all_weight_choices(("text_encoders", "clip"), "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors")
 
 
 def _vae_choices(needles: tuple[str, ...], fallback: str) -> list[str]:
     return _all_weight_choices(("vae",), fallback)
 
 
-@lru_cache(maxsize=16)
-def _registered_node_class(*names: str):
-    """Find an optional custom-node class without importing it unconditionally."""
-    mappings = getattr(nodes, "NODE_CLASS_MAPPINGS", {})
-    for name in names:
-        node_class = mappings.get(name) if hasattr(mappings, "get") else None
-        if node_class is not None:
-            return node_class
-        node_class = getattr(nodes, name, None)
-        if node_class is not None:
-            return node_class
-    for module in tuple(sys.modules.values()):
-        if module is None:
-            continue
-        for name in names:
-            node_class = getattr(module, name, None)
-            if node_class is not None:
-                return node_class
-    return None
-
-
-def _load_gguf_unet(model_name: str):
-    loader_class = _registered_node_class("UnetLoaderGGUF", "UNETLoaderGGUF", "UnetLoaderGGUFAdvanced")
-    if loader_class is None:
-        raise RuntimeError(
-            "A GGUF MiniMax H3 transformer was selected, but this ComfyUI installation has no GGUF loader node. "
-            "Install ComfyUI-GGUF and restart ComfyUI."
-        )
-    loader = loader_class()
-    return loader.load_unet(model_name)[0]
-
-
 def _load_text_encoder(text_encoder: str):
-    if not _is_gguf_file(text_encoder):
-        return nodes.CLIPLoader().load_clip(text_encoder, "minimax", "default")[0]
-
-    loader_class = _registered_node_class("CLIPLoaderGGUF", "CLIPLoaderGGUFAdvanced")
-    if loader_class is None:
-        raise RuntimeError(
-            "A GGUF MiniMax H3 text encoder was selected, but this ComfyUI installation has no GGUF loader node. "
-            "Install ComfyUI-GGUF and restart ComfyUI."
-        )
-    loader = loader_class()
-    try:
-        return loader.load_clip(text_encoder, "minimax")[0]
-    except TypeError:
-        return loader.load_clip(text_encoder, type="minimax")[0]
+    return nodes.CLIPLoader().load_clip(text_encoder, "minimax", "default")[0]
 
 
 @dataclass
@@ -2308,8 +2216,6 @@ class MiniMaxH3Bundle:
 
             if supplied_model is not None:
                 base_model = supplied_model
-            elif _is_gguf_file(model_name):
-                base_model = _load_gguf_unet(model_name)
             else:
                 base_model, = nodes.UNETLoader().load_unet(model_name, "default")
             self._model = self._apply_loras(base_model)
@@ -2345,10 +2251,7 @@ class MiniMaxH3Bundle:
                     self._second_model_name = ""
                     self._second_model_cache_key = None
                     comfy.model_management.soft_empty_cache()
-                if _is_gguf_file(model_name):
-                    base_model = _load_gguf_unet(model_name)
-                else:
-                    base_model, = nodes.UNETLoader().load_unet(model_name, "default")
+                base_model, = nodes.UNETLoader().load_unet(model_name, "default")
                 # Keep a pre-LoRA patcher, sharing weights without a second load.
                 clean_base = base_model.clone()
                 model = self._apply_loras(base_model, self.second_lora_stack) if self.second_lora_stack else base_model
@@ -3099,6 +3002,35 @@ def _trim_reference_audio(audio: Mapping, trim_range: Any) -> Mapping:
     trimmed = dict(audio)
     trimmed["waveform"] = waveform[..., start_sample:end_sample]
     return trimmed
+
+
+def _window_reference_audio(audio: Mapping, start: float, end: float) -> Mapping:
+    """Cut an audio card to one shot block (md @audio 分块), sample-accurate.
+
+    ``start``/``end`` are seconds on the md timeline; a recording that ends
+    before the block is padded with silence so the block keeps its length.
+    """
+    waveform = audio.get("waveform") if isinstance(audio, Mapping) else None
+    if not isinstance(waveform, torch.Tensor) or waveform.ndim < 1:
+        raise ValueError("Audio references must contain a waveform for time trimming")
+    sample_rate = _audio_sample_rate(audio)
+    if sample_rate <= 0:
+        raise ValueError("Audio reference has an invalid sample rate")
+    total_samples = int(waveform.shape[-1])
+    start_sample = max(0, int(round(start * sample_rate)))
+    end_sample = max(start_sample + 1, int(round(end * sample_rate)))
+    if start_sample >= total_samples:
+        raise ValueError(
+            f"Easy H3: 音频卡只有 {total_samples / sample_rate:.2f} 秒，本块从 {start:.2f} 秒开始"
+            "（md 写了 @audio 分块，音频要和 @range 用同一条时间轴）。")
+    clip = waveform[..., start_sample:min(end_sample, total_samples)]
+    missing = end_sample - start_sample - int(clip.shape[-1])
+    if missing > 0:
+        pad = torch.zeros(*clip.shape[:-1], missing, dtype=clip.dtype, device=clip.device)
+        clip = torch.cat([clip, pad], dim=-1)
+    windowed = dict(audio)
+    windowed["waveform"] = clip
+    return windowed
 
 
 
@@ -3977,6 +3909,15 @@ class FeiHouEasyH3:
             # A connected (not gallery) video was decoded whole; hold its first frame the same way.
             items = [_MediaInput(item.input_index, item.media_type, _hold_reference_video(item.value, hold, window), "")
                      if item.media_type == "video" and not _is_windowed(item.value) else item for item in items]
+        block_range = production_shot["motion"].get("range") if motion_shot else None
+        if motion_shot and production_shot["motion"].get("audio_window") and block_range and len(block_range) == 2:
+            # md @audio 分块: each audio card is cut to this block's @range (after
+            # its own manual trim), so a talk block sends only its own seconds.
+            start, end = float(block_range[0]), float(block_range[1])
+            items = [_MediaInput(item.input_index, item.media_type,
+                                 _window_reference_audio(_trim_reference_audio(item.value, item.audio_trim), start, end), "")
+                     if item.media_type == "audio" else item for item in items]
+            logging.info("Easy H3: md 写了 @audio 分块，音频卡截取 %.2f-%.2f 秒（%.2f 秒）", start, end, end - start)
         if isinstance(production_shot, dict) and production_shot.get("passthrough"):
             return cls._passthrough_context(h3_bundle, items, width, height, fps,
                                             _as_bool(advanced) and _as_bool(low_vram_streamed_attention))

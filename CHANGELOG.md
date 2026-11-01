@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.4.27
+
+- Removes GGUF transformer and text encoder support, so Easy H3 no longer needs ComfyUI-GGUF. Workflows that selected a `.gguf` model need a `.safetensors` model instead. Local GGUF prompt-optimizer models are unaffected.
+- Motion transfer: audio cards can follow each shot block's time range.
+- Fixes old video-card players that kept playing after a card was replaced or removed, which caused overlapping sound.
+
 ## v1.4.26
 
 - The LoRA loader no longer needs rgthree-comfy: its widgets, row drawing and LoRA list are now built in, so it no longer shows up blank when rgthree-comfy is missing.
