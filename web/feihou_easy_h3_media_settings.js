@@ -4,7 +4,8 @@
 // backend reads; the duration is the same window in seconds.
 
 export const VIDEO_SIZES = Object.freeze(["原始", "匹配参考图", "360P", "480P", "540P", "640P", "720P"]);
-export const DEFAULT_VIDEO_OPTS = Object.freeze({ fps: 24, size: "原始", skip: 0, cap: 0 });
+// 720P only ever shrinks: a source with a shorter short edge keeps its size.
+export const DEFAULT_VIDEO_OPTS = Object.freeze({ fps: 24, size: "720P", skip: 0, cap: 0 });
 
 function wholeNumber(value, fallback = 0) {
     const number = Math.round(Number(value));

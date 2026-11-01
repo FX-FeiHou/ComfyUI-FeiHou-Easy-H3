@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.4.28
+
+- Media video cards now default to 720P: a source whose short edge is above 720 is read at 720P, a smaller one keeps its own size. This also applies to cards whose settings were never opened. A card explicitly set to 原始 keeps the original size; Media Bridge and linked videos are not limited.
+- Short-edge presets now land exactly on their value (1080p at 720P gives 1280x720 instead of 1280x704), and a source at or below the preset is no longer resized.
+
 ## v1.4.27
 
 - Removes GGUF transformer and text encoder support, so Easy H3 no longer needs ComfyUI-GGUF. Workflows that selected a `.gguf` model need a `.safetensors` model instead. Local GGUF prompt-optimizer models are unaffected.

@@ -6209,7 +6209,7 @@ function openVideoSettings(node, ordinal, anchor) {
     };
     const fps = field(ZH_BROWSER ? "帧率" : "Frame rate", ZH_BROWSER ? "0 = 原始帧率" : "0 = source rate", numberInput(1));
     fps.max = "120";
-    const size = field(ZH_BROWSER ? "短边长" : "Short edge", ZH_BROWSER ? "保持比例，只缩小" : "Keeps aspect, only shrinks", document.createElement("select"));
+    const size = field(ZH_BROWSER ? "短边长" : "Short edge", ZH_BROWSER ? "默认 720P：超过才缩小，低于保持原尺寸" : "Default 720P: larger sources shrink, smaller ones stay as they are", document.createElement("select"));
     for (const value of VIDEO_SIZES) size.append(new Option(value, value));
     const cap = field(ZH_BROWSER ? "读取帧上限" : "Frame load cap", ZH_BROWSER ? "0 = 读到结尾" : "0 = to the end", numberInput(1));
     const skip = field(ZH_BROWSER ? "跳过前 X 帧" : "Skip first frames", ZH_BROWSER ? "按上面的帧率计" : "At the frame rate above", numberInput(1));

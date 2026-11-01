@@ -3775,6 +3775,10 @@ class FeiHouEasyH3:
                 # decoding, so the frame window replaces the time trim.
                 value = media_options.load_video(_embedded_media_path(value), options, image_area)
                 trim = ""
+            elif isinstance(value, str) and resolved_type == "video" and (
+                    default := media_options.default_options(_embedded_media_path(value))) is not None:
+                # No 媒体设置: a source above 720P is decoded at 720P; the time trim still applies.
+                value = media_options.load_video(_embedded_media_path(value), default, image_area)
             elif isinstance(value, str):
                 value = _load_embedded_media(value, resolved_type)
             if resolved_type == "image" and image_area is None and isinstance(value, torch.Tensor) and value.ndim == 4:

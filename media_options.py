@@ -28,6 +28,8 @@ VIDEO_SIZE_ORIGINAL = "原始"
 VIDEO_SIZE_MATCH_IMAGE = "匹配参考图"
 VIDEO_SHORT_EDGES = {f"{edge}P": edge for edge in (360, 480, 540, 640, 720)}
 VIDEO_SIZES = [VIDEO_SIZE_ORIGINAL, VIDEO_SIZE_MATCH_IMAGE, *VIDEO_SHORT_EDGES]
+# A card without its own choice: a larger source is read at 720P, a smaller one as it is.
+VIDEO_SIZE_DEFAULT = "720P"
 DEFAULT_FPS = 24.0
 CANVAS_MULTIPLE = 32
 
@@ -52,19 +54,22 @@ def parse_video_options(value: Any) -> dict | None:
             return default
         return result if math.isfinite(result) and result >= 0 else default
 
-    size = str(value.get("size") or VIDEO_SIZE_ORIGINAL)
+    size = str(value.get("size") or VIDEO_SIZE_DEFAULT)
     return {
         "fps": min(120.0, number("fps", DEFAULT_FPS, float)),
-        "size": size if size in VIDEO_SIZES else VIDEO_SIZE_ORIGINAL,
+        "size": size if size in VIDEO_SIZES else VIDEO_SIZE_DEFAULT,
         "skip": int(number("skip", 0, int)),
         "cap": int(number("cap", 0, int)),
     }
 
 
 def fit_short_edge(width: int, height: int, short_edge: int) -> tuple[int, int]:
-    scale = min(1.0, float(short_edge) / max(1, min(width, height)))
+    """The short edge lands exactly on the preset; a source at or below it keeps its size."""
+    if min(width, height) <= short_edge:
+        return width, height
     step = CANVAS_MULTIPLE
-    return max(step, round(width * scale / step) * step), max(step, round(height * scale / step) * step)
+    long_edge = max(step, round(max(width, height) * float(short_edge) / min(width, height) / step) * step)
+    return (short_edge, long_edge) if width <= height else (long_edge, short_edge)
 
 
 def fit_area(width: int, height: int, area: float) -> tuple[int, int]:
@@ -116,6 +121,17 @@ def probe_video(path: str) -> dict:
             "height": int(stream.codec_context.height),
             "has_audio": bool(container.streams.audio),
         }
+
+
+def default_options(path: str) -> dict | None:
+    """Options for a card without its own 媒体设置, or None when its source is small enough.
+
+    The source's own frame rate is kept: only the size differs from loading the file directly.
+    """
+    info = probe_video(path)
+    if target_size(info["width"], info["height"], VIDEO_SIZE_DEFAULT, None) is None:
+        return None
+    return {"fps": 0.0, "size": VIDEO_SIZE_DEFAULT, "skip": 0, "cap": 0}
 
 
 def _frame_array(frame, size: tuple[int, int] | None) -> np.ndarray:
@@ -249,7 +265,7 @@ def load_video_window(path: str, options: dict | None, trim: tuple[float, float]
     count = max(1, min(int(frames), hold + total - start_frame))
     indexes = hold_indexes(start_frame, count, hold, total)
     first = int(indexes[0])
-    size = options["size"] if options is not None else VIDEO_SIZE_ORIGINAL
+    size = options["size"] if options is not None else VIDEO_SIZE_DEFAULT
     arrays, _rate = _sample_frames(path, fps, round(origin * fps) + first, int(indexes[-1]) - first + 1,
                                    lambda width, height: target_size(width, height, size, image_area))
     if not arrays:
