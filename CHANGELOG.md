@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.4.26
+
+- The LoRA loader no longer needs rgthree-comfy: its widgets, row drawing and LoRA list are now built in, so it no longer shows up blank when rgthree-comfy is missing.
+- Corrects the example workflow notes and guide: rgthree-comfy is only needed by the rgthree nodes kept in Two-Stage Sampling v8.
+
 ## v1.4.25
 
 - Adds two example workflows: **Two-Stage Sampling v8** and **One-Click Long Video Replacement v1**. Reference media and previews are cleared; each workflow has notes for node and model downloads and for usage.

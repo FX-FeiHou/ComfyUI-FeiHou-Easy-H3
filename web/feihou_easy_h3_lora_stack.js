@@ -1,23 +1,8 @@
 // Same canvas-native stack UI as FeiHou LoRA Stack (Merge/Extract).
-// Adapted from rgthree-comfy's Power Lora Loader (MIT License).
+// Adapted from rgthree-comfy's Power Lora Loader and canvas widgets (MIT License,
+// Copyright (c) 2023 Regis Gaughan, III). Works without rgthree-comfy installed.
 import { app } from "../../scripts/app.js";
-import { RgthreeBaseServerNode } from "../rgthree-comfy/base_node.js";
-import { rgthree } from "../rgthree-comfy/rgthree.js";
-import {
-    drawNumberWidgetPart,
-    drawRoundedRectangle,
-    drawTogglePart,
-    fitString,
-    isLowQuality,
-} from "../rgthree-comfy/utils_canvas.js";
-import {
-    RgthreeBaseWidget,
-    RgthreeBetterButtonWidget,
-    RgthreeDividerWidget,
-} from "../rgthree-comfy/utils_widgets.js";
-import { showLoraChooser } from "../rgthree-comfy/utils_menu.js";
-import { rgthreeApi } from "../../rgthree/common/rgthree_api.js";
-import { moveArrayItem, removeArrayItem } from "../../rgthree/common/shared_utils.js";
+import { api } from "../../scripts/api.js";
 
 const STACK_CLASS = "FeiHouEasyH3LoraStack";
 const STACK_WIDTH = 440;
@@ -25,6 +10,226 @@ const BOTTOM_MARGIN = 14;
 const LORA_TEXT_NORMAL = "#f5f5f5";
 const LORA_TEXT_BYPASS = "#b8d8ff";
 const LORA_TEXT_DISABLED = "#777777";
+
+let lorasPromise = null;
+let lastPointerEvent = null;
+document.addEventListener("pointerdown", (event) => { lastPointerEvent = event; }, true);
+
+function moveArrayItem(array, item, to) {
+    array.splice(to, 0, array.splice(array.indexOf(item), 1)[0]);
+}
+
+function isLowQuality() {
+    return (app.canvas?.ds?.scale || 1) <= 0.5;
+}
+
+function fitString(ctx, text, maxWidth) {
+    if (ctx.measureText(text).width <= maxWidth) return text;
+    const room = maxWidth - ctx.measureText("…").width;
+    let low = 0;
+    let high = text.length;
+    while (low < high) {
+        const middle = Math.ceil((low + high) / 2);
+        if (ctx.measureText(text.substring(0, middle)).width <= room) low = middle;
+        else high = middle - 1;
+    }
+    return text.substring(0, low) + "…";
+}
+
+function drawRoundedRectangle(ctx, {pos, size}) {
+    const lowQuality = isLowQuality();
+    ctx.save();
+    ctx.strokeStyle = LiteGraph.WIDGET_OUTLINE_COLOR;
+    ctx.fillStyle = LiteGraph.WIDGET_BGCOLOR;
+    ctx.beginPath();
+    ctx.roundRect(...pos, ...size, lowQuality ? [0] : [size[1] * 0.5]);
+    ctx.fill();
+    if (!lowQuality) ctx.stroke();
+    ctx.restore();
+}
+
+function drawNumberWidgetPart(ctx, {posX, posY, height, value, textColor}) {
+    const arrowWidth = 9;
+    const arrowHeight = 10;
+    const innerMargin = 3;
+    const numberWidth = 32;
+    const midY = posY + height / 2;
+    let x = posX - drawNumberWidgetPart.WIDTH_TOTAL;
+    const less = [x, arrowWidth];
+    ctx.save();
+    ctx.fill(new Path2D(`M ${x} ${midY} l ${arrowWidth} ${arrowHeight / 2} l 0 -${arrowHeight} L ${x} ${midY} z`));
+    x += arrowWidth + innerMargin;
+    const number = [x, numberWidth];
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    const arrowColor = ctx.fillStyle;
+    if (textColor) ctx.fillStyle = textColor;
+    ctx.fillText(fitString(ctx, value.toFixed(2), numberWidth), x + numberWidth / 2, midY);
+    ctx.fillStyle = arrowColor;
+    x += numberWidth + innerMargin;
+    const more = [x, arrowWidth];
+    ctx.fill(new Path2D(`M ${x} ${midY - arrowHeight / 2} l ${arrowWidth} ${arrowHeight / 2} l -${arrowWidth} ${arrowHeight / 2} v -${arrowHeight} z`));
+    ctx.restore();
+    return [less, number, more];
+}
+drawNumberWidgetPart.WIDTH_TOTAL = 9 + 3 + 32 + 3 + 9;
+
+// Tri-state: true right, false left, null (some rows on) in the middle.
+function drawTogglePart(ctx, {posX, posY, height, value}) {
+    const lowQuality = isLowQuality();
+    const width = height * 1.5;
+    ctx.save();
+    if (!lowQuality) {
+        ctx.beginPath();
+        ctx.roundRect(posX + 4, posY + 4, width - 8, height - 8, [height * 0.5]);
+        ctx.globalAlpha = app.canvas.editor_alpha * 0.25;
+        ctx.fillStyle = "rgba(255,255,255,0.45)";
+        ctx.fill();
+        ctx.globalAlpha = app.canvas.editor_alpha;
+    }
+    ctx.fillStyle = value === true ? "#89B" : "#888";
+    const x = lowQuality || value === false ? posX + height * 0.5 : value === true ? posX + height : posX + height * 0.75;
+    ctx.beginPath();
+    ctx.arc(x, posY + height * 0.5, height * 0.36, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+    return [posX, width];
+}
+
+// LoraLoaderModelOnly is a core node, and object_info also answers remote browsers.
+function getLoras(force = false) {
+    if (!lorasPromise || force) {
+        lorasPromise = api.fetchApi("/object_info/LoraLoaderModelOnly", {cache: "no-store"})
+            .then((response) => response.json())
+            .then((info) => {
+                const spec = info?.LoraLoaderModelOnly?.input?.required?.lora_name;
+                const list = Array.isArray(spec?.[0]) ? spec[0] : spec?.[1]?.options;
+                return Array.isArray(list) ? list : [];
+            })
+            .catch((error) => {
+                lorasPromise = null;
+                console.warn("[FeiHou Easy H3] could not list LoRAs", error);
+                return [];
+            });
+    }
+    return lorasPromise;
+}
+
+class CanvasWidget {
+    constructor(name) {
+        this.name = name;
+        this.type = "custom";
+        this.options = {};
+        this.y = 0;
+        this.last_y = 0;
+        this.mouseDowned = null;
+        this.isMouseDownedAndOver = false;
+        this.hitAreas = {};
+        this.downedHitAreasForMove = [];
+        this.downedHitAreasForClick = [];
+    }
+
+    serializeValue() {
+        return this.value;
+    }
+
+    withinBounds(pos, bounds) {
+        return pos[0] >= bounds[0] && pos[0] <= bounds[0] + bounds[1];
+    }
+
+    mouse(event, pos, node) {
+        if (event.type === "pointerdown") {
+            this.mouseDowned = [...pos];
+            this.isMouseDownedAndOver = true;
+            this.downedHitAreasForMove.length = 0;
+            this.downedHitAreasForClick.length = 0;
+            let handled = false;
+            for (const part of Object.values(this.hitAreas)) {
+                if (!this.withinBounds(pos, part.bounds)) continue;
+                if (part.onMove) this.downedHitAreasForMove.push(part);
+                if (part.onClick) this.downedHitAreasForClick.push(part);
+                if (part.onDown) handled = part.onDown.apply(this, [event, pos, node, part]) === true || handled;
+            }
+            return handled;
+        }
+        if (event.type === "pointerup") {
+            if (!this.mouseDowned) return true;
+            const over = this.isMouseDownedAndOver;
+            this.cancelMouseDown();
+            let handled = false;
+            for (const part of this.downedHitAreasForClick) {
+                if (this.withinBounds(pos, part.bounds)) {
+                    handled = part.onClick.apply(this, [event, pos, node, part]) === true || handled;
+                }
+            }
+            this.downedHitAreasForClick.length = 0;
+            if (over) handled = this.onMouseClick(event, pos, node) === true || handled;
+            return this.onMouseUp(event, pos, node) ?? handled;
+        }
+        if (event.type === "pointermove") {
+            this.isMouseDownedAndOver = Boolean(this.mouseDowned) && !(pos[0] < 15 || pos[0] > node.size[0] - 15
+                || pos[1] < this.last_y || pos[1] > this.last_y + LiteGraph.NODE_WIDGET_HEIGHT);
+            for (const part of this.downedHitAreasForMove) part.onMove.apply(this, [event, pos, node, part]);
+            return true;
+        }
+        return false;
+    }
+
+    cancelMouseDown() {
+        this.mouseDowned = null;
+        this.isMouseDownedAndOver = false;
+        this.downedHitAreasForMove.length = 0;
+    }
+
+    onMouseClick() {}
+
+    onMouseUp() {}
+}
+
+class ButtonWidget extends CanvasWidget {
+    constructor(label, onClick) {
+        super(label);
+        this.value = "";
+        this.label = label;
+        this.onClickCallback = onClick;
+    }
+
+    draw(ctx, node, width, y, height) {
+        const lowQuality = isLowQuality();
+        ctx.save();
+        ctx.fillStyle = this.isMouseDownedAndOver ? "#444" : LiteGraph.WIDGET_BGCOLOR;
+        ctx.strokeStyle = LiteGraph.WIDGET_OUTLINE_COLOR;
+        ctx.beginPath();
+        ctx.roundRect(15, y, width - 30, height, lowQuality ? [0] : [4]);
+        ctx.fill();
+        if (!lowQuality) {
+            ctx.stroke();
+            ctx.fillStyle = LiteGraph.WIDGET_TEXT_COLOR;
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText(this.label, width / 2, y + height / 2);
+        }
+        ctx.restore();
+    }
+
+    onMouseClick(event, pos, node) {
+        return this.onClickCallback(event, pos, node);
+    }
+}
+
+class SpacerWidget extends CanvasWidget {
+    constructor() {
+        super("divider");
+        this.value = {};
+        this.options = {serialize: false};
+    }
+
+    draw() {}
+
+    computeSize(width) {
+        return [width, 4];
+    }
+}
 
 function drawLoraToggle(ctx, {posX, posY, height, value, activeColor}) {
     ctx.save();
@@ -99,14 +304,10 @@ function migrateLoraValues(values, defaultBypass = true) {
     return migrated;
 }
 
-class FeiHouEasyH3LoraStackNode extends RgthreeBaseServerNode {
-    constructor(title = stackTitle()) {
-        super(title);
-        this.loraWidgetsCounter = 0;
-        this.widgetButtonSpacer = null;
-        rgthreeApi.getLoras();
-    }
+// Methods put on the node's own ComfyUI class; ``base`` holds the ones they replace.
+const base = {};
 
+const stackMethods = {
     configure(info) {
         const legacyBypass = typeof info?.properties?.feihou_lora_bypass === "boolean"
             ? info.properties.feihou_lora_bypass
@@ -116,10 +317,10 @@ class FeiHouEasyH3LoraStackNode extends RgthreeBaseServerNode {
         // (workflow tab switch) re-create this node and lose node.mode.
         const savedMode = Number.isInteger(info?.properties?.feihou_mode) ? info.properties.feihou_mode : info?.mode;
         this.title = stackTitle();
-        while (this.widgets?.length) this.removeWidget(0);
+        if (this.widgets) this.widgets.length = 0;
         this.widgetButtonSpacer = null;
         this.loraWidgetsCounter = 0;
-        if (info?.id != null) super.configure({...info, widgets_values: []});
+        if (info?.id != null) base.configure.call(this, {...info, widgets_values: []});
         // The old node-level bypass property is consumed only as a migration
         // hint above and is not written back to the workflow.
         if (this.properties) delete this.properties.feihou_lora_bypass;
@@ -141,52 +342,48 @@ class FeiHouEasyH3LoraStackNode extends RgthreeBaseServerNode {
                 }
             }, 0);
         }
-    }
+    },
 
-    onModeChange(from, to) {
-        super.onModeChange?.(from, to);
-        if (this.configuring) return;
-        this.properties ||= {};
-        if (Number.isInteger(to)) this.properties.feihou_mode = to;
-    }
+    onSerialize(info) {
+        base.onSerialize?.call(this, info);
+        if (Number.isInteger(this.mode)) (info.properties ||= {}).feihou_mode = this.mode;
+    },
 
     onNodeCreated() {
-        super.onNodeCreated?.();
+        base.onNodeCreated?.call(this);
+        this.serialize_widgets = true;
+        this.loraWidgetsCounter = 0;
+        this.widgetButtonSpacer = null;
         this.title = stackTitle();
         this.addNonLoraWidgets();
         localizeLoraSlots(this);
         this.resizeToContent();
         this.setDirtyCanvas(true, true);
-    }
+    },
 
     resizeToContent() {
         const computed = this.computeSize();
         this.size = [STACK_WIDTH, Math.ceil(computed[1]) + BOTTOM_MARGIN];
         this.setDirtyCanvas(true, true);
-    }
+    },
 
     addNewLoraWidget(lora) {
-        this.loraWidgetsCounter++;
+        this.loraWidgetsCounter = (this.loraWidgetsCounter || 0) + 1;
         const row = this.addCustomWidget(new FeiHouEasyH3LoraWidget(`lora_${this.loraWidgetsCounter}`));
         if (lora) row.setLora(lora);
         if (this.widgetButtonSpacer) {
             moveArrayItem(this.widgets, row, this.widgets.indexOf(this.widgetButtonSpacer));
         }
         return row;
-    }
+    },
 
     addNonLoraWidgets() {
-        moveArrayItem(
-            this.widgets,
-            this.addCustomWidget(new RgthreeDividerWidget({marginTop: 4, marginBottom: 0, thickness: 0})),
-            0,
-        );
+        this.widgets ||= [];
+        moveArrayItem(this.widgets, this.addCustomWidget(new SpacerWidget()), 0);
         moveArrayItem(this.widgets, this.addCustomWidget(new FeiHouEasyH3LoraHeaderWidget()), 1);
-        this.widgetButtonSpacer = this.addCustomWidget(
-            new RgthreeDividerWidget({marginTop: 4, marginBottom: 0, thickness: 0}),
-        );
+        this.widgetButtonSpacer = this.addCustomWidget(new SpacerWidget());
         this.addCustomWidget(
-            new RgthreeBetterButtonWidget(t("+ 添加 LoRA", "+ Add LoRA"), (event) => {
+            new ButtonWidget(t("+ 添加 LoRA", "+ Add LoRA"), (event) => {
                 this.showLoraChooser(event, (value) => {
                     if (value && value !== "NONE" && value !== "None") {
                         this.addNewLoraWidget(value);
@@ -196,24 +393,24 @@ class FeiHouEasyH3LoraStackNode extends RgthreeBaseServerNode {
                 return true;
             }),
         );
-    }
+    },
 
     async showLoraChooser(event, onChoose) {
-        const details = await rgthreeApi.getLoras();
-        const loras = details.map((item) => item.file);
-        showLoraChooser(
+        const loras = await getLoras();
+        new LiteGraph.ContextMenu(["None", ...loras], {
             event,
-            (value) => {
+            title: "Choose a lora",
+            scale: Math.max(1, app.canvas.ds?.scale ?? 1),
+            className: "dark",
+            callback: (value) => {
                 if (typeof value === "string") onChoose(value.toUpperCase() === "NONE" ? null : value);
                 this.setDirtyCanvas(true, true);
             },
-            null,
-            ["None", ...loras],
-        );
-    }
+        });
+    },
 
     getSlotInPosition(canvasX, canvasY) {
-        const slot = super.getSlotInPosition(canvasX, canvasY);
+        const slot = base.getSlotInPosition?.call(this, canvasX, canvasY);
         if (slot) return slot;
         let lastWidget = null;
         for (const current of this.widgets || []) {
@@ -228,7 +425,7 @@ class FeiHouEasyH3LoraStackNode extends RgthreeBaseServerNode {
             return {widget: lastWidget, output: {type: "LORA WIDGET"}};
         }
         return undefined;
-    }
+    },
 
     getSlotMenuOptions(slot) {
         if (slot?.widget?.name?.startsWith("lora_")) {
@@ -265,31 +462,32 @@ class FeiHouEasyH3LoraStackNode extends RgthreeBaseServerNode {
                 {
                     content: t("移除", "Remove"),
                     callback: () => {
-                        removeArrayItem(this.widgets, row);
+                        this.widgets.splice(this.widgets.indexOf(row), 1);
                         this.resizeToContent();
                     },
                 },
             ];
             new LiteGraph.ContextMenu(menuItems, {
                 title: t("LoRA 控件", "LORA WIDGET"),
-                event: rgthree.lastCanvasMouseEvent,
+                event: lastPointerEvent,
             });
             return undefined;
         }
-        return this.defaultGetSlotMenuOptions(slot);
-    }
+        return base.getSlotMenuOptions?.call(this, slot) ?? defaultSlotMenu(slot);
+    },
 
     refreshComboInNode() {
-        rgthreeApi.getLoras(true);
-    }
+        base.refreshComboInNode?.call(this);
+        getLoras(true);
+    },
 
     loraWidgets() {
         return (this.widgets || []).filter((item) => item.name?.startsWith("lora_"));
-    }
+    },
 
     hasLoraWidgets() {
         return this.loraWidgets().length > 0;
-    }
+    },
 
     allLorasState() {
         const rows = this.loraWidgets();
@@ -297,28 +495,27 @@ class FeiHouEasyH3LoraStackNode extends RgthreeBaseServerNode {
         const allOn = rows.every((row) => row.value.on === true);
         const allOff = rows.every((row) => row.value.on === false);
         return allOn ? true : allOff ? false : null;
-    }
+    },
 
     toggleAllLoras() {
         const value = this.allLorasState() === true ? false : true;
         for (const row of this.loraWidgets()) row.value.on = value;
         this.setDirtyCanvas(true, true);
-    }
+    },
+};
 
-    static setUp(comfyClass, nodeData) {
-        RgthreeBaseServerNode.registerForOverride(comfyClass, nodeData, FeiHouEasyH3LoraStackNode);
+function defaultSlotMenu(slot) {
+    const menu = [];
+    if (slot?.output?.links?.length) menu.push({content: "Disconnect Links", slot});
+    const socket = slot?.input || slot?.output;
+    if (socket) {
+        if (socket.removable) menu.push(socket.locked ? {content: "Cannot remove"} : {content: "Remove Slot", slot});
+        if (!socket.nameLocked) menu.push({content: "Rename Slot", slot});
     }
-
-    static onRegisteredForOverride(comfyClass) {
-        setTimeout(() => { FeiHouEasyH3LoraStackNode.category = comfyClass.category; });
-    }
+    return menu;
 }
 
-FeiHouEasyH3LoraStackNode.title = stackTitle();
-FeiHouEasyH3LoraStackNode.type = STACK_CLASS;
-FeiHouEasyH3LoraStackNode.comfyClass = STACK_CLASS;
-
-class FeiHouEasyH3LoraHeaderWidget extends RgthreeBaseWidget {
+class FeiHouEasyH3LoraHeaderWidget extends CanvasWidget {
     constructor() {
         super("FeiHouEasyH3LoraHeaderWidget");
         this.value = {type: "FeiHouEasyH3LoraHeaderWidget"};
@@ -356,7 +553,7 @@ class FeiHouEasyH3LoraHeaderWidget extends RgthreeBaseWidget {
     }
 }
 
-class FeiHouEasyH3LoraWidget extends RgthreeBaseWidget {
+class FeiHouEasyH3LoraWidget extends CanvasWidget {
     constructor(name) {
         super(name);
         this.haveMouseMovedStrength = false;
@@ -497,8 +694,7 @@ class FeiHouEasyH3LoraWidget extends RgthreeBaseWidget {
         }, event);
     }
 
-    onMouseUp(event, pos, node) {
-        super.onMouseUp(event, pos, node);
+    onMouseUp() {
         this.haveMouseMovedStrength = false;
     }
 
@@ -511,6 +707,11 @@ class FeiHouEasyH3LoraWidget extends RgthreeBaseWidget {
 app.registerExtension({
     name: "FeiHouEasyH3.NativeLoraStack",
     async beforeRegisterNodeDef(nodeType, nodeData) {
-        if (nodeData.name === STACK_CLASS) FeiHouEasyH3LoraStackNode.setUp(nodeType, nodeData);
+        if (nodeData.name !== STACK_CLASS) return;
+        const proto = nodeType.prototype;
+        for (const name of Object.keys(stackMethods)) base[name] = proto[name];
+        Object.assign(proto, stackMethods);
+        nodeType.title = stackTitle();
+        getLoras();
     },
 });

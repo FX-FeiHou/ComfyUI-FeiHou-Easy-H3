@@ -10,7 +10,7 @@
 - [ComfyUI-KJNodes](https://github.com/kijai/ComfyUI-KJNodes)（请更新到最新版，旧版可能报 `unexpected keyword argument 'attention'`）
 - [ComfyUI-VideoHelperSuite](https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite)
 - [ComfyUI-FeiHou-Toolbox](https://github.com/FX-FeiHou/ComfyUI-FeiHou-Toolbox)（二段式采样 v8、一键长视频自动替换 v1）
-- [rgthree-comfy](https://github.com/rgthree/rgthree-comfy)（LoRA 加载器需要，二段式采样 v8 的分组开关和标题也用它）
+- [rgthree-comfy](https://github.com/rgthree/rgthree-comfy)（二段式采样 v8 的分组开关和标题）
 - [ComfyUI-MiniMaxH3Mod](https://github.com/Luisacaotica/ComfyUI-MiniMaxH3Mod)（二段式采样 v8 的 RefMod 节点，默认静音，用不到可不装）
 
 也可以在 ComfyUI Manager 中搜索插件名称安装。安装或更新后请重启 ComfyUI。
@@ -43,7 +43,7 @@ Before using any workflow in this folder, install the required custom nodes and 
 - [ComfyUI-KJNodes](https://github.com/kijai/ComfyUI-KJNodes) (keep it up to date; old versions can fail with `unexpected keyword argument 'attention'`)
 - [ComfyUI-VideoHelperSuite](https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite)
 - [ComfyUI-FeiHou-Toolbox](https://github.com/FX-FeiHou/ComfyUI-FeiHou-Toolbox) (Two-Stage Sampling v8, one-click long-video replacement v1)
-- [rgthree-comfy](https://github.com/rgthree/rgthree-comfy) (required by the LoRA loader; Two-Stage Sampling v8 also uses its group toggles and labels)
+- [rgthree-comfy](https://github.com/rgthree/rgthree-comfy) (group toggles and labels in Two-Stage Sampling v8)
 - [ComfyUI-MiniMaxH3Mod](https://github.com/Luisacaotica/ComfyUI-MiniMaxH3Mod) (the RefMod node in Two-Stage Sampling v8; muted by default and optional)
 
 You can also install them by searching for their names in ComfyUI Manager. Restart ComfyUI after installing or updating custom nodes.
