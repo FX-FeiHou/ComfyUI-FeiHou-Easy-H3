@@ -5911,15 +5911,49 @@ async function uploadEmbeddedMediaFile(node, mediaType, ordinal, file) {
     }
 }
 
+const EMBEDDED_MEDIA_EXTENSIONS = Object.freeze({
+    image: /\.(png|jpe?g|webp|gif|bmp)$/i,
+    video: /\.(mp4|webm|mov|mkv|avi|m4v)$/i,
+    audio: /\.(mp3|wav|flac|ogg|m4a|aac|opus|mp4|webm|mov)$/i,
+});
+
+function embeddedMediaFileFits(mediaType, file) {
+    const kind = String(file?.type || "").split("/")[0];
+    if (kind) return kind === mediaType || (mediaType === "audio" && kind === "video");
+    return EMBEDDED_MEDIA_EXTENSIONS[mediaType]?.test(String(file?.name || "")) || false;
+}
+
+// Several files dropped or picked at once fill this card and the ones after it,
+// in file-name order (2 before 10, like the folder view); files past the last
+// card are dropped.  A single file only replaces this card, as before.
+async function uploadEmbeddedMediaFiles(node, mediaType, ordinal, fileList) {
+    const files = Array.from(fileList || []).filter((file) => embeddedMediaFileFits(mediaType, file));
+    if (files.length <= 1) {
+        if (files[0] || fileList?.[0]) await uploadEmbeddedMediaFile(node, mediaType, ordinal, files[0] || fileList[0]);
+        return;
+    }
+    files.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }));
+    const targets = [];
+    for (let slot = ordinal; slot <= EMBEDDED_MEDIA_LIMITS[mediaType]; slot += 1) {
+        if (!embeddedMediaCell(node, mediaType, slot)?.classList?.contains("is-disabled")) targets.push(slot);
+    }
+    const placed = files.slice(0, targets.length);
+    if (files.length > placed.length) {
+        console.info(`[Easy H3] 拖入 ${files.length} 个文件，从卡片 ${ordinal} 起放得下 ${placed.length} 个，后面的 ${files.length - placed.length} 个已忽略`);
+    }
+    for (const [index, file] of placed.entries()) await uploadEmbeddedMediaFile(node, mediaType, targets[index], file);
+}
+
 function chooseEmbeddedMediaFile(node, mediaType, ordinal) {
     const input = document.createElement("input");
     input.type = "file";
+    input.multiple = true;
     input.accept = EMBEDDED_MEDIA_ACCEPT[mediaType] || "";
     input.style.display = "none";
     input.addEventListener("change", () => {
-        const file = input.files?.[0];
+        const files = Array.from(input.files || []);
         input.remove();
-        if (file) uploadEmbeddedMediaFile(node, mediaType, ordinal, file);
+        if (files.length) uploadEmbeddedMediaFiles(node, mediaType, ordinal, files);
     }, { once: true });
     document.body.append(input);
     input.click();
@@ -5984,8 +6018,8 @@ function createEmbeddedMediaSlot(node, mediaType, ordinal) {
             if (payload.node_id === String(node.id ?? "") && payload.media_type === mediaType) reorderEmbeddedMedia(node, mediaType, payload.ordinal, ordinal);
             return;
         }
-        const file = event.dataTransfer?.files?.[0];
-        if (file) uploadEmbeddedMediaFile(node, mediaType, ordinal, file);
+        const files = event.dataTransfer?.files;
+        if (files?.length) uploadEmbeddedMediaFiles(node, mediaType, ordinal, files);
     });
     return cell;
 }

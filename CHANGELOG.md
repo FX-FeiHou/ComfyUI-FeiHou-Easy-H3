@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.4.29
+
+- Motion transfer: Motion Collect now queues the film's next segment itself, right behind the running prompt at the front of the queue. A task queued during a film waits until the film is finished instead of running in between and mixing up the run state, and switching workflow tabs no longer queues the wrong workflow. The browser only queues as a fallback, and progress updates only touch the workflow the run belongs to.
+- Media node: several files dropped onto a card (or picked at once) fill that card and the ones after it in file-name order (2 before 10); files of another type are skipped and files past the last card are dropped.
+
 ## v1.4.28
 
 - Media video cards now default to 720P: a source whose short edge is above 720 is read at 720P, a smaller one keeps its own size. This also applies to cards whose settings were never opened. A card explicitly set to 原始 keeps the original size; Media Bridge and linked videos are not limited.

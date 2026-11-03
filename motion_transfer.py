@@ -27,10 +27,12 @@ Combine V2 joins the blocks into the complete film.
 
 from __future__ import annotations
 
+import copy
 import logging
 import math
 import os
 import random
+import uuid
 from collections import OrderedDict
 from dataclasses import dataclass, replace
 from fractions import Fraction
@@ -58,7 +60,8 @@ from .dual_sample import (
 from .nodes import H3HighresRebuilder, MiniMaxH3Context
 from .production_continuation import SAVE_KEY, _audio_slice
 from .production_pack import SHOT_TYPE
-from .shot_prompts import advance_block, finish_series, load_tail, output_root, save_tail
+from .shot_prompts import START_MANUAL, advance_block, finish_series, load_tail, output_root, save_tail
+from .shot_prompts import START_AUTO as SHOT_START_AUTO, START_RESTART as SHOT_START_RESTART
 from .third_party import h3_dual_clock as dual_clock
 
 
@@ -126,6 +129,54 @@ _RUN: dict = {}
 _WINDOW_CACHE: OrderedDict = OrderedDict()
 # A context-window block holds a few windows per canvas.
 WINDOW_CACHE_SIZE = 16
+
+
+def _queue_next_run(info: dict) -> bool:
+    """Queue this film's next segment right behind the running prompt.
+
+    The copy is the prompt that is running now, not the browser's current
+    graph, and it goes to the front of the queue: another task queued in the
+    meantime waits until this film is finished instead of running in between
+    (which also mixed up the run state and, after switching workflow tabs,
+    queued the other workflow).  Returns False when the running prompt cannot
+    be found, so the browser falls back to queueing it.
+    """
+    try:
+        from server import PromptServer
+    except ImportError:
+        return False
+    server = getattr(PromptServer, "instance", None)
+    queue = getattr(server, "prompt_queue", None)
+    prompt_id = getattr(server, "last_prompt_id", None)
+    if queue is None or not prompt_id:
+        return False
+    with queue.mutex:
+        running = next((item for item in queue.currently_running.values() if item[1] == prompt_id), None)
+        running = copy.deepcopy(running) if running is not None else None
+    if running is None:
+        return False
+    prompt = running[2]
+    # What the browser does to 分镜提示词 before queueing: 镜号 names the block to
+    # run (this one while it has segments left), 从头开始 becomes 自动续接.
+    if "shot_done" in info:
+        shot_numbers = str(int(info["shot_next"])) if info.get("shot_next") else None
+    else:
+        shot_numbers = str(int(info["block"])) if info.get("block") else None
+    for node in prompt.values():
+        if not isinstance(node, dict) or node.get("class_type") != "FeiHouEasyH3ShotPrompts":
+            continue
+        inputs = node.setdefault("inputs", {})
+        if inputs.get("start") == START_MANUAL:
+            continue
+        if inputs.get("start") == SHOT_START_RESTART:
+            inputs["start"] = SHOT_START_AUTO
+        if shot_numbers is not None and not isinstance(inputs.get("shot_numbers"), list):
+            inputs["shot_numbers"] = shot_numbers
+    number = -server.number
+    server.number += 1
+    queue.put((number, str(uuid.uuid4()), prompt, *running[3:]))
+    LOGGER.info("Easy H3 motion transfer: queued the next run of this film at the front of the queue")
+    return True
 
 
 def _detached(value):
@@ -1136,6 +1187,16 @@ class FeiHouEasyH3MotionCollect:
     @staticmethod
     def collect(latent, motion_state, audio_output, auto_queue=True, color_match=False, color_match_strength=1.0,
                 save_segments=False, filename_prefix="FeiHou_H3_motion/segment"):
+        result = FeiHouEasyH3MotionCollect._collect(latent, motion_state, audio_output, auto_queue, color_match,
+                                                    color_match_strength, save_segments, filename_prefix)
+        info = result["ui"]["feihou_motion"][0]
+        if info.get("next"):
+            info["queued"] = _queue_next_run(info)
+        return result
+
+    @staticmethod
+    def _collect(latent, motion_state, audio_output, auto_queue, color_match, color_match_strength,
+                 save_segments, filename_prefix):
         if not isinstance(motion_state, dict) or "run" not in motion_state:
             raise ValueError("motion_state 必须接「动作迁移分段」节点。")
         if not isinstance(latent, dict) or not getattr(latent.get("samples"), "is_nested", False):

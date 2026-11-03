@@ -669,14 +669,19 @@ app.registerExtension({
     installDropTarget();
     api.addEventListener("executed", (event) => {
       const output = event?.detail?.output || {};
-      if (output.feihou_shot?.[0]) showShot(output.feihou_shot[0]);
+      // Another workflow tab may be open now: only touch the graph the run belongs to.
+      const ownerId = event?.detail?.display_node ?? event?.detail?.node;
+      const owner = app.graph?.getNodeById?.(ownerId);
+      const ownedBy = (type) => owner?.type === type;
+      if (output.feihou_shot?.[0] && ownedBy(SHOT_NODE)) showShot(output.feihou_shot[0]);
       const info = output.feihou_motion?.[0];
-      setShotProgress(info);
+      if (ownedBy("FeiHouEasyH3MotionCollect")) setShotProgress(info);
       if (!info?.next) return;
-      // The next block is queued from this same graph: switch a "从头开始" batch to
-      // 自动续接, otherwise it would restart at block 1 forever. 手动设置 stays as
-      // it is: the server resumes the same pick list from its state file.
-      const shot = (app.graph?._nodes || []).find((node) => node?.type === "FeiHouEasyH3ShotPrompts");
+      const mine = ownedBy("FeiHouEasyH3MotionCollect");
+      // The next run continues this film: switch a "从头开始" batch to 自动续接,
+      // otherwise it would restart at block 1 forever. 手动设置 stays as it is:
+      // the server resumes the same pick list from its state file.
+      const shot = mine ? (app.graph?._nodes || []).find((node) => node?.type === "FeiHouEasyH3ShotPrompts") : null;
       const startWidget = shot?.widgets?.find((widget) => widget?.name === "start");
       if (startWidget && startWidget.value === START_RESTART) {
         startWidget.value = "自动续接";
@@ -684,6 +689,12 @@ app.registerExtension({
         shot.setDirtyCanvas?.(true, true);
         console.info("[Easy H3] 自动续跑下一块：start 已切到「自动续接」");
       }
+      if (info.queued) {
+        // The server already queued this film's next run, at the front of the queue.
+        console.info("[Easy H3] 动作迁移：下一段已由后台排在队列最前面");
+        return;
+      }
+      if (!mine) return;  // another workflow is open: queueing it would run the wrong graph
       const where = info.blocks ? `第 ${info.block}/${info.blocks} 个分镜，第 ${info.done}/${info.count} 段` : `第 ${info.done}/${info.count} 段`;
       console.info(`[Easy H3] 动作迁移：${where}完成，排队下一段`);
       setTimeout(() => app.queuePrompt(0, 1), 0);
