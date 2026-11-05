@@ -546,8 +546,9 @@ function labelSegmentFrames(node) {
   if (widget._state) widget._state.value = match;
 }
 
-// 帧窗口 off: segment_frames and overlap_frames do nothing, show them greyed out.
-const FRAME_WINDOW_FIELDS = ["segment_frames", "overlap_frames"];
+// 帧窗口 off: segment_frames does nothing, show it greyed out.  overlap_frames
+// stays live: shot blocks still use it for @split segments and @continue.
+const FRAME_WINDOW_FIELDS = ["segment_frames"];
 
 function syncFrameWindowFields(node) {
   const toggle = node.widgets?.find((item) => item?.name === "frame_window");

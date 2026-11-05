@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.4.30
+
+- Motion transfer: a shot md whose blocks are all `@video none` (reference generation only, no reference video) now runs in the motion transfer workflow; each block takes its length from `@range`, and color matching is skipped when there is no source video.
+- Motion transfer: shot blocks without `@split` follow Motion Segment's frame window setting: 帧窗口分段 cuts them into `segment_frames` clips, 整段一次采完 samples the whole block at once. `overlap_frames` stays editable with the frame window off, since `@split` and `@continue` still use it.
+- Dual Sample: a context that skipped Motion Segment now stops with a clear message instead of a latent shape mismatch.
+
 ## v1.4.29
 
 - Motion transfer: Motion Collect now queues the film's next segment itself, right behind the running prompt at the front of the queue. A task queued during a film waits until the film is finished instead of running in between and mixing up the run state, and switching workflow tabs no longer queues the wrong workflow. The browser only queues as a fallback, and progress updates only touch the workflow the run belongs to.

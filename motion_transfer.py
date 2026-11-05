@@ -5,9 +5,10 @@
 Two ways to cut the reference video 1 (e.g. the RGB dance):
 
 * **Shot blocks** (``shot_prompts`` connected): the markdown shot list gives
-  each block its time range and its own prompt; a block of up to 15 s is one
-  segment, a longer continuous shot is split at its @split points (or evenly)
-  into segments of at most 15 s, and the block is saved as one video.  Consecutive segments inside a block,
+  each block its time range and its own prompt; a block is split at its
+  @split points, otherwise Motion Segment decides: 帧窗口分段 cuts it into
+  ``segment_frames`` clips, 整段一次采完 samples it whole; the block is saved
+  as one video.  Consecutive segments inside a block,
   and a block marked ``@continue``, are anchored to the previous segment's last
   frames through the tail guide, so the seam stays continuous; a block that
   follows a hard cut starts from nothing.  With 分段方式 上下文窗口 a long
@@ -118,9 +119,8 @@ CONTEXT_OVERLAP_CHOICES = ["34", "68", "102"]
 CONTEXT_OVERLAP_DEFAULT = "68"
 SEGMENT_SAMPLERS = [*comfy.samplers.SAMPLER_NAMES,
                     *(name for name in dual_clock.SAMPLER_OPTIONS if name not in comfy.samplers.SAMPLER_NAMES)]
-# An in-block segment (块内分镜) holds at most 15 s of the block; the overlap
-# context frames of a continued segment come on top.  A 15 s block is one
-# segment, 20 s two, 40 s three.
+# An @split segment (块内分镜) holds at most 15 s of the block; the overlap
+# context frames of a continued segment come on top.
 SEGMENT_MAX_FRAMES = round(15.0 * h3.FPS)
 # One motion-transfer run in progress (ComfyUI process memory).
 _RUN: dict = {}
@@ -380,7 +380,7 @@ def _color_matched(frames, motion_state, start: int, enabled: bool, strength: fl
     if not enabled:
         return frames
     if window is None:
-        LOGGER.warning("Easy H3 motion transfer: 颜色匹配需要重新运行 Setup（旧的 h3_context 没有原片帧），本块未调色")
+        LOGGER.info("Easy H3 motion transfer: 没有参考视频 1 的原片帧，颜色匹配跳过")
         return frames
     frames, report = match_colors_to_source(frames, window(start, int(frames.shape[0])), strength)
     for shot in report:
@@ -423,11 +423,14 @@ class _Segment:
 
 
 def _block_segments(frames: int, start: int, overlap: int, continues: bool,
-                    splits: list[int] | tuple[int, ...] | None = None) -> list[_Segment]:
-    """Split one shot block into sampling segments of at most 15 s.
+                    splits: list[int] | tuple[int, ...] | None = None,
+                    segment_length: int | None = None) -> list[_Segment]:
+    """Split one shot block into sampling segments.
 
     ``splits`` (frames from the block start, from @split) are where the
-    framing changes; without them a longer block is split evenly.
+    framing changes.  Without them Motion Segment decides: ``segment_length``
+    (帧窗口分段) samples clips of that many frames, overlap included; None
+    (整段一次采完) samples the whole block at once, however long it is.
     Segment 0 starts from nothing unless the block continues the previous one,
     in which case ``overlap`` context frames come first.  Every later segment
     starts ``overlap`` frames before its own window, so the tail guide and the
@@ -440,9 +443,13 @@ def _block_segments(frames: int, start: int, overlap: int, continues: bool,
         longest = max(right - left for left, right in zip(bounds, bounds[1:]))
         if longest > SEGMENT_MAX_FRAMES + 1:
             raise ValueError(f"动作迁移：@split 分出的块内分镜有 {longest / h3.FPS:.2f} 秒，超过 15 秒。")
+    elif segment_length:
+        bounds = [0]
+        while bounds[-1] < frames:
+            skip = min(overlap if (len(bounds) > 1 or continues) else 0, max(0, int(start) + bounds[-1]))
+            bounds.append(min(frames, bounds[-1] + max(1, int(segment_length) - skip)))
     else:
-        count = max(1, math.ceil(frames / SEGMENT_MAX_FRAMES))
-        bounds = [int(round(index * frames / count)) for index in range(count + 1)]
+        bounds = [0, frames]
     bounds[-1] = frames
     plan: list[_Segment] = []
     for index in range(len(bounds) - 1):
@@ -607,7 +614,8 @@ def _prepare_fixed_segments(h3_context, builder, length: int, overlap: int, max_
 
 
 def _prepare_shot_block(h3_context, builder, shot: dict, overlap: int, width: int, height: int, fps: float,
-                        soundtrack: bool = True, context: tuple[int, int] | None = None):
+                        soundtrack: bool = True, context: tuple[int, int] | None = None,
+                        segment_length: int | None = None):
     """One sampling segment of the current markdown shot block.
 
     ``context`` = (window frames, overlap frames): the whole block is one
@@ -630,7 +638,7 @@ def _prepare_shot_block(h3_context, builder, shot: dict, overlap: int, width: in
         skip = min(overlap if continues else 0, block_start)
         plan = [_Segment(block_start - skip, _ceil_grid(block_frames + skip), skip, block_frames)]
     else:
-        plan = _block_segments(block_frames, block_start, overlap, continues, shot.get("splits"))
+        plan = _block_segments(block_frames, block_start, overlap, continues, shot.get("splits"), segment_length)
     same_run = (_RUN.get("mode") == "block" and _RUN.get("fingerprint") == fingerprint
                 and _RUN.get("series") == series)
     if not same_run or int(_RUN.get("block") or 0) != block:
@@ -706,7 +714,7 @@ def _window_context(h3_context, builder, state, conditioning, latent, soundtrack
         return _clip_conditioning(h3_context, builder, start, length, width, height, windows, tail,
                                   skip if tail is not None else 0, first, **options)
 
-    return replace(h3_context, conditioning=conditioning, latent=latent, dual_plan=None,
+    return replace(h3_context, conditioning=conditioning, latent=latent, dual_plan=None, motion_placeholder=False,
                    highres_rebuilder=H3HighresRebuilder(build=build, canvas_dependent=True))
 
 
@@ -783,7 +791,8 @@ class FeiHouEasyH3MotionSegment:
             "optional": {
                 "shot_prompts": (SHOT_TYPE, {"forceInput": True, "tooltip":
                     "接「分镜提示词」节点的 production_shot（同一个输出再拉一根线过来）。接上后按 md 的分镜块跑："
-                    "15 秒以内的块整块采样，更长的按 @split 或平均分成每段不超过 15 秒，块内和 @continue 的块用尾部帧接续；不接则按每段帧数固定分段。"}),
+                    "写了 @split 的块按切点分段；没写的按本节点的 frame_window：帧窗口分段按 segment_frames 分段，整段一次采完则整块一次采样（不限时长）。"
+                    "块内和 @continue 的块用尾部帧接续；不接则按每段帧数固定分段。"}),
                 "reference_soundtrack": ([SOUNDTRACK_TO_MODEL, SOUNDTRACK_COLLECT_ONLY], {"default": SOUNDTRACK_TO_MODEL,
                     "tooltip": "参考视频 1 的原声要不要送进模型。送入模型：原声作为 <Audio 1> 参与生成（人物替换跟唱、对口型用），音色参考等音频卡顺延成 <Audio 2> 起。"
                                "不送入模型：视频只做动作参考，原声不编码（参考 token 更少），音频卡的第一条就是 <Audio 1>；原声照样交给「动作迁移收束」按 @sound / audio_output 输出。"}),
@@ -791,18 +800,18 @@ class FeiHouEasyH3MotionSegment:
                 # (feihou_segment_layout) maps older saves onto this order by name.
                 "segmentation": ([SEGMENTATION_CHAIN, SEGMENTATION_CONTEXT], {"default": SEGMENTATION_CHAIN,
                     "tooltip": "分段方式（只对接了分镜提示词、长于一个窗口的跳舞/动作块生效）。"
-                               "帧窗口：块内按 15 秒分段逐段采样，后一段锁定上一段解码出的尾部帧接上，段数越多细节越掉、噪点越多。"
+                               "帧窗口：块内按 @split 或 segment_frames 分段逐段采样，后一段锁定上一段解码出的尾部帧接上，段数越多细节越掉、噪点越多。"
                                "上下文窗口：整块一次采样，每一步把整块 latent 切成互相重叠的窗口分别预测、在重叠处线性混合，"
                                "每个窗口拿自己时间段的参考视频（参考图和提示词每个窗口都带），窗口之间不传解码画面，画质不随长度累积变差；"
                                "单块一次跑完（不再自动排队块内下一段），@split 不再分段。二段式的一采和 2nd Sample Enhancer 都按窗口采样。"
                                "没有参考视频的口播块自动按帧窗口处理。"}),
                 "frame_window": ("BOOLEAN", {"default": True, "label_on": "帧窗口分段", "label_off": "整段一次采完",
-                    "tooltip": "只在没接「分镜提示词」时生效。帧窗口分段：按 segment_frames 把参考视频 1 逐段采样，"
-                               "后一段接上一段结尾 overlap_frames 帧，直到整段跑完。整段一次采完：参考视频 1 整段一次采样，"
-                               "segment_frames 和 overlap_frames 不起作用（视频长时很吃显存）。接了分镜提示词时按 md 分块。"}),
+                    "tooltip": "帧窗口分段：按 segment_frames 逐段采样，后一段接上一段结尾 overlap_frames 帧，直到跑完。"
+                               "整段一次采完：不分段，一次采样（视频长时很吃显存）。没接「分镜提示词」时作用于参考视频 1 整段；"
+                               "接了分镜提示词时作用于没写 @split 的分镜块，写了 @split 的块按切点分段。"}),
                 "segment_frames": (SEGMENT_FRAME_CHOICES, {"default": SEGMENT_FRAME_DEFAULT,
                                            "tooltip": "固定分段的每段帧数（24fps），H3 只接受 5+17N 帧：124 帧 ≈ 5.17 秒，其它可选 107、141、158…。"
-                                                      "接「分镜提示词」时本项不决定段长：15 秒以内的块整块一段，更长的按 @split（没写就平均）分成每段不超过 15 秒，它只用于重叠帧数的上限校验。"}),
+                                                      "接「分镜提示词」时，用于没写 @split 的分镜块（帧窗口分段打开时）；写了 @split 的块按切点分段。"}),
                 "overlap_frames": (OVERLAP_CHOICES, {"default": "22",
                                                     "tooltip": "相邻两段重叠帧数：上一段结尾这么多帧的 latent 被锁定作为下一段开头。22 帧 = 7 个视频 token。"}),
                 "context_window_frames": (CONTEXT_WINDOW_CHOICES, {"default": CONTEXT_WINDOW_DEFAULT,
@@ -880,7 +889,7 @@ class FeiHouEasyH3MotionSegment:
         if first_pass is not None:
             # Two-pass: the 2nd Sample Enhancer needs a 1st-pass context; its
             # sampling is wasted work, Collect outputs the source frames anyway.
-            guider, sampler, _sigmas, _latent, context = first_pass(h3_context)
+            guider, sampler, _sigmas, _latent, context = first_pass(replace(h3_context, motion_placeholder=False))
         else:
             sampler = _node_value(custom_sampler.KSamplerSelect.execute(sampler_name))
             guider = _guider(model, h3_context.conditioning, 1.0, None)
@@ -902,8 +911,12 @@ class FeiHouEasyH3MotionSegment:
         builder = getattr(h3_context, "segment_builder", None)
         if builder is None:
             raise ValueError("动作迁移需要 Setup 选择「参考生视频」模式（并重新运行 Setup）。")
-        if builder.source_frames < 5:
-            raise ValueError("动作迁移需要至少一个参考视频：参考视频 1 决定总长度。")
+        shot = shot_prompts.get("motion") if isinstance(shot_prompts, dict) else None
+        # A shot md block written @video none (reference generation, e.g. a talk
+        # block) takes its length from @range, so the md needs no reference video.
+        if builder.source_frames < 5 and not (shot and shot.get("video") is False):
+            raise ValueError("动作迁移需要至少一个参考视频：参考视频 1 决定总长度。"
+                             "只做参考生视频（不跟随视频）时，分镜 md 的每块写 @video none。")
 
         length = _grid_frames(_window_frames(segment_frames))
         whole = not frame_window and not isinstance(shot_prompts, dict)
@@ -932,7 +945,6 @@ class FeiHouEasyH3MotionSegment:
         def first_pass(context):
             return _first_pass(model, context, sampler_name, scheduler, steps, first_steps, cfg)
 
-        shot = shot_prompts.get("motion") if isinstance(shot_prompts, dict) else None
         if shot and shot.get("passthrough"):
             return FeiHouEasyH3MotionSegment._prepare_passthrough(model, h3_context, builder, shot, sampler_name,
                                                                   width, height, fps,
@@ -946,7 +958,8 @@ class FeiHouEasyH3MotionSegment:
                 LOGGER.warning("Easy H3 motion transfer: 上下文窗口需要接「分镜提示词」，固定分段仍按帧窗口采样")
         if shot:
             conditioning, latent, state, index, count, total = _prepare_shot_block(
-                h3_context, builder, shot, overlap, width, height, fps, soundtrack, context)
+                h3_context, builder, shot, overlap, width, height, fps, soundtrack, context,
+                length if frame_window else None)
         else:
             conditioning, latent, state, index, count, total = _prepare_fixed_segments(
                 h3_context, builder, length, overlap, 0, start, width, height, fps, soundtrack)

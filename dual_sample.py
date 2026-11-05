@@ -123,6 +123,16 @@ def _context_class():
     return MiniMaxH3Context
 
 
+def _refuse_motion_placeholder(context: Any) -> None:
+    """Setup fed by 分镜提示词 encodes nothing itself: only 动作迁移分段 can sample it."""
+    if getattr(context, "motion_placeholder", False):
+        raise ValueError(
+            "这个 Setup 接了「分镜提示词」，它的 h3_context 只是给「动作迁移分段」用的占位（没有编码参考，latent 只有 5 帧）。"
+            "请让采样经过「动作迁移分段」：一采用它的输出，2nd Sample Enhancer 的 h3_context 接「动作迁移分段」的 h3_context；"
+            "只做参考生视频也可以：分镜 md 每块写 @video none，用动作迁移（长视频）工作流跑，不接参考视频也行；"
+            "不用分镜 md 就把「分镜提示词」从 Setup 的 production_shot 上断开。")
+
+
 def _with_default_trigger_words(context: Any, enabled: bool) -> Any:
     """Rebuild the current-canvas conditioning with the hidden trigger prefix.
 
@@ -305,6 +315,7 @@ class FeiHouEasyH3DualSample1st:
                 bridge_strength, cfg=1.0, negative_prompt="", scheduler="simple", default_trigger_words=False):
         if not isinstance(h3_context, _context_class()):
             raise ValueError("h3_context 必须接 ComfyUI-FeiHou-Easy-H3 主节点的 h3_context")
+        _refuse_motion_placeholder(h3_context)
         total_steps, first_steps = int(total_steps), int(first_steps)
         if not 1 <= first_steps < total_steps:
             raise ValueError("first_steps 必须小于 total_steps")
@@ -368,6 +379,7 @@ class FeiHouEasyH3DualSample2nd:
     @staticmethod
     def prepare(h3_context, latent_upscaler, upscale_by, second_steps, model=None, default_trigger_words=False, **kwargs):
         first_latent = kwargs.get("1st_latent")
+        _refuse_motion_placeholder(h3_context)
         plan = getattr(h3_context, "dual_plan", None) if isinstance(h3_context, _context_class()) else None
         if not plan:
             raise ValueError("h3_context 必须接 Dual Sample 1st 的 h3_context 输出")

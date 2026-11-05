@@ -2541,6 +2541,9 @@ class MiniMaxH3Context:
     reference_map: str = ""
     # Reference-mode window rebuilder for Motion Transfer (H3SegmentBuilder or None).
     segment_builder: Any = None
+    # Setup fed by 分镜提示词: conditioning and latent are placeholders that only
+    # 动作迁移分段 replaces with each segment's window.
+    motion_placeholder: bool = False
 
 
 @dataclass(frozen=True)
@@ -4159,6 +4162,7 @@ class FeiHouEasyH3:
             highres_rebuilder=highres_rebuilder,
             reference_map=reference_map,
             segment_builder=segment_builder,
+            motion_placeholder=bool(motion_shot),
         )
         if h3_bundle.force_offload_enabled:
             _release_auxiliary_models_for_sampling(h3_bundle, phase="first-pass sampling")

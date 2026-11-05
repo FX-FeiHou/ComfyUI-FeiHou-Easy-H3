@@ -336,8 +336,8 @@ def parse_shot_prompts(text: str) -> list[Shot]:
         pictures_explicit = "pictures" in directives
         splits = _splits(directives.get("split", ""), start, end, f"第 {sentinel_line} 行：分镜 {index}")
         if not splits and not passthrough and seconds > MAX_SEGMENT_SECONDS + 1e-6:
-            LOGGER.info("Easy H3 shot prompts: 分镜 %d 有 %.2f 秒、没写 @split，平均分成 %d 个块内分镜",
-                        index, seconds, math.ceil(seconds / MAX_SEGMENT_SECONDS - 1e-9))
+            LOGGER.info("Easy H3 shot prompts: 分镜 %d 有 %.2f 秒、没写 @split，按「动作迁移分段」的帧窗口设置分段",
+                        index, seconds)
         sound = ""
         for key in SOUND_KEYS & set(directives):
             value = str(directives[key] or "").strip().lower()
