@@ -1796,11 +1796,47 @@ def _is_loopback_web_request(request: Any) -> bool:
     return False
 
 
-def _local_only_route_response(web: Any):
-    return web.json_response(
-        {"ok": False, "error": "This Easy H3 settings route is available only from the local ComfyUI host."},
-        status=403,
-    )
+REMOTE_ACCESS_ENV = "FEIHOU_EASY_H3_ALLOW_REMOTE"
+REMOTE_INSTALL_ENV = "FEIHOU_EASY_H3_ALLOW_REMOTE_INSTALL"
+REMOTE_ACCESS_FILE = "allow_remote"
+
+
+def _env_flag(name: str) -> bool:
+    return str(os.environ.get(name, "")).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _remote_access_enabled() -> bool:
+    """Cloud pods reach ComfyUI through a reverse proxy, so the peer is never loopback.
+
+    Off by default.  On with FEIHOU_EASY_H3_ALLOW_REMOTE=1 or an ``allow_remote``
+    file next to prompt_optimizer.json.  A forwarded client IP is never trusted.
+    """
+    if _env_flag(REMOTE_ACCESS_ENV):
+        return True
+    try:
+        return os.path.isfile(os.path.join(_prompt_optimizer_config_directory(), REMOTE_ACCESS_FILE))
+    except Exception:
+        return False
+
+
+def _web_access_allowed(request: Any) -> bool:
+    return _is_loopback_web_request(request) or _remote_access_enabled()
+
+
+def _remote_install_allowed(request: Any) -> bool:
+    """Dependency install runs pip, so a remote browser needs a second switch."""
+    return _is_loopback_web_request(request) or (_remote_access_enabled() and _env_flag(REMOTE_INSTALL_ENV))
+
+
+def _local_only_route_response(web: Any, install: bool = False):
+    if install and _remote_access_enabled():
+        error = (f"远程安装依赖默认关闭：请在 ComfyUI 服务端设置环境变量 {REMOTE_INSTALL_ENV}=1 后重启，"
+                 "或在服务器上安装。")
+    else:
+        error = ("这个 Easy H3 设置接口默认只允许运行 ComfyUI 的本机访问。云端（反向代理）使用时，"
+                 f"请在服务端设置环境变量 {REMOTE_ACCESS_ENV}=1，或创建文件 "
+                 f"ComfyUI/user/default/ComfyUI-FeiHou-Easy-H3/{REMOTE_ACCESS_FILE}，然后重启 ComfyUI。")
+    return web.json_response({"ok": False, "error": error}, status=403)
 
 
 def _register_prompt_optimizer_route() -> bool:
@@ -1814,7 +1850,7 @@ def _register_prompt_optimizer_route() -> bool:
         return bool(getattr(_register_prompt_optimizer_route, "_registered", False))
 
     register_production_pack_routes(routes, _is_loopback_web_request)
-    register_shot_md_routes(routes, _is_loopback_web_request)
+    register_shot_md_routes(routes, _is_loopback_web_request, _remote_access_enabled)
 
     @routes.get("/feihou_easy_h3/media/probe")
     async def _probe_media(request):
@@ -1840,7 +1876,7 @@ def _register_prompt_optimizer_route() -> bool:
 
     @routes.get("/feihou_easy_h3/local_dependencies")
     async def _local_dependencies_check(request):
-        if not _is_loopback_web_request(request):
+        if not _web_access_allowed(request):
             return _local_only_route_response(web)
         try:
             profile = request.query.get("profile", "all")
@@ -1853,14 +1889,14 @@ def _register_prompt_optimizer_route() -> bool:
 
     @routes.get("/feihou_easy_h3/local_dependencies/install")
     async def _local_dependencies_install_status(request):
-        if not _is_loopback_web_request(request):
-            return _local_only_route_response(web)
+        if not _remote_install_allowed(request):
+            return _local_only_route_response(web, install=True)
         return web.json_response({"ok": True, "job": local_dependencies.job_status()})
 
     @routes.post("/feihou_easy_h3/local_dependencies/install")
     async def _local_dependencies_install(request):
-        if not _is_loopback_web_request(request):
-            return _local_only_route_response(web)
+        if not _remote_install_allowed(request):
+            return _local_only_route_response(web, install=True)
         origin = request.headers.get("Origin", "")
         if (request.headers.get("X-FeiHou-Dependency-Install") != "1" or
                 request.headers.get("Sec-Fetch-Site") == "cross-site" or
@@ -1892,13 +1928,13 @@ def _register_prompt_optimizer_route() -> bool:
 
     @routes.get("/feihou_easy_h3/prompt_optimizer_settings")
     async def _prompt_optimizer_settings_get(request):
-        if not _is_loopback_web_request(request):
+        if not _web_access_allowed(request):
             return _local_only_route_response(web)
         return web.json_response({"ok": True, "settings": _public_prompt_optimizer_config(_read_prompt_optimizer_config())})
 
     @routes.post("/feihou_easy_h3/prompt_optimizer_settings")
     async def _prompt_optimizer_settings_post(request):
-        if not _is_loopback_web_request(request):
+        if not _web_access_allowed(request):
             return _local_only_route_response(web)
         try:
             payload = await request.json()
@@ -1909,7 +1945,7 @@ def _register_prompt_optimizer_route() -> bool:
 
     @routes.get("/feihou_easy_h3/providers/{provider_id}/models")
     async def _prompt_optimizer_provider_models(request):
-        if not _is_loopback_web_request(request):
+        if not _web_access_allowed(request):
             return _local_only_route_response(web)
         try:
             provider_id = _safe_config_id(request.match_info.get("provider_id"), "provider")
@@ -1931,7 +1967,7 @@ def _register_prompt_optimizer_route() -> bool:
 
     @routes.get("/feihou_easy_h3/loras")
     async def _feihou_easy_h3_loras(request):
-        if not _is_loopback_web_request(request):
+        if not _web_access_allowed(request):
             return _local_only_route_response(web)
         try:
             return web.json_response({"ok": True, "loras": folder_paths.get_filename_list("loras")})
@@ -1940,7 +1976,7 @@ def _register_prompt_optimizer_route() -> bool:
 
     @routes.post("/feihou_easy_h3/prompt_optimize")
     async def _prompt_optimize(request):
-        if not _is_loopback_web_request(request):
+        if not _web_access_allowed(request):
             return _local_only_route_response(web)
         try:
             payload = await request.json()

@@ -51,6 +51,8 @@ Custom APIs can be entered directly as complete HTTPS URLs, such as https://api.
 
 External prompt APIs still require HTTPS. Local Ollama may use http://localhost:11434, 127.0.0.1, or ::1. API settings, model discovery, and immediate prompt-optimization routes remain available only from the machine running ComfyUI.
 
+These routes, dependency checks and reading a shot md by path accept only the machine running ComfyUI by default. For cloud deployments behind a reverse proxy, set `FEIHOU_EASY_H3_ALLOW_REMOTE=1` on the server or create an empty file `ComfyUI/user/default/ComfyUI-FeiHou-Easy-H3/allow_remote`, then restart ComfyUI. Anyone who can open that ComfyUI URL can then use the settings page: API keys stay hidden, but saved keys can be used for optimization and spend credit. Remote md reads are limited to ComfyUI's input and user folders; remote dependency installs also need `FEIHOU_EASY_H3_ALLOW_REMOTE_INSTALL=1`.
+
 The package uses unique FeiHouEasyH3* node IDs and dedicated prompt-optimizer routes, so it can be installed alongside the original project.
 
 ### RefMod references

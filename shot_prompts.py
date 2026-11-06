@@ -438,12 +438,36 @@ def pick_markdown_path(initial: Any = "") -> str:
     return markdown_path(process.stdout) if process.stdout.strip() else ""
 
 
-def register_routes(routes, is_local):
+def remote_markdown_roots() -> list[str]:
+    """Folders a remote browser may read md from: ComfyUI's input and user folders."""
+    return [os.path.realpath(folder) for folder in (folder_paths.get_input_directory(),
+                                                    folder_paths.get_user_directory())]
+
+
+def check_remote_markdown_path(value: Any) -> str:
+    raw = str(value or "").strip().strip('"').strip("'")
+    if not raw:
+        raise ValueError("md_path 是空的。")
+    # Relative names belong to ComfyUI/input, never the server's working folder.
+    raw = os.path.expanduser(raw)
+    path = os.path.realpath(raw if os.path.isabs(raw) else os.path.join(folder_paths.get_input_directory(), raw))
+    for root in remote_markdown_roots():
+        try:
+            if os.path.commonpath([root, path]) == root:
+                return path
+        except ValueError:  # another drive
+            continue
+    raise PermissionError("云端只能读取 ComfyUI 的 input 或 user 文件夹里的 md："
+                          "把 md 上传到 input 后在 md_path 填文件名，或直接把内容粘贴进 prompt_text。")
+
+
+def register_routes(routes, is_local, remote_enabled=lambda: False):
     from aiohttp import web
     import asyncio
 
-    def refuse(request):
-        if not is_local(request):
+    def refuse(request, remote_ok=False):
+        if not is_local(request) and not (remote_ok and remote_enabled()):
+            # local: False makes the node fall back to the browser's own file picker.
             return web.json_response({"ok": False, "local": False,
                                       "error": "只有在运行 ComfyUI 的这台电脑上才能按路径读 md。"}, status=403)
         # A custom header cannot be sent cross-site without a CORS preflight.
@@ -453,6 +477,7 @@ def register_routes(routes, is_local):
 
     @routes.post("/feihou_easy_h3/shot_md/pick")
     async def _pick_shot_markdown(request):
+        # The dialog opens on the server's screen, so a remote browser always picks locally.
         refused = refuse(request)
         if refused is not None:
             return refused
@@ -468,12 +493,18 @@ def register_routes(routes, is_local):
 
     @routes.post("/feihou_easy_h3/shot_md/read")
     async def _read_shot_markdown(request):
-        refused = refuse(request)
+        refused = refuse(request, remote_ok=True)
         if refused is not None:
             return refused
         try:
             payload = await request.json()
-            return web.json_response({"ok": True, **await asyncio.to_thread(read_markdown_file, payload.get("path"))})
+            path = payload.get("path")
+            if not is_local(request):
+                try:
+                    path = check_remote_markdown_path(path)
+                except PermissionError as exc:
+                    return web.json_response({"ok": False, "error": str(exc)}, status=403)
+            return web.json_response({"ok": True, **await asyncio.to_thread(read_markdown_file, path)})
         except Exception as exc:
             return web.json_response({"ok": False, "error": str(exc)}, status=400)
 

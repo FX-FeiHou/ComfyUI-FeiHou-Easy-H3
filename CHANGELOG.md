@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.4.31
+
+- Cloud access: settings, LoRA and model lists, immediate prompt optimization, dependency checks and reading a shot md by path can now be opened from a remote browser (for example a cloud pod behind a reverse proxy) once the server sets `FEIHOU_EASY_H3_ALLOW_REMOTE=1` or has an empty `ComfyUI/user/default/ComfyUI-FeiHou-Easy-H3/allow_remote` file. Off by default; forwarded client IPs are never trusted. API keys stay masked, remote md reads are limited to ComfyUI's input and user folders, the md picker falls back to the browser, and remote dependency installs also need `FEIHOU_EASY_H3_ALLOW_REMOTE_INSTALL=1`. The 403 message now says how to switch it on.
+
 ## v1.4.30
 
 - Motion transfer: a shot md whose blocks are all `@video none` (reference generation only, no reference video) now runs in the motion transfer workflow; each block takes its length from `@range`, and color matching is skipped when there is no source video.

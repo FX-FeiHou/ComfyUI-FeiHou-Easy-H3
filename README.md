@@ -54,6 +54,8 @@ Manager 安装时会执行依赖安装入口；手动解压后可在 Easy H3 设
 
 外部提示词 API 仍要求 HTTPS；本机 Ollama 可使用 http://localhost:11434、127.0.0.1 或 ::1。API 设置、模型发现和即时提示词优化路由仍只接受运行 ComfyUI 的本机访问。
 
+API 设置、模型发现、即时提示词优化、依赖检查和按路径读分镜 md 默认只接受运行 ComfyUI 的本机访问。云端（晨羽智云、RunningHub 等经反向代理访问）使用时，在服务端设置环境变量 `FEIHOU_EASY_H3_ALLOW_REMOTE=1`，或创建空文件 `ComfyUI/user/default/ComfyUI-FeiHou-Easy-H3/allow_remote`，然后重启 ComfyUI。开启后，能打开这个 ComfyUI 网址的人都能使用设置页：看不到 API Key，但能用已保存的 Key 调用优化接口、消耗额度。远程读分镜 md 只限 ComfyUI 的 input 和 user 文件夹；远程安装依赖还需要另设 `FEIHOU_EASY_H3_ALLOW_REMOTE_INSTALL=1`。
+
 开发时可自行维护本机的同步配置；本仓库不会提交本机路径、API Key、上传媒体或输出元数据。
 
 在“图生或首尾帧”模式下，只使用九宫格前两个图片槽：一张图按高级选项作为首帧或尾帧，两张图作为首尾帧。切换模式不会删除已选的其他参考素材，返回参考模式后可继续使用。
