@@ -3509,7 +3509,7 @@ def _reference_conditioning(bundle, prompt, width, height, length, ref_image_siz
         if video_w * video_h < canvas_w * canvas_h:
             canvas_w = max(h3.CANVAS_MULTIPLE, round(video_w / h3.CANVAS_MULTIPLE) * h3.CANVAS_MULTIPLE)
             canvas_h = max(h3.CANVAS_MULTIPLE, round(video_h / h3.CANVAS_MULTIPLE) * h3.CANVAS_MULTIPLE)
-        frames = _resize_video_frames(frames, canvas_w, canvas_h)
+        # Only the first ``frame_count`` frames are encoded: cut before resizing.
         if frames.shape[0] > frame_count:
             frames = frames[:frame_count]
         count = frames.shape[0]
@@ -3517,7 +3517,12 @@ def _reference_conditioning(bundle, prompt, width, height, length, ref_image_siz
             raise ValueError("Reference videos need at least 5 frames")
         while count % 17 != 5:
             count -= 1
-        frames = frames[:count]
+        frames = _resize_video_frames(frames[:count], canvas_w, canvas_h)
+        if soundtrack is not None:
+            # The soundtrack covers the same frames, not the whole file: a 20 s
+            # video in a 6 s generation sends 6 s of audio.  A shot-block window
+            # keeps its audio indexed from the timeline start (frame_offset).
+            soundtrack = _window_audio(soundtrack, _frame_offset(item.value), count)
         video_latent = None if text_only else bundle.video_vae.encode(frames)
         audio_latent = None
         audio_t = 0
@@ -3790,10 +3795,12 @@ class FeiHouEasyH3:
 
     @staticmethod
     def _collect_media(kwargs: dict, media_count=MAX_MEDIA, window: tuple[int, int] | None = None,
-                       hold: int = 0) -> list[_MediaInput]:
+                       hold: int = 0, head: int | None = None) -> list[_MediaInput]:
         """Load the media_* fields.  ``window`` = (start_frame, frames) of a motion
         shot block: gallery videos then decode only that part of the file.
-        ``hold`` = frames of held first frame in front of the timeline (shot md @hold)."""
+        ``hold`` = frames of held first frame in front of the timeline (shot md @hold).
+        ``head`` = frames the generation encodes: gallery videos decode only that
+        many frames (at H3 fps) from the start of their trim / frame window."""
         items = []
         image_area = None
         for index in range(1, media_count + 1):
@@ -3808,6 +3815,11 @@ class FeiHouEasyH3:
                 value = media_options.load_video_window(
                     _embedded_media_path(value), options, _audio_trim_range(trim) if trim.strip() else None,
                     window[0], window[1], image_area, float(h3.FPS), hold)
+                trim = ""
+            elif isinstance(value, str) and resolved_type == "video" and head:
+                value = media_options.load_video_head(
+                    _embedded_media_path(value), options, _audio_trim_range(trim) if trim.strip() else None,
+                    head, image_area, float(h3.FPS))
                 trim = ""
             elif isinstance(value, str) and resolved_type == "video" and options is not None:
                 # 媒体设置: frame rate, size and the frame window are applied while
@@ -3939,11 +3951,20 @@ class FeiHouEasyH3:
         media_limit = (MAX_MEDIA if (production_shot is not None and keep_production_media)
                        else len(production_shot["media"]) if production_shot is not None else MAX_MEDIA)
         motion_shot = keep_production_media and isinstance(production_shot, dict) and isinstance(production_shot.get("motion"), dict)
+        # 动作迁移分段 encodes each window itself; a Sample Enhancer graph (no
+        # segment node, flagged by 分镜提示词) needs Setup to encode the block.
+        motion_deferred = motion_shot and production_shot["motion"].get("segment", True) is not False
         window = None
         hold = int(production_shot["motion"].get("hold_frames") or 0) if motion_shot else 0
         if motion_shot and int(production_shot["motion"].get("frames") or 0) > 0:
             window = (int(production_shot["motion"].get("start_frame") or 0), int(production_shot["motion"]["frames"]))
-        items = cls._collect_media(kwargs, media_limit, window, hold)
+        head = None
+        if not motion_shot and _duration_alignment(audio_duration_auto) == "off":
+            # Setup encodes at most as many reference frames as it generates
+            # (see _reference_conditioning): decode no more than that.  Duration
+            # alignment needs the whole video to measure it.
+            head = h3.align_frame_count(max(5, _frame_length(min(MAX_SECONDS, max(MIN_SECONDS, float(seconds))), fps)))
+        items = cls._collect_media(kwargs, media_limit, window, hold, head)
         # Decode/crop each video once; duration and conditioning share these frames.
         items = [_MediaInput(item.input_index, item.media_type,
                              _trim_reference_video(item.value, item.audio_trim), "")
@@ -4101,7 +4122,7 @@ class FeiHouEasyH3:
             if counts["image"] == 0 and counts["video"] == 0 and not any(mod.kind in {"image", "video"} for mod, _ in refmods):
                 raise ValueError("Reference mode needs an image or video in addition to audio")
             model = h3_bundle.model_for("ref2va")
-            if motion_shot:
+            if motion_deferred:
                 # Motion Segment encodes each segment's own window through the
                 # segment builder; encoding the whole reference video here would
                 # only be thrown away (minutes for a long film).  It reads the
@@ -4198,7 +4219,7 @@ class FeiHouEasyH3:
             highres_rebuilder=highres_rebuilder,
             reference_map=reference_map,
             segment_builder=segment_builder,
-            motion_placeholder=bool(motion_shot),
+            motion_placeholder=bool(motion_deferred),
         )
         if h3_bundle.force_offload_enabled:
             _release_auxiliary_models_for_sampling(h3_bundle, phase="first-pass sampling")

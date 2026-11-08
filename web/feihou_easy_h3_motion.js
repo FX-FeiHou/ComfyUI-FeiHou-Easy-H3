@@ -15,6 +15,15 @@ function setups() {
   return (app.graph?._nodes || []).filter((node) => node.type === "FeiHouEasyH3Setup");
 }
 
+// The 分镜提示词 node a run belongs to.  A graph may keep a second, bypassed
+// copy (another md): only the node that ran, else the first active one, counts.
+function activeShotNode(nodeId) {
+  const owner = nodeId == null ? null : app.graph?.getNodeById?.(nodeId);
+  if (owner?.type === SHOT_NODE) return owner;
+  const shots = (app.graph?._nodes || []).filter((node) => node?.type === SHOT_NODE);
+  return shots.find((node) => !node.mode) || shots[0] || null;
+}
+
 function promptWidget(node) {
   return (node?.widgets || []).find((widget) => widget?.name === "prompt_text") || null;
 }
@@ -279,6 +288,16 @@ function firstMarkdownFile(event) {
   return null;
 }
 
+// During dragover the browser hides file names (dataTransfer.files is empty);
+// only each item's kind and MIME type are readable.  A .md file is usually
+// text/markdown, or "" on Windows; images, videos and workflows are not taken.
+function mayBeMarkdownDrag(event) {
+  const items = event?.dataTransfer?.items;
+  if (!items || !items.length) return false;
+  return [...items].some((item) => item.kind === "file"
+    && (item.type === "" || /^text\/(markdown|x-markdown|plain)$/.test(item.type)));
+}
+
 function shotNodeUnder(event) {
   const canvas = app.canvas;
   if (!canvas || typeof canvas.convertEventToCanvasOffset !== "function") return null;
@@ -300,14 +319,21 @@ function installDropTarget() {
   if (window.__feihouMdDropInstalled) return;
   window.__feihouMdDropInstalled = true;
   // Capture phase on the document: runs before ComfyUI's own canvas drop logic.
+  // Accepting the dragover here also lets a drop land on the node's prompt
+  // box (a textarea refuses file drags by default, so no drop event came).
   document.addEventListener("dragover", (event) => {
-    if (!firstMarkdownFile(event) || !shotNodeUnder(event)) return;
+    if (!mayBeMarkdownDrag(event) || !shotNodeUnder(event)) return;
     event.preventDefault();
     if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
   }, true);
   document.addEventListener("drop", (event) => {
     const node = shotNodeUnder(event);
     const file = firstMarkdownFile(event);
+    if (node && !file && event.dataTransfer?.files?.length && /^(TEXTAREA|INPUT)$/.test(event.target?.tagName || "")) {
+      // A non-md file let through by the dragover above: don't let the browser open it.
+      event.preventDefault();
+      return;
+    }
     if (!node || !file) return;
     event.preventDefault();
     event.stopPropagation();
@@ -488,9 +514,9 @@ function showShot(info) {
 // 镜号 = the block the next run starts from. Motion Collect reports it once a
 // block is really finished; 0 after the last block makes the next click start
 // the film over.
-function setShotProgress(info) {
+function setShotProgress(info, nodeId) {
   if (!info || !Number.isFinite(Number(info.block))) return;
-  const shotNode = (app.graph?._nodes || []).find((node) => node?.type === SHOT_NODE);
+  const shotNode = activeShotNode(nodeId);
   const numberWidget = shotNode?.widgets?.find((widget) => widget?.name === "shot_numbers");
   if (!numberWidget) return;
   // 手动设置: 镜号 is the user's pick list, not a progress display. The server
@@ -664,10 +690,34 @@ function installSegmentLayout(nodeType) {
   };
 }
 
+// 分镜提示词 in a Sample Enhancer graph (v8 style, no Motion Collect): the
+// server finishes the block when the whole run succeeded and puts the next one
+// at the front of the queue itself (another tab's task waits); the browser only
+// shows the new 镜号.
+function switchRestartToAuto(shot) {
+  const startWidget = shot?.widgets?.find((widget) => widget?.name === "start");
+  if (startWidget && startWidget.value === START_RESTART) {
+    startWidget.value = "自动续接";
+    if (startWidget._state) startWidget._state.value = startWidget.value;
+    shot.setDirtyCanvas?.(true, true);
+  }
+}
+
+function showStandaloneProgress(info) {
+  if (!info) return;
+  const owner = info.node == null ? null : app.graph?.getNodeById?.(info.node);
+  if (owner?.type !== SHOT_NODE) return;  // another workflow tab is open
+  setShotProgress(info, info.node);
+  if (!info.shot_done) switchRestartToAuto(owner);
+  console.info(info.shot_done ? `[Easy H3] 分镜提示词：全片已跑完`
+    : `[Easy H3] 分镜 ${info.block} 完成，下一块 ${info.shot_next} 已由后台排在队列最前面`);
+}
+
 app.registerExtension({
   name: "FeiHou.EasyH3.MotionTransfer",
   setup() {
     installDropTarget();
+    api.addEventListener("feihou_shot_progress", (event) => showStandaloneProgress(event?.detail));
     api.addEventListener("executed", (event) => {
       const output = event?.detail?.output || {};
       // Another workflow tab may be open now: only touch the graph the run belongs to.
@@ -682,7 +732,7 @@ app.registerExtension({
       // The next run continues this film: switch a "从头开始" batch to 自动续接,
       // otherwise it would restart at block 1 forever. 手动设置 stays as it is:
       // the server resumes the same pick list from its state file.
-      const shot = mine ? (app.graph?._nodes || []).find((node) => node?.type === "FeiHouEasyH3ShotPrompts") : null;
+      const shot = mine ? activeShotNode() : null;
       const startWidget = shot?.widgets?.find((widget) => widget?.name === "start");
       if (startWidget && startWidget.value === START_RESTART) {
         startWidget.value = "自动续接";

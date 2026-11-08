@@ -28,6 +28,7 @@ interrupted run continues where it stopped instead of starting over.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import logging
@@ -36,6 +37,7 @@ import os
 import re
 import shutil
 import time
+import uuid
 from dataclasses import dataclass
 from typing import Any
 
@@ -735,6 +737,144 @@ def advance_block(markdown_fingerprint: str) -> dict[str, Any] | None:
     return state
 
 
+def finish_standalone_block(markdown_fingerprint: str, block: int) -> dict[str, Any]:
+    """A Sample Enhancer run of ``block`` finished: advance 镜号 like Motion Collect does."""
+    if not re.fullmatch(r"[0-9a-f]{8,64}", markdown_fingerprint or ""):
+        raise ValueError("分镜提示词：无效的 md 指纹")
+    state = read_state(markdown_fingerprint)
+    if state is None or state.get("done"):
+        return {"done": True, "next": None}
+    if block and int(state.get("block") or 0) != int(block):
+        # Already advanced (e.g. a second browser tab reported the same run).
+        return {"done": False, "next": int(state.get("block") or 1), "stale": True}
+    progress = advance_block(markdown_fingerprint) or {}
+    done = bool(progress.get("done"))
+    if done:
+        finish_series(str(progress.get("series") or ""), markdown_fingerprint)
+    LOGGER.info("Easy H3 shot prompts: 分镜 %d 完成（采样增强工作流），%s", block,
+                "全片完成" if done else f"下一块 {progress.get('block')}")
+    return {"done": done, "next": None if done else int(progress.get("block") or 0)}
+
+
+# Sample Enhancer runs of 分镜提示词 in flight: prompt_id -> the block it was given.
+_STANDALONE_RUNS: dict[str, dict[str, Any]] = {}
+
+
+def _remember_standalone_run(unique_id: Any, markdown_fingerprint: str, block: int, start: str) -> None:
+    """Note the running prompt's block; the queue hook finishes it when the run ends."""
+    try:
+        from server import PromptServer
+    except ImportError:
+        return
+    server = getattr(PromptServer, "instance", None)
+    prompt_id = getattr(server, "last_prompt_id", None)
+    if not prompt_id or not install_queue_hook(getattr(server, "prompt_queue", None)):
+        return
+    _STANDALONE_RUNS[str(prompt_id)] = {"fingerprint": markdown_fingerprint, "block": int(block),
+                                        "node": str(unique_id) if unique_id is not None else None,
+                                        "start": str(start)}
+
+
+def install_queue_hook(queue: Any) -> bool:
+    """Wrap ``PromptQueue.task_done`` once so a finished block queues the next one.
+
+    The worker calls task_done right before it takes the next item, so the copy
+    put here at the front runs before anything another tab queued meanwhile —
+    the same order Motion Collect keeps for the motion-transfer graph.
+    """
+    if queue is None or not callable(getattr(queue, "task_done", None)):
+        return False
+    if getattr(queue, "_feihou_shot_hook", False):
+        return True
+    original = queue.task_done
+
+    def task_done(item_id, history_result, status=None, process_item=None):
+        with queue.mutex:
+            item = queue.currently_running.get(item_id)
+            item = copy.deepcopy(item) if item is not None else None
+        result = original(item_id, history_result, status=status, process_item=process_item)
+        try:
+            _after_task(queue, item, status)
+        except Exception:  # never break the ComfyUI worker loop
+            LOGGER.exception("Easy H3 shot prompts: 排下一块失败")
+        return result
+
+    queue.task_done = task_done
+    queue._feihou_shot_hook = True
+    return True
+
+
+def _after_task(queue: Any, item: Any, status: Any) -> None:
+    if not item:
+        return
+    run = _STANDALONE_RUNS.pop(str(item[1]), None)
+    if run is None:
+        return
+    if not getattr(status, "completed", False):
+        LOGGER.info("Easy H3 shot prompts: 分镜 %d 没有跑完，镜号不变，下次排队重跑这一块", run["block"])
+        return
+    progress = finish_standalone_block(run["fingerprint"], run["block"])
+    server = getattr(queue, "server", None)
+    if server is not None and getattr(server, "client_id", None) is not None:
+        server.send_sync("feihou_shot_progress", {"node": run["node"], "block": run["block"],
+                                                   "shot_done": progress["done"], "shot_next": progress["next"]},
+                         server.client_id)
+    if progress["done"] or progress.get("stale") or server is None:
+        return
+    prompt = item[2]
+    for node in prompt.values():
+        if not isinstance(node, dict) or node.get("class_type") != "FeiHouEasyH3ShotPrompts":
+            continue
+        inputs = node.setdefault("inputs", {})
+        if inputs.get("start") == START_MANUAL:
+            continue  # the state file resumes the pick list
+        if inputs.get("start") == START_RESTART:
+            inputs["start"] = START_AUTO
+        if not isinstance(inputs.get("shot_numbers"), list):
+            inputs["shot_numbers"] = str(int(progress["next"]))
+    number = -server.number
+    server.number += 1
+    queue.put((number, str(uuid.uuid4()), prompt, *item[3:]))
+    LOGGER.info("Easy H3 shot prompts: 下一块 %s 已排在队列最前面（先跑完这部片）", progress["next"])
+
+
+def _motion_segment_in(prompt: Any) -> bool:
+    """Does this queued graph run shots through 动作迁移分段?  Unknown graphs say yes."""
+    if not isinstance(prompt, dict):
+        return True
+    return any(isinstance(node, dict) and node.get("class_type") == "FeiHouEasyH3MotionSegment"
+               for node in prompt.values())
+
+
+def standalone_payload(payload: dict[str, Any], shot: "Shot") -> dict[str, Any]:
+    """The block for a Sample Enhancer graph (v8 style): Setup encodes it itself.
+
+    Joining and @continue go through the production-pack continuation
+    (「视频接续（合并）」 + Video Combine V2): each series is its own pack.
+    """
+    from .production_continuation import CONTINUATION_KEY, continue_shot
+
+    if shot.passthrough:
+        raise ValueError(f"分镜 {shot.index} 写了 @passthrough（原片直出），只能用动作迁移工作流"
+                         "（「动作迁移分段」+「动作迁移收束」）跑。")
+    payload = {**payload, "motion": {**payload["motion"], "segment": False},
+               "pack_key": f"shotmd_{payload['motion']['series']}",
+               "transition": "continue" if shot.continues else "cut"}
+    payload = continue_shot(payload)
+    overlap = int((payload.get(CONTINUATION_KEY) or {}).get("overlap") or 0)
+    if overlap:
+        # The shot is lengthened at its start by the previous tail: the reference
+        # window starts that many frames earlier so the motion stays in step.
+        motion = dict(payload["motion"])
+        lead = min(overlap, int(motion.get("start_frame") or 0))
+        motion["start_frame"] = int(motion.get("start_frame") or 0) - lead
+        motion["frames"] = int(motion.get("frames") or 0) + lead
+        start, end = motion.get("range") or (shot.start, shot.end)
+        motion["range"] = [max(0.0, float(start) - lead / FPS), float(end)]
+        payload["motion"] = motion
+    return payload
+
+
 def tail_path(series: str, block: int) -> str:
     return os.path.join(series_directory(series), f"tail_{int(block):03d}.npz")
 
@@ -840,6 +980,8 @@ class FeiHouEasyH3ShotPrompts:
     DESCRIPTION = (
         "动作迁移分镜提示词：把 skills 生成的分镜 md 拖到节点上、点「选择 md 文件」，或粘贴全文（每块：===== FEIHOU_SHOT nn ===== / @range / @pictures / @continue + 六段式提示词）。"
         "输出接 Setup 的「制作包分镜」口（和制作包加载器二选一），同一输出再接「动作迁移分段」的 shot_prompts。"
+        "也能用在二段式采样（1st/2nd Sample Enhancer，例如 v8）工作流：图里没有「动作迁移分段」时 Setup 直接编码本块，"
+        "跑完自动排下一块；@continue 和整片拼接用「视频接续（合并）」（production_shot 接本节点）+ Video Combine V2。"
         "每跑完一个分镜自动 +1，状态存在 input/feihou_h3_motion，可中断续跑。"
         "选过的 md 路径记在 md_path 里，随工作流保存；改了 md 文件后点「刷新提示词」从磁盘重读。"
     )
@@ -863,6 +1005,7 @@ class FeiHouEasyH3ShotPrompts:
                     "自动续接时每跑完一块自动改成下一块，整片跑完回到 0。"}),
 
             },
+            "hidden": {"prompt": "PROMPT", "unique_id": "UNIQUE_ID"},
         }
 
     @classmethod
@@ -870,7 +1013,7 @@ class FeiHouEasyH3ShotPrompts:
         return float("nan")  # the current shot advances after every block
 
     @staticmethod
-    def load(prompt_text="", md_path="", start=START_AUTO, shot_numbers=""):
+    def load(prompt_text="", md_path="", start=START_AUTO, shot_numbers="", prompt=None, unique_id=None):
         text = str(prompt_text or "")
         if not text.strip() and str(md_path or "").strip():
             text = read_markdown_file(md_path)["text"]
@@ -917,6 +1060,14 @@ class FeiHouEasyH3ShotPrompts:
         # The film ends at its last block, a filtered run at its last pick.
         is_last = (block >= max(picks)) if picks else (block >= total)
         payload = shot_payload(shot, total, markdown_fingerprint, series, is_last, picks)
+        # Without 动作迁移分段 (1st/2nd Sample Enhancer graphs such as v8) Setup
+        # encodes the block itself and the browser advances 镜号 after the run.
+        standalone = not _motion_segment_in(prompt)
+        if standalone:
+            payload = standalone_payload(payload, shot)
+            _remember_standalone_run(unique_id, markdown_fingerprint, block, start)
+            LOGGER.info("Easy H3 shot prompts: 没有「动作迁移分段」，按采样增强工作流跑（Setup 直接编码本块，"
+                        "接续 / 拼接用「视频接续（合并）」+ Video Combine V2）")
         LOGGER.info("Easy H3 shot prompts: 分镜 %d/%d %s (%ss, %s, continue=%s%s, series %s)",
                     block, total, payload["range"], shot.seconds,
                     "原片直出，不采样" if shot.passthrough else f"pictures={list(shot.pictures) or '全部'}",
@@ -926,5 +1077,6 @@ class FeiHouEasyH3ShotPrompts:
             "next": payload.get("next_index"),
             "range": payload["range"], "seconds": shot.seconds,
             "pictures": list(shot.pictures), "continue": bool(shot.continues),
+            "standalone": standalone, "fingerprint": markdown_fingerprint, "is_last": bool(is_last),
         }]}
         return {"ui": ui, "result": (payload,)}

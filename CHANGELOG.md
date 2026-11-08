@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.4.32
+
+- Shot Prompts in a Sample Enhancer graph (two-pass v8 style, no Motion Segment): Setup now encodes each md block itself instead of leaving a motion placeholder, so the shot list and production packs both work in that workflow. 自动续接 queues the next block on the server at the front of the queue, so a task queued from another tab waits until the film is done; a failed or interrupted run keeps its block, and 手动设置 keeps its pick list. `@continue` blocks start their window earlier by the overlap so 视频接续（合并） can join them; `@passthrough` still needs the motion workflow.
+- Reference video length: a gallery video longer than the generation is now read only for the generated seconds (from its time trim or frame window start), and each reference video's soundtrack is cut to the frames actually encoded, so a 20 s video in a 6 s generation no longer sends 20 s of audio. Duration alignment still reads the whole video.
+- Shot Prompts: an md file can now be dropped onto the prompt box as well, not only the title bar and menus.
+
 ## v1.4.31
 
 - Cloud access: settings, LoRA and model lists, immediate prompt optimization, dependency checks and reading a shot md by path can now be opened from a remote browser (for example a cloud pod behind a reverse proxy) once the server sets `FEIHOU_EASY_H3_ALLOW_REMOTE=1` or has an empty `ComfyUI/user/default/ComfyUI-FeiHou-Easy-H3/allow_remote` file. Off by default; forwarded client IPs are never trusted. API keys stay masked, remote md reads are limited to ComfyUI's input and user folders, the md picker falls back to the browser, and remote dependency installs also need `FEIHOU_EASY_H3_ALLOW_REMOTE_INSTALL=1`. The 403 message now says how to switch it on.

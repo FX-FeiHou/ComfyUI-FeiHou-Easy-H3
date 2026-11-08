@@ -284,6 +284,31 @@ def load_video_window(path: str, options: dict | None, trim: tuple[float, float]
             "total_frames": hold + total}
 
 
+def load_video_head(path: str, options: dict | None, trim: tuple[float, float] | None,
+                    frames: int, image_area: float | None = None, fps: float = 24.0) -> dict:
+    """Only the first ``frames`` frames of the card's timeline, at ``fps``, with their own audio.
+
+    For a plain generation: Setup encodes at most as many reference frames as
+    it generates, so a 20 s video in a 6 s generation decodes 6 s.  The
+    timeline is the 媒体设置 frame window, or else the card's time trim.
+    """
+    origin, length, info = timeline(path, options, trim)
+    count = max(1, min(int(frames), max(1, round(length * fps))))
+    size = options["size"] if options is not None else VIDEO_SIZE_DEFAULT
+    arrays, _rate = _sample_frames(path, fps, round(origin * fps), count,
+                                   lambda width, height: target_size(width, height, size, image_area))
+    if not arrays:
+        raise ValueError(f"参考视频「{os.path.basename(path)}」从 {origin:.2f} 秒起没有画面")
+    height, width = arrays[0].shape[:2]
+    images = torch.empty((len(arrays), height, width, 3), dtype=torch.float32)
+    for position, array in enumerate(arrays):
+        images[position] = torch.from_numpy(array).to(torch.float32).div_(255.0)
+    audio = _slice_audio(path, origin, origin + len(arrays) / fps) if info["has_audio"] else None
+    logging.info("Easy H3 媒体: %s 只读生成需要的 %.2f-%.2f 秒（%d 帧，视频共 %.2f 秒）%dx%d",
+                 os.path.basename(path), origin, origin + len(arrays) / fps, len(arrays), length, width, height)
+    return {"images": images, "audio": audio, "fps": float(fps)}
+
+
 def load_video(path: str, options: dict, image_area: float | None = None) -> dict:
     """Decode a reference video with its 媒体设置 into ``{"images", "audio", "fps"}``."""
     has_audio = probe_video(path)["has_audio"]
