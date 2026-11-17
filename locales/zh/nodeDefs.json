@@ -79,86 +79,188 @@
       }
     }
   },
-  "FeiHouEasyH3Resolution": {"display_name":"FeiHou Easy H3 分辨率","description":"与 Easy H3 主节点使用相同的尺寸计算规则。自定义分辨率时使用宽度、高度。","inputs":{"resolution":{"name":"分辨率"},"aspect_ratio":{"name":"宽高比"},"width":{"name":"自定义宽度"},"height":{"name":"自定义高度"}},"outputs":{"0":{"name":"宽度"},"1":{"name":"高度"}}},
+  "FeiHouEasyH3Resolution": {
+    "display_name": "FeiHou Easy H3 分辨率",
+    "description": "与 Easy H3 主节点使用相同的尺寸计算规则。自定义分辨率时使用宽度、高度。",
+    "inputs": {
+      "resolution": {
+        "name": "分辨率"
+      },
+      "aspect_ratio": {
+        "name": "宽高比"
+      },
+      "width": {
+        "name": "自定义宽度"
+      },
+      "height": {
+        "name": "自定义高度"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "宽度"
+      },
+      "1": {
+        "name": "高度"
+      }
+    }
+  },
   "FeiHouEasyH3ProductionPackLoader": {
     "display_name": "FeiHou Easy H3 制作包分镜加载器",
     "description": "载入文件夹或 ZIP，读取最终分镜页，每次任务输出一镜。将生成后操作设为 increment 可按序号推进。",
     "inputs": {
-      "source": { "name": "制作包文件夹 / ZIP 路径" },
-      "shotlist_file": { "name": "分镜 HTML 相对路径（可留空）" },
-      "audio_file": { "name": "歌曲相对路径（可留空）" },
-      "shot_index": { "name": "分镜序号" },
-      "prompt_language": { "name": "提示词语言" },
-      "package_id": { "name": "已准备制作包 ID" }
+      "source": {
+        "name": "制作包文件夹 / ZIP 路径"
+      },
+      "shotlist_file": {
+        "name": "分镜 HTML 相对路径（可留空）"
+      },
+      "audio_file": {
+        "name": "歌曲相对路径（可留空）"
+      },
+      "shot_index": {
+        "name": "分镜序号"
+      },
+      "prompt_language": {
+        "name": "提示词语言"
+      },
+      "package_id": {
+        "name": "已准备制作包 ID"
+      }
     },
-    "outputs": { "0": { "name": "制作包分镜" } }
+    "outputs": {
+      "0": {
+        "name": "制作包分镜"
+      }
+    }
   },
   "FeiHouEasyH3LoraStack": {
     "display_name": "加载LoRA（仅模型）",
     "description": "供 FeiHou Easy H3 加载器使用的动态 LoRA 堆栈；每条 LoRA 可单独切换旁路或正常加载。",
     "inputs": {
-      "optional_lora_stack": { "name": "可选 LoRA 堆栈" }
+      "optional_lora_stack": {
+        "name": "可选 LoRA 堆栈"
+      }
     },
     "outputs": {
-      "0": { "name": "LoRA 堆栈" }
+      "0": {
+        "name": "LoRA 堆栈"
+      }
     }
   },
   "FeiHouEasyH3Loader": {
     "display_name": "FeiHou Easy H3 加载器",
     "description": "加载 MiniMax H3 主模型、文本编码器、视频 VAE 与音频 VAE。",
     "inputs": {
-      "fl2va_model": { "name": "FL2VA 模型" },
-      "ref2va_model": { "name": "REF2VA 模型" },
-      "text_encoder": { "name": "文本编码器" },
-      "video_vae": { "name": "视频 VAE" },
-      "audio_vae": { "name": "音频 VAE" },
-      "lora_stack": { "name": "LoRA 堆栈" },
-      "custom_second_sampling_models": { "name": "自定义二采模型" },
-      "second_fl2va_model": { "name": "二采 FL2VA 模型" },
-      "second_ref2va_model": { "name": "二采 REF2VA 模型" },
-      "second_sampling_use_lora": { "name": "二采使用 LoRA" }
+      "fl2va_model": {
+        "name": "FL2VA 模型"
+      },
+      "ref2va_model": {
+        "name": "REF2VA 模型"
+      },
+      "text_encoder": {
+        "name": "文本编码器"
+      },
+      "video_vae": {
+        "name": "视频 VAE"
+      },
+      "audio_vae": {
+        "name": "音频 VAE"
+      },
+      "lora_stack": {
+        "name": "LoRA 堆栈"
+      },
+      "custom_second_sampling_models": {
+        "name": "自定义二采模型"
+      },
+      "second_fl2va_model": {
+        "name": "二采 FL2VA 模型"
+      },
+      "second_ref2va_model": {
+        "name": "二采 REF2VA 模型"
+      },
+      "second_sampling_use_lora": {
+        "name": "二采使用 LoRA"
+      }
     },
     "outputs": {
-      "0": { "name": "H3 模型组合" }
+      "0": {
+        "name": "H3 模型组合"
+      }
     }
   },
   "FeiHouEasyH3RemixLoader": {
     "display_name": "FeiHou Easy H3 Remix 加载器",
     "description": "加载一个供 FL2VA 与 REF2VA 共用的 MiniMax H3 Remix 主模型，并支持独立的一采、二采 LoRA 堆栈；未选择二采模型时，二采输出自动使用主模型加二采 LoRA。",
     "inputs": {
-      "remix_model": { "name": "Remix 主模型" },
-      "text_encoder": { "name": "文本编码器" },
-      "video_vae": { "name": "视频 VAE" },
-      "audio_vae": { "name": "音频 VAE" },
-      "second_sampling_model": { "name": "二采模型" },
-      "first_pass_lora_stack": { "name": "一采 LoRA 堆栈" },
-      "second_pass_lora_stack": { "name": "二采 LoRA 堆栈" }
+      "remix_model": {
+        "name": "Remix 主模型"
+      },
+      "text_encoder": {
+        "name": "文本编码器"
+      },
+      "video_vae": {
+        "name": "视频 VAE"
+      },
+      "audio_vae": {
+        "name": "音频 VAE"
+      },
+      "second_sampling_model": {
+        "name": "二采模型"
+      },
+      "first_pass_lora_stack": {
+        "name": "一采 LoRA 堆栈"
+      },
+      "second_pass_lora_stack": {
+        "name": "二采 LoRA 堆栈"
+      }
     },
     "outputs": {
-      "0": { "name": "H3 模型组合" }
+      "0": {
+        "name": "H3 模型组合"
+      }
     }
   },
   "FeiHouEasyH3ModelAdapter": {
     "display_name": "FeiHou Easy H3 模型中转",
     "description": "从标准 ComfyUI 的模型、CLIP 与 VAE 连接组装 H3 模型组合。",
     "inputs": {
-      "text_encoder": { "name": "文本编码器" },
-      "video_vae": { "name": "视频 VAE" },
-      "audio_vae": { "name": "音频 VAE" },
-      "fl2va_model": { "name": "FL2VA 模型" },
-      "ref2va_model": { "name": "REF2VA 模型" }
+      "text_encoder": {
+        "name": "文本编码器"
+      },
+      "video_vae": {
+        "name": "视频 VAE"
+      },
+      "audio_vae": {
+        "name": "音频 VAE"
+      },
+      "fl2va_model": {
+        "name": "FL2VA 模型"
+      },
+      "ref2va_model": {
+        "name": "REF2VA 模型"
+      }
     },
     "outputs": {
-      "0": { "name": "H3 模型组合" }
+      "0": {
+        "name": "H3 模型组合"
+      }
     }
   },
   "FeiHouEasyH3": {
     "display_name": "ComfyUI-FeiHou-Easy-H3",
     "description": "内嵌 9 张图片、3 个视频、3 个音频媒体栏的 MiniMax H3 生成节点。",
     "inputs": {
-      "h3_bundle": { "name": "H3 模型组合" },
-      "production_shot": { "name": "制作包分镜" },
-      "refmods": { "name": "RefMod", "tooltip": "接 Load H3 RefMods 的 mods 输出，使用参考生视频模式；@ 菜单可直接选择参考包。RefMod 优先编号，普通素材顺延，不占内嵌素材槽位。编号见 Output.reference_map。" },
+      "h3_bundle": {
+        "name": "H3 模型组合"
+      },
+      "production_shot": {
+        "name": "制作包分镜"
+      },
+      "refmods": {
+        "name": "RefMod",
+        "tooltip": "接 Load H3 RefMods 的 mods 输出，使用参考生视频模式；@ 菜单可直接选择参考包。RefMod 优先编号，普通素材顺延，不占内嵌素材槽位。编号见 Output.reference_map。"
+      },
       "mode": {
         "name": "模式",
         "options": {
@@ -166,18 +268,42 @@
           "reference": "参考生视频"
         }
       },
-      "prompt": { "name": "提示词" },
-      "resolution": { "name": "分辨率" },
-      "aspect_ratio": { "name": "宽高比" },
-      "width": { "name": "宽度" },
-      "height": { "name": "高度" },
+      "prompt": {
+        "name": "提示词"
+      },
+      "resolution": {
+        "name": "分辨率"
+      },
+      "aspect_ratio": {
+        "name": "宽高比"
+      },
+      "width": {
+        "name": "宽度"
+      },
+      "height": {
+        "name": "高度"
+      },
       "audio_duration_auto": {
-      "name": "自动时长对齐",
-      "options": {"off": "关闭", "video1": "对齐Video1", "video2": "对齐Video2", "video3": "对齐Video3", "audio1": "对齐Audio1", "audio2": "对齐Audio2", "audio3": "对齐Audio3"}
-    },
-    "seconds": { "name": "秒数" },
-      "advanced": { "name": "高级选项" },
-      "fps": { "name": "帧率（FPS）" },
+        "name": "自动时长对齐",
+        "options": {
+          "off": "关闭",
+          "video1": "对齐Video1",
+          "video2": "对齐Video2",
+          "video3": "对齐Video3",
+          "audio1": "对齐Audio1",
+          "audio2": "对齐Audio2",
+          "audio3": "对齐Audio3"
+        }
+      },
+      "seconds": {
+        "name": "秒数"
+      },
+      "advanced": {
+        "name": "高级选项"
+      },
+      "fps": {
+        "name": "帧率（FPS）"
+      },
       "keyframe_role": {
         "name": "首尾帧设置",
         "options": {
@@ -185,7 +311,12 @@
           "last": "尾帧优先"
         }
       },
-      "ref_image_size": { "name": "参考图尺寸（短边）", "options": { "match": "匹配生成分辨率" } },
+      "ref_image_size": {
+        "name": "参考图尺寸（短边）",
+        "options": {
+          "match": "匹配生成分辨率"
+        }
+      },
       "reference_mention_mode": {
         "name": "@引用方式",
         "options": {
@@ -193,58 +324,130 @@
           "index": "按序号"
         }
       },
-      "prompt_optimizer_enabled": { "name": "提示词优化" },
-      "prompt_optimizer_provider": { "name": "API 服务/模型" },
-      "prompt_optimizer_scene_guide": { "name": "提示词方案" }
+      "prompt_optimizer_enabled": {
+        "name": "提示词优化"
+      },
+      "prompt_optimizer_provider": {
+        "name": "API 服务/模型"
+      },
+      "prompt_optimizer_scene_guide": {
+        "name": "提示词方案"
+      }
     },
     "outputs": {
-      "0": { "name": "模型" },
-      "1": { "name": "二次采样模型" },
-      "2": { "name": "H3 Context" }
+      "0": {
+        "name": "模型"
+      },
+      "1": {
+        "name": "二次采样模型"
+      },
+      "2": {
+        "name": "H3 Context"
+      }
     }
   },
   "FeiHouEasyH3Output": {
     "display_name": "FeiHou Easy H3 输出",
     "description": "从 H3 Context 拆出条件、潜空间、VAE、帧率与提示词预览。",
     "inputs": {
-      "h3_context": { "name": "H3 Context" }
+      "h3_context": {
+        "name": "H3 Context"
+      }
     },
     "outputs": {
-      "0": { "name": "正面条件" },
-      "1": { "name": "潜空间" },
-      "2": { "name": "视频 VAE" },
-      "3": { "name": "音频 VAE" },
-      "4": { "name": "FPS" },
-      "5": { "name": "提示词反推输出" },
-      "6": { "name": "CLIP" },
-      "7": { "name": "音频输出" },
-      "8": { "name": "时长控制" },
-      "9": { "name": "RefMod 编号对应表" }
+      "0": {
+        "name": "正面条件"
+      },
+      "1": {
+        "name": "潜空间"
+      },
+      "2": {
+        "name": "视频 VAE"
+      },
+      "3": {
+        "name": "音频 VAE"
+      },
+      "4": {
+        "name": "FPS"
+      },
+      "5": {
+        "name": "提示词反推输出"
+      },
+      "6": {
+        "name": "CLIP"
+      },
+      "7": {
+        "name": "音频输出"
+      },
+      "8": {
+        "name": "时长控制"
+      },
+      "9": {
+        "name": "RefMod 编号对应表"
+      }
     }
   },
   "FeiHouEasyH3DurationCrop": {
     "display_name": "FeiHou Easy H3 数字人/MV 时长裁剪",
     "description": "使用 Easy H3 的时长控制输出还原所选参考视频/音频的精确时长；控制关闭时，媒体不作修改直接透传。",
     "inputs": {
-      "images": { "name": "图像" },
-      "fps": { "name": "FPS" },
-      "duration_control": { "name": "时长控制" },
-      "audio": { "name": "音频" }
+      "images": {
+        "name": "图像"
+      },
+      "fps": {
+        "name": "FPS"
+      },
+      "duration_control": {
+        "name": "时长控制"
+      },
+      "audio": {
+        "name": "音频"
+      }
     },
     "outputs": {
-      "0": { "name": "图像" },
-      "1": { "name": "FPS" },
-      "2": { "name": "音频" }
+      "0": {
+        "name": "图像"
+      },
+      "1": {
+        "name": "FPS"
+      },
+      "2": {
+        "name": "音频"
+      }
     }
   },
   "FeiHouEasyH3PromptPreview": {
     "display_name": "FeiHou Easy H3 提示词预览",
     "description": "预览最终扩写或反推得到的提示词。",
     "inputs": {
-      "text": { "name": "提示词反推输出" }
+      "text": {
+        "name": "提示词反推输出"
+      }
     },
     "outputs": {
-      "0": { "name": "文本" }
+      "0": {
+        "name": "文本"
+      }
+    }
+  },
+  "FeiHouEasyH3MotionPreprocess": {
+    "display_name": "H3动作迁移预处理",
+    "inputs": {
+      "mode": {
+        "name": "模式"
+      },
+      "face_blur_on": {
+        "name": "脸部模糊"
+      },
+      "face_blur": {
+        "name": "模糊档位"
+      },
+      "face_detector": {
+        "name": "人脸检测模型"
+      },
+      "shot_prompts": {
+        "name": "分镜提示词"
+      }
     }
   }
 }

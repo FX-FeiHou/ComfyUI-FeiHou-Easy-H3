@@ -79,86 +79,179 @@
       }
     }
   },
-  "FeiHouEasyH3Resolution": {"display_name":"FeiHou Easy H3 Resolution","inputs":{"resolution":{"name":"Resolution"},"aspect_ratio":{"name":"Aspect ratio"},"width":{"name":"Custom width"},"height":{"name":"Custom height"}}},
+  "FeiHouEasyH3Resolution": {
+    "display_name": "FeiHou Easy H3 Resolution",
+    "inputs": {
+      "resolution": {
+        "name": "Resolution"
+      },
+      "aspect_ratio": {
+        "name": "Aspect ratio"
+      },
+      "width": {
+        "name": "Custom width"
+      },
+      "height": {
+        "name": "Custom height"
+      }
+    }
+  },
   "FeiHouEasyH3ProductionPackLoader": {
     "display_name": "FeiHou Easy H3 Production Pack Loader",
     "description": "Import a folder or ZIP, read the final Shotlist, and supply one shot per queued task. Enable increment after generation to advance the shot index.",
     "inputs": {
-      "source": { "name": "Package folder / ZIP path" },
-      "shotlist_file": { "name": "Shotlist path (optional)" },
-      "audio_file": { "name": "Soundtrack path (optional)" },
-      "shot_index": { "name": "Shot index" },
-      "prompt_language": { "name": "Prompt language" },
-      "package_id": { "name": "Prepared package ID" }
+      "source": {
+        "name": "Package folder / ZIP path"
+      },
+      "shotlist_file": {
+        "name": "Shotlist path (optional)"
+      },
+      "audio_file": {
+        "name": "Soundtrack path (optional)"
+      },
+      "shot_index": {
+        "name": "Shot index"
+      },
+      "prompt_language": {
+        "name": "Prompt language"
+      },
+      "package_id": {
+        "name": "Prepared package ID"
+      }
     },
-    "outputs": { "0": { "name": "Production shot" } }
+    "outputs": {
+      "0": {
+        "name": "Production shot"
+      }
+    }
   },
   "FeiHouEasyH3LoraStack": {
     "display_name": "Load LoRA (Model Only)",
     "description": "Dynamic LoRA stack used by the FeiHou Easy H3 Loader; each LoRA can independently use bypass or regular loading.",
     "inputs": {
-      "optional_lora_stack": { "name": "Optional LoRA stack" }
+      "optional_lora_stack": {
+        "name": "Optional LoRA stack"
+      }
     },
     "outputs": {
-      "0": { "name": "LoRA stack" }
+      "0": {
+        "name": "LoRA stack"
+      }
     }
   },
   "FeiHouEasyH3Loader": {
     "display_name": "FeiHou Easy H3 Loader",
     "description": "Load MiniMax H3 transformers, text encoder, and video/audio VAEs.",
     "inputs": {
-      "fl2va_model": { "name": "FL2VA model" },
-      "ref2va_model": { "name": "REF2VA model" },
-      "text_encoder": { "name": "Text encoder" },
-      "video_vae": { "name": "Video VAE" },
-      "audio_vae": { "name": "Audio VAE" },
-      "lora_stack": { "name": "LoRA stack" },
-      "custom_second_sampling_models": { "name": "Custom second-pass models" },
-      "second_fl2va_model": { "name": "Second-pass FL2VA model" },
-      "second_ref2va_model": { "name": "Second-pass REF2VA model" },
-      "second_sampling_use_lora": { "name": "Use LoRA for second pass" }
+      "fl2va_model": {
+        "name": "FL2VA model"
+      },
+      "ref2va_model": {
+        "name": "REF2VA model"
+      },
+      "text_encoder": {
+        "name": "Text encoder"
+      },
+      "video_vae": {
+        "name": "Video VAE"
+      },
+      "audio_vae": {
+        "name": "Audio VAE"
+      },
+      "lora_stack": {
+        "name": "LoRA stack"
+      },
+      "custom_second_sampling_models": {
+        "name": "Custom second-pass models"
+      },
+      "second_fl2va_model": {
+        "name": "Second-pass FL2VA model"
+      },
+      "second_ref2va_model": {
+        "name": "Second-pass REF2VA model"
+      },
+      "second_sampling_use_lora": {
+        "name": "Use LoRA for second pass"
+      }
     },
     "outputs": {
-      "0": { "name": "H3 model bundle" }
+      "0": {
+        "name": "H3 model bundle"
+      }
     }
   },
   "FeiHouEasyH3RemixLoader": {
     "display_name": "FeiHou Easy H3 Remix Loader",
     "description": "Load one MiniMax H3 Remix transformer shared by FL2VA and REF2VA, with independent first- and second-pass LoRA stacks; when no second-pass model is selected, the second-pass output uses the main model with the second-pass LoRA.",
     "inputs": {
-      "remix_model": { "name": "Remix main model" },
-      "text_encoder": { "name": "Text encoder" },
-      "video_vae": { "name": "Video VAE" },
-      "audio_vae": { "name": "Audio VAE" },
-      "second_sampling_model": { "name": "Second-pass model" },
-      "first_pass_lora_stack": { "name": "First-pass LoRA stack" },
-      "second_pass_lora_stack": { "name": "Second-pass LoRA stack" }
+      "remix_model": {
+        "name": "Remix main model"
+      },
+      "text_encoder": {
+        "name": "Text encoder"
+      },
+      "video_vae": {
+        "name": "Video VAE"
+      },
+      "audio_vae": {
+        "name": "Audio VAE"
+      },
+      "second_sampling_model": {
+        "name": "Second-pass model"
+      },
+      "first_pass_lora_stack": {
+        "name": "First-pass LoRA stack"
+      },
+      "second_pass_lora_stack": {
+        "name": "Second-pass LoRA stack"
+      }
     },
     "outputs": {
-      "0": { "name": "H3 model bundle" }
+      "0": {
+        "name": "H3 model bundle"
+      }
     }
   },
   "FeiHouEasyH3ModelAdapter": {
     "display_name": "FeiHou Easy H3 Model Bridge",
     "description": "Build an H3 bundle from standard ComfyUI model, CLIP, and VAE connections.",
     "inputs": {
-      "text_encoder": { "name": "Text encoder" },
-      "video_vae": { "name": "Video VAE" },
-      "audio_vae": { "name": "Audio VAE" },
-      "fl2va_model": { "name": "FL2VA model" },
-      "ref2va_model": { "name": "REF2VA model" }
+      "text_encoder": {
+        "name": "Text encoder"
+      },
+      "video_vae": {
+        "name": "Video VAE"
+      },
+      "audio_vae": {
+        "name": "Audio VAE"
+      },
+      "fl2va_model": {
+        "name": "FL2VA model"
+      },
+      "ref2va_model": {
+        "name": "REF2VA model"
+      }
     },
     "outputs": {
-      "0": { "name": "H3 model bundle" }
+      "0": {
+        "name": "H3 model bundle"
+      }
     }
   },
   "FeiHouEasyH3": {
     "display_name": "ComfyUI-FeiHou-Easy-H3",
     "description": "MiniMax H3 generation with an embedded 9-image, 3-video, and 3-audio media gallery.",
     "inputs": {
-      "h3_bundle": { "name": "H3 model bundle" },
-      "production_shot": { "name": "Production shot" },
-      "refmods": { "name": "RefMod", "tooltip": "Connect Load H3 RefMods.mods in Reference Video mode. Select RefMods directly in @. RefMods lead each type; ordinary media follow. Independent of gallery slots; see Output.reference_map." },
+      "h3_bundle": {
+        "name": "H3 model bundle"
+      },
+      "production_shot": {
+        "name": "Production shot"
+      },
+      "refmods": {
+        "name": "RefMod",
+        "tooltip": "Connect Load H3 RefMods.mods in Reference Video mode. Select RefMods directly in @. RefMods lead each type; ordinary media follow. Independent of gallery slots; see Output.reference_map."
+      },
       "mode": {
         "name": "Mode",
         "options": {
@@ -166,18 +259,42 @@
           "reference": "Reference-to-video"
         }
       },
-      "prompt": { "name": "Prompt" },
-      "resolution": { "name": "Resolution" },
-      "aspect_ratio": { "name": "Aspect ratio" },
-      "width": { "name": "Width" },
-      "height": { "name": "Height" },
+      "prompt": {
+        "name": "Prompt"
+      },
+      "resolution": {
+        "name": "Resolution"
+      },
+      "aspect_ratio": {
+        "name": "Aspect ratio"
+      },
+      "width": {
+        "name": "Width"
+      },
+      "height": {
+        "name": "Height"
+      },
       "audio_duration_auto": {
-      "name": "Automatic duration alignment",
-      "options": {"off": "Off", "video1": "Align Video 1", "video2": "Align Video 2", "video3": "Align Video 3", "audio1": "Align Audio 1", "audio2": "Align Audio 2", "audio3": "Align Audio 3"}
-    },
-    "seconds": { "name": "Seconds" },
-      "advanced": { "name": "Advanced options" },
-      "fps": { "name": "Frame rate (FPS)" },
+        "name": "Automatic duration alignment",
+        "options": {
+          "off": "Off",
+          "video1": "Align Video 1",
+          "video2": "Align Video 2",
+          "video3": "Align Video 3",
+          "audio1": "Align Audio 1",
+          "audio2": "Align Audio 2",
+          "audio3": "Align Audio 3"
+        }
+      },
+      "seconds": {
+        "name": "Seconds"
+      },
+      "advanced": {
+        "name": "Advanced options"
+      },
+      "fps": {
+        "name": "Frame rate (FPS)"
+      },
       "keyframe_role": {
         "name": "First/last frame setup",
         "options": {
@@ -185,7 +302,12 @@
           "last": "Last frame priority"
         }
       },
-      "ref_image_size": { "name": "Reference image size (short edge)", "options": { "match": "Match generation size" } },
+      "ref_image_size": {
+        "name": "Reference image size (short edge)",
+        "options": {
+          "match": "Match generation size"
+        }
+      },
       "reference_mention_mode": {
         "name": "@ reference mode",
         "options": {
@@ -193,58 +315,130 @@
           "index": "By index"
         }
       },
-      "prompt_optimizer_enabled": { "name": "Prompt optimization" },
-      "prompt_optimizer_provider": { "name": "API service/model" },
-      "prompt_optimizer_scene_guide": { "name": "Prompt Guide" }
+      "prompt_optimizer_enabled": {
+        "name": "Prompt optimization"
+      },
+      "prompt_optimizer_provider": {
+        "name": "API service/model"
+      },
+      "prompt_optimizer_scene_guide": {
+        "name": "Prompt Guide"
+      }
     },
     "outputs": {
-      "0": { "name": "Model" },
-      "1": { "name": "Second sampling model" },
-      "2": { "name": "H3 Context" }
+      "0": {
+        "name": "Model"
+      },
+      "1": {
+        "name": "Second sampling model"
+      },
+      "2": {
+        "name": "H3 Context"
+      }
     }
   },
   "FeiHouEasyH3Output": {
     "display_name": "FeiHou Easy H3 Output",
     "description": "Unpack conditioning, latent, VAEs, FPS, and prompt preview from H3 Context.",
     "inputs": {
-      "h3_context": { "name": "H3 Context" }
+      "h3_context": {
+        "name": "H3 Context"
+      }
     },
     "outputs": {
-      "0": { "name": "Positive" },
-      "1": { "name": "Latent" },
-      "2": { "name": "Video VAE" },
-      "3": { "name": "Audio VAE" },
-      "4": { "name": "FPS" },
-      "5": { "name": "Prompt inference output" },
-      "6": { "name": "CLIP" },
-      "7": { "name": "Audio output" },
-      "8": { "name": "Duration control" },
-      "9": { "name": "RefMod reference map" }
+      "0": {
+        "name": "Positive"
+      },
+      "1": {
+        "name": "Latent"
+      },
+      "2": {
+        "name": "Video VAE"
+      },
+      "3": {
+        "name": "Audio VAE"
+      },
+      "4": {
+        "name": "FPS"
+      },
+      "5": {
+        "name": "Prompt inference output"
+      },
+      "6": {
+        "name": "CLIP"
+      },
+      "7": {
+        "name": "Audio output"
+      },
+      "8": {
+        "name": "Duration control"
+      },
+      "9": {
+        "name": "RefMod reference map"
+      }
     }
   },
   "FeiHouEasyH3DurationCrop": {
     "display_name": "FeiHou Easy H3 Digital Human/MV Duration Crop",
     "description": "Uses the Easy H3 duration-control output to restore the selected video/audio duration. Disabled control passes media through unchanged.",
     "inputs": {
-      "images": { "name": "Images" },
-      "fps": { "name": "FPS" },
-      "duration_control": { "name": "Duration control" },
-      "audio": { "name": "Audio" }
+      "images": {
+        "name": "Images"
+      },
+      "fps": {
+        "name": "FPS"
+      },
+      "duration_control": {
+        "name": "Duration control"
+      },
+      "audio": {
+        "name": "Audio"
+      }
     },
     "outputs": {
-      "0": { "name": "Images" },
-      "1": { "name": "FPS" },
-      "2": { "name": "Audio" }
+      "0": {
+        "name": "Images"
+      },
+      "1": {
+        "name": "FPS"
+      },
+      "2": {
+        "name": "Audio"
+      }
     }
   },
   "FeiHouEasyH3PromptPreview": {
     "display_name": "FeiHou Easy H3 Prompt Preview",
     "description": "Preview the final expanded or media-inferred prompt.",
     "inputs": {
-      "text": { "name": "Prompt inference output" }
+      "text": {
+        "name": "Prompt inference output"
+      }
     },
     "outputs": {
-      "0": { "name": "Text" }
+      "0": {
+        "name": "Text"
+      }
+    }
+  },
+  "FeiHouEasyH3MotionPreprocess": {
+    "display_name": "H3 Motion Transfer Preprocess",
+    "inputs": {
+      "mode": {
+        "name": "mode"
+      },
+      "face_blur_on": {
+        "name": "face blur"
+      },
+      "face_blur": {
+        "name": "blur level"
+      },
+      "face_detector": {
+        "name": "face detector"
+      },
+      "shot_prompts": {
+        "name": "shot prompts"
+      }
     }
   }
 }

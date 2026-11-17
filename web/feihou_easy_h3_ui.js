@@ -6348,7 +6348,8 @@ function openVideoSettings(node, ordinal, anchor) {
 // ---- Video card preview -------------------------------------------------
 // A loaded video plays muted on a loop; hovering the card turns the sound on.
 // Once a 分镜提示词 node has run a block, every video card plays that block's
-// part of the source (on a loop) until the next block runs.
+// part of the source (on a loop) until the next block runs; a block that does not
+// use the video (@video none, or lying inside the @hold) plays the whole video.
 const PREVIEW_BLOCK_PROP = "feihou_h3_preview_block";
 const SHOT_PROMPTS_CLASS = "FeiHouEasyH3ShotPrompts";
 
@@ -6367,11 +6368,16 @@ function videoTimelineStart(record) {
 function videoPreviewRange(node, record) {
     const host = isCoreNode(node) ? mediaHostNode(node) : node;
     const block = host?.properties?.[PREVIEW_BLOCK_PROP];
-    if (!block || !shotPromptsActive()) return null;
+    if (!block || !shotPromptsActive() || block.video === false) return null;
     const range = parseClockRange(block.range);
     if (!range || !(range.end > range.start)) return null;
     const origin = videoTimelineStart(record);
-    return { start: origin + range.start, end: origin + range.end };
+    // The md's @hold holds the video's first frame this long in front of it: the block's
+    // film time minus the hold is its time in the file.  A block inside the hold does not use it.
+    const hold = Math.max(0, Number(block.hold) || 0);
+    const end = range.end - hold;
+    if (end <= 0) return null;
+    return { start: origin + Math.max(0, range.start - hold), end: origin + end };
 }
 
 function applyPreviewRange(video, range) {
@@ -6469,7 +6475,8 @@ function installVideoPreviewFollower() {
     api.addEventListener("executed", (event) => {
         const shot = event?.detail?.output?.feihou_shot?.[0];
         if (!shot?.range) return;
-        const block = { index: Number(shot.index) || 0, range: String(shot.range) };
+        const block = { index: Number(shot.index) || 0, range: String(shot.range), hold: Number(shot.hold) || 0,
+            video: shot.video !== false };
         for (const node of app.graph?._nodes || []) {
             if (!isMediaNode(node) && !(node?.type === NODE_CLASS && node.__feihouMediaGallery)) continue;
             node.properties ||= {};

@@ -7,7 +7,7 @@ Two ways to cut the reference video 1 (e.g. the RGB dance):
 * **Shot blocks** (``shot_prompts`` connected): the markdown shot list gives
   each block its time range and its own prompt; a block is split at its
   @split points, otherwise Motion Segment decides: 帧窗口分段 cuts it into
-  ``segment_frames`` clips, 整段一次采完 samples it whole; the block is saved
+  ``segment_frames`` clips, 不分段 samples it whole; the block is saved
   as one video.  Consecutive segments inside a block,
   and a block marked ``@continue``, are anchored to the previous segment's last
   frames through the tail guide, so the seam stays continuous; a block that
@@ -29,6 +29,8 @@ Combine V2 joins the blocks into the complete film.
 from __future__ import annotations
 
 import copy
+import json
+import hashlib
 import logging
 import math
 import os
@@ -54,15 +56,17 @@ from comfy_extras import nodes_custom_sampler as custom_sampler
 from comfy_extras import nodes_minimax_h3 as h3
 
 from . import h3_context_windows as context_windows
+from . import remake as remake_mode
 from .dual_sample import (
     NONE_OPTION, SHIFT_AUDIO, SHIFT_VIDEO, VAE_DOWNSAMPLE, FeiHouEasyH3DualSample1st,
     _encode_negative, _guider, _node_value, _split_av, _with_canvas,
 )
-from .nodes import H3HighresRebuilder, MiniMaxH3Context
+from .nodes import H3HighresRebuilder, MiniMaxH3Context, _window_audio, deferred_text_encoding, has_pending_text, resolve_text_batch
 from .production_continuation import SAVE_KEY, _audio_slice
 from .production_pack import SHOT_TYPE
-from .shot_prompts import START_MANUAL, advance_block, finish_series, load_tail, output_root, save_tail
-from .shot_prompts import START_AUTO as SHOT_START_AUTO, START_RESTART as SHOT_START_RESTART
+from .shot_prompts import (START_MANUAL, advance_block, finish_series, load_held, load_tail, output_root, save_held,
+                           save_tail)
+from .shot_prompts import next_run_numbers, start_mode
 from .third_party import h3_dual_clock as dual_clock
 
 
@@ -86,17 +90,25 @@ SAMPLING_TWO_PASS = "二段式（一采）"
 # resolved to plain links there).
 SECOND_PASS_CLASSES = {"FeiHouEasyH3SampleEnhancer2nd", "FeiHouEasyH3RHSampleEnhancer2nd",
                        "FeiHouEasyH3DualSample2nd", "FeiHouEasyH3RHDualSample2nd"}
-# Motion Segment: how a block longer than one segment is sampled.  帧窗口: in-block
-# segments one after another, each continuing the previous one's decoded tail.
-# 上下文窗口: the whole block in one sampler run, overlapping windows blended at
-# every step (h3_context_windows); blocks without reference video (talk) keep 帧窗口.
+# Motion Segment 分段方式: how a block longer than one segment is sampled.
+# 不分段: one run per block (an @split block is still cut at its splits).
+# 帧窗口: in-block segments one after another, each continuing the previous
+# one's decoded tail.  上下文窗口: the whole block in one sampler run,
+# overlapping windows blended at every step (h3_context_windows); blocks
+# without reference video (talk) keep 帧窗口.  segment_frames / overlap_frames
+# are shared: segment length and tail overlap, or window length and window
+# overlap (the frontend swaps the option lists and remembers each mode's values).
+SEGMENTATION_WHOLE = "不分段"
 SEGMENTATION_CHAIN = "帧窗口"
 # Saved before the rename; still means 帧窗口.
 SEGMENTATION_LEGACY = {"接续": SEGMENTATION_CHAIN}
-# Context windows are switched off for now: the fields stay (saved workflows
-# keep their values) but are hidden in the UI and every block runs 帧窗口.
-CONTEXT_WINDOWS_ENABLED = False
+CONTEXT_WINDOWS_ENABLED = True
 SEGMENTATION_CONTEXT = "上下文窗口"
+# 自动: each md block's @segment (or the md header's) decides; without one, 不分段.
+SEGMENTATION_AUTO = "自动"
+SEGMENTATION_CHOICES = [SEGMENTATION_AUTO, SEGMENTATION_WHOLE, SEGMENTATION_CHAIN, SEGMENTATION_CONTEXT]
+# 不分段 / 自动 grey out the window fields: @split segments and @continue blocks join on this overlap.
+WHOLE_OVERLAP = "22"
 # Context-window sizes offered on Motion Segment.  Windows are 5 + 17N frames,
 # from about 5 s (124) up to 15 s (362); overlaps are whole 17-frame groups,
 # because windows start on the 17-frame clip grid.
@@ -115,8 +127,52 @@ SEGMENT_FRAME_DEFAULT = _window_label(124)
 def _window_frames(value) -> int:
     """Frames of a window option ("362 帧 · 15.08 秒"; a bare number also works)."""
     return int(str(value).split()[0])
-CONTEXT_OVERLAP_CHOICES = ["34", "68", "102"]
-CONTEXT_OVERLAP_DEFAULT = "68"
+# The overlap of two windows on the 17-frame grid is 5 + 17k frames; saves from
+# before 2026-11-13 wrote 34 / 68 / 102 for 39 / 73 / 107 (context_windows.LEGACY_OVERLAPS).
+CONTEXT_OVERLAP_CHOICES = ["22", "39", "56", "73", "90", "107"]
+CONTEXT_OVERLAP_DEFAULT = "73"
+# overlap_frames serves both: tail overlap (帧窗口 / 不分段) or window overlap (上下文窗口).
+SEGMENT_OVERLAP_CHOICES = [*OVERLAP_CHOICES, *(c for c in CONTEXT_OVERLAP_CHOICES if c not in OVERLAP_CHOICES)]
+# A context-window block continued with @continue (or the fixed-length
+# fallback) still anchors on the previous tail with this many frames.
+CONTEXT_CHAIN_OVERLAP = 22
+# 上下文窗口每段上限: a longer block is sampled in segments of at most this
+# long, one segment per run; each segment starts on the previous one's last
+# overlap_frames (the window overlap), anchored to its decoded frames and
+# cross-faded into them, so a long film shows results early and an
+# interrupted run keeps its finished segments.
+CONTEXT_SEGMENT_WHOLE = "整块一次"
+CONTEXT_SEGMENT_SECONDS = (20, 30, 45, 60)
+CONTEXT_SEGMENT_CHOICES = [CONTEXT_SEGMENT_WHOLE, *(f"{seconds} 秒" for seconds in CONTEXT_SEGMENT_SECONDS)]
+CONTEXT_SEGMENT_DEFAULT = "30 秒"
+# Cross-fade between split context segments: this many frames in the middle of
+# the overlap blend from the previous segment into the next one; before them the
+# overlap shows the previous segment, after them the new one.  全部重叠 = the whole overlap.
+CROSSFADE_ALL = "全部重叠"
+CROSSFADE_CHOICES = ["6", "12", "18", "24", CROSSFADE_ALL]
+CROSSFADE_DEFAULT = "12"
+
+
+def _crossfade_frames(value) -> int | None:
+    """Frames of a 叠化帧数 option, None for the whole overlap."""
+    text = str(value or "").strip()
+    if not text or text == CROSSFADE_ALL:
+        return None
+    return int(text)
+
+
+def _context_segment_frames(value) -> int | None:
+    """Frames of a 每段上限 option, None for 整块一次."""
+    text = str(value or "").strip()
+    if not text or text == CONTEXT_SEGMENT_WHOLE:
+        return None
+    return round(float(text.split()[0]) * h3.FPS)
+
+
+def _segmentation(value) -> str:
+    value = str(value)
+    return SEGMENTATION_LEGACY.get(value, value)
+# dual_clock_euler is offered only on ComfyUI builds without native H3 AV sampling (see h3_dual_clock).
 SEGMENT_SAMPLERS = [*comfy.samplers.SAMPLER_NAMES,
                     *(name for name in dual_clock.SAMPLER_OPTIONS if name not in comfy.samplers.SAMPLER_NAMES)]
 # An @split segment (块内分镜) holds at most 15 s of the block; the overlap
@@ -129,6 +185,26 @@ _RUN: dict = {}
 _WINDOW_CACHE: OrderedDict = OrderedDict()
 # A context-window block holds a few windows per canvas.
 WINDOW_CACHE_SIZE = 16
+
+
+# Saved segments go where the joined video goes: the filename_prefix of the
+# node fed by Collect's images (e.g. Video Combine V2), else this folder.
+SEGMENT_PREFIX_FALLBACK = "FeiHou_H3_motion/segment"
+
+
+def _segment_prefix(prompt, unique_id) -> str:
+    if isinstance(prompt, dict) and unique_id is not None:
+        for node in prompt.values():
+            inputs = node.get("inputs") if isinstance(node, dict) else None
+            if not isinstance(inputs, dict):
+                continue
+            takes_images = any(isinstance(value, (list, tuple)) and len(value) == 2
+                               and str(value[0]) == str(unique_id) and str(value[1]) == "0"
+                               for value in inputs.values())
+            target = inputs.get("filename_prefix")
+            if takes_images and isinstance(target, str) and target.strip():
+                return target.strip()
+    return SEGMENT_PREFIX_FALLBACK
 
 
 def _queue_next_run(info: dict) -> bool:
@@ -166,12 +242,11 @@ def _queue_next_run(info: dict) -> bool:
         if not isinstance(node, dict) or node.get("class_type") != "FeiHouEasyH3ShotPrompts":
             continue
         inputs = node.setdefault("inputs", {})
-        if inputs.get("start") == START_MANUAL:
+        if start_mode(inputs.get("start")) == START_MANUAL:
             continue
-        if inputs.get("start") == SHOT_START_RESTART:
-            inputs["start"] = SHOT_START_AUTO
+        inputs["start"] = start_mode(inputs.get("start"))
         if shot_numbers is not None and not isinstance(inputs.get("shot_numbers"), list):
-            inputs["shot_numbers"] = shot_numbers
+            inputs["shot_numbers"] = next_run_numbers(inputs.get("shot_numbers"), int(shot_numbers))
     number = -server.number
     server.number += 1
     queue.put((number, str(uuid.uuid4()), prompt, *running[3:]))
@@ -199,6 +274,12 @@ def _fresh(value):
     return value
 
 
+def _remember_window(key, conditioning, latent):
+    _WINDOW_CACHE[key] = (_detached(conditioning), _detached(latent))
+    while len(_WINDOW_CACHE) > WINDOW_CACHE_SIZE:
+        _WINDOW_CACHE.popitem(last=False)
+
+
 def _build_window(h3_context, builder, start, count, width, height, **options):
     """``builder.build`` with a small cache keyed by request, models and window."""
     if not getattr(builder, "signature", ""):
@@ -213,9 +294,10 @@ def _build_window(h3_context, builder, start, count, width, height, **options):
         conditioning, latent = cached
         return _fresh(conditioning), _fresh(latent)
     conditioning, latent = builder.build(start, count, width, height, **options)
-    _WINDOW_CACHE[key] = (_detached(conditioning), _detached(latent))
-    while len(_WINDOW_CACHE) > WINDOW_CACHE_SIZE:
-        _WINDOW_CACHE.popitem(last=False)
+    if has_pending_text(conditioning):
+        # The prompt is still to be encoded: _clip_conditioning caches it afterwards.
+        return conditioning, latent, key
+    _remember_window(key, conditioning, latent)
     return _fresh(conditioning), _fresh(latent)
 
 
@@ -424,7 +506,7 @@ class _Segment:
 
 def _block_segments(frames: int, start: int, overlap: int, continues: bool,
                     splits: list[int] | tuple[int, ...] | None = None,
-                    segment_length: int | None = None) -> list[_Segment]:
+                    segment_length: int | None = None, head_overlap: int | None = None) -> list[_Segment]:
     """Split one shot block into sampling segments.
 
     ``splits`` (frames from the block start, from @split) are where the
@@ -434,9 +516,11 @@ def _block_segments(frames: int, start: int, overlap: int, continues: bool,
     Segment 0 starts from nothing unless the block continues the previous one,
     in which case ``overlap`` context frames come first.  Every later segment
     starts ``overlap`` frames before its own window, so the tail guide and the
-    reference video show where the previous segment ended.
+    reference video show where the previous segment ended.  ``head_overlap``
+    (default ``overlap``) is segment 0's overlap when the block continues.
     """
     frames = max(1, int(frames))
+    head = int(overlap if head_overlap is None else head_overlap)
     points = sorted({int(point) for point in (splits or ()) if 0 < int(point) < frames})
     if points:
         bounds = [0, *points, frames]
@@ -446,7 +530,7 @@ def _block_segments(frames: int, start: int, overlap: int, continues: bool,
     elif segment_length:
         bounds = [0]
         while bounds[-1] < frames:
-            skip = min(overlap if (len(bounds) > 1 or continues) else 0, max(0, int(start) + bounds[-1]))
+            skip = min(overlap if len(bounds) > 1 else head if continues else 0, max(0, int(start) + bounds[-1]))
             bounds.append(min(frames, bounds[-1] + max(1, int(segment_length) - skip)))
     else:
         bounds = [0, frames]
@@ -457,9 +541,37 @@ def _block_segments(frames: int, start: int, overlap: int, continues: bool,
         if keep < 1:
             continue
         segment_start = int(start) + bounds[index]
-        skip = min(overlap if (index > 0 or continues) else 0, max(0, segment_start))
+        skip = min(overlap if index > 0 else head if continues else 0, max(0, segment_start))
         plan.append(_Segment(segment_start - skip, _ceil_grid(keep + skip), skip, keep))
     return plan
+
+
+def _cross_fade(images: list, head, frames: int | None = None) -> None:
+    """Blend a segment's repeated head into the end of the frames collected so far.
+
+    ``head`` re-renders the previous segment's last frames (anchored to them);
+    mixing it in with a rising weight hides the step where the new segment
+    takes over.  ``images`` holds uint8 parts; the last frames are replaced.
+    ``frames``: length of the fade, centred in the overlap (None = the whole
+    overlap); overlap frames after it are the new segment's own.
+    """
+    if int(images[-1].shape[0]) < int(head.shape[0]):
+        images[:] = [torch.cat(images, dim=0)]
+    count = min(int(head.shape[0]), int(images[-1].shape[0]))
+    if count < 1:
+        return
+    previous = images[-1].clone()
+    tail = previous[-count:].float()
+    new = head[-count:].float()
+    if head.dtype != torch.uint8:
+        new = new.clamp(0, 1) * 255
+    span = count if not frames else max(1, min(int(frames), count))
+    lead = (count - span) // 2
+    weight = torch.cat([torch.zeros(lead), torch.linspace(0, 1, span + 2, dtype=torch.float32)[1:-1],
+                        torch.ones(count - lead - span)]).view(-1, 1, 1, 1)
+    mixed = (tail * (1 - weight) + new[..., :tail.shape[-1]] * weight).round().clamp(0, 255).to(torch.uint8)
+    previous[-count:] = mixed
+    images[-1] = previous
 
 
 def _apply_tail_guide(conditioning, video_vae, tail, frames: int, width: int, height: int, length: int):
@@ -472,6 +584,102 @@ def _apply_tail_guide(conditioning, video_vae, tail, frames: int, width: int, he
         conditioning, {"minimax_keyframes": [guide], "minimax_frame_count": int(length)})
 
 
+def _remake_options(remake: bool, face_blur=None, detector: str = remake_mode.FACE_DETECTOR, people=None) -> dict:
+    """builder.build options of a Remake 替换 run (原片脸部模糊 when face_blur is a level or "auto";
+    ``people`` = the key of the recognised @blur_people, None = the largest face)."""
+    if not remake:
+        return {}
+    if not face_blur:
+        return {"remake": True}
+    options = {"remake": True, "face_blur": face_blur, "face_detector": str(detector)}
+    if people:
+        options["face_people"] = people
+    return options
+
+
+def _block_people(builder, shot, detector: str, recognizer: str = remake_mode.RECOGNIZER_DEFAULT):
+    """Key of this block's @blur_people, recognised from their moments (None = not written).
+
+    Only the moments inside the block's @range can be read (the reference video is
+    loaded for this block only).
+    """
+    anchors = (shot or {}).get("blur_people") if isinstance(shot, dict) else None
+    if not anchors:
+        return None
+    window = getattr(builder, "source_window", None)
+    if window is None:
+        raise ValueError("@blur_people 需要参考视频 1。")
+    start = int(shot.get("start_frame") or 0)
+    end = start + int(shot.get("frames") or 0)
+    inside = [(int(frame), float(x), float(y)) for frame, x, y in anchors if start <= int(frame) < end]
+    if not inside:
+        raise ValueError(f"分镜 {shot.get('block')}：@blur_people 写的时间都不在本块 @range 里"
+                         f"（{start / h3.FPS:.2f}–{end / h3.FPS:.2f} 秒），节点只读得到本块的画面。"
+                         "请在这一块写一行 @blur_people，时间取本块里这个人正脸清楚的一刻。")
+    if len(inside) < len(anchors):
+        LOGGER.info("Easy H3 动作迁移预处理：分镜 %s 的 @blur_people 有 %d 个时间不在本块，只用本块里的 %d 个",
+                    shot.get("block"), len(anchors) - len(inside), len(inside))
+    key = "people:" + hashlib.sha1(json.dumps([str(getattr(builder, "signature", "")), detector, str(recognizer),
+                                                inside]).encode()).hexdigest()
+    if remake_mode.people(key) is None:
+        vectors = remake_mode.resolve_people(lambda frame: window(frame, 1), inside, detector, recognizer)
+        remake_mode.register_people(key, vectors, recognizer)
+        LOGGER.info("Easy H3 动作迁移预处理：分镜 %s 只模糊 %d 个指定的人（%s）", shot.get("block"), len(inside),
+                    "，".join(f"{frame / h3.FPS:.2f} 秒 ({x:.2f}, {y:.2f})" for frame, x, y in inside))
+    return key
+
+
+# H3 动作迁移预处理 modes (the node's 模式 widget); 自动 follows the md's @mode.
+MODE_OFF, MODE_AUTO, MODE_SWAP = "关闭", "自动", "人物替换"
+PREPROCESS_MODES = [MODE_OFF, MODE_AUTO, MODE_SWAP]
+_MD_MODES = {"off": MODE_OFF, "swap": MODE_SWAP}
+
+
+def _block_mode(preprocess, shot) -> str:
+    """This run's mode: 关闭 or 人物替换.
+
+    The node's 模式 decides; 自动 takes the md block's @mode (not written = 关闭).
+    A preprocess dict from before the 模式 widget only had ``remake``.
+    """
+    if not isinstance(preprocess, dict):
+        return MODE_OFF
+    mode = preprocess.get("mode")
+    if mode is None:
+        mode = MODE_SWAP if preprocess.get("remake") else MODE_OFF
+    if mode == MODE_AUTO:
+        written = str(shot.get("mode") or "") if isinstance(shot, dict) else ""
+        mode = _MD_MODES.get(written, MODE_OFF)
+        if isinstance(shot, dict):
+            LOGGER.info("Easy H3 动作迁移预处理：自动，分镜 %s 按 md 的 @mode：%s", shot.get("block"),
+                        mode if written else "没写，关闭")
+    elif mode not in (MODE_OFF, MODE_SWAP):
+        LOGGER.warning("Easy H3 动作迁移预处理：模式「%s」已移除，按关闭", mode)
+        mode = MODE_OFF
+    return mode
+
+
+def _preprocess_recognizer(preprocess) -> str:
+    """The preprocess node's 人脸识别模型 (@blur_people), buffalo_l when not set."""
+    value = preprocess.get("face_recognizer") if isinstance(preprocess, dict) else None
+    return str(value or remake_mode.RECOGNIZER_DEFAULT)
+
+
+def _block_face_blur(preprocess, shot) -> tuple:
+    """(face_blur, detector) of this run: the md block's @face_blur over the preprocess node's setting.
+
+    Without the preprocess node, or with it set to 关, nothing is blurred.
+    """
+    if not isinstance(preprocess, dict) or preprocess.get("face_blur") is None:
+        if isinstance(shot, dict) and shot.get("face_blur") not in (None, "", "off"):
+            LOGGER.info("Easy H3 动作迁移：md 写了 @face_blur %s，但没接「H3 动作迁移预处理」或它的脸部模糊是 关，不模糊",
+                        shot.get("face_blur"))
+        return None, remake_mode.FACE_DETECTOR
+    detector = str(preprocess.get("face_detector") or remake_mode.FACE_DETECTOR)
+    written = str(shot.get("face_blur") or "") if isinstance(shot, dict) else ""
+    setting = remake_mode.parse_face_blur(written) if written else preprocess["face_blur"]
+    return setting, detector
+
+
 def _clip_conditioning(h3_context, builder, start: int, length: int, width: int, height: int,
                        windows=None, tail=None, skip: int = 0, first=None, **options):
     """Conditioning + empty latent of one sampled clip.
@@ -482,7 +690,18 @@ def _clip_conditioning(h3_context, builder, start: int, length: int, width: int,
     windows every window gets its own reference window (the anchor goes to the
     first), and the result carries the whole window set for the windowed guider.
     """
-    if skip:
+    remake = bool(options.get("remake"))
+    prefix = None
+    if skip and remake and remake_mode.prefix_frames(skip) and tail is not None:
+        # Remake: the previous segment's frames open this one held clean (noise_mask 0),
+        # whole 17-frame groups of the overlap; the rest of the overlap is generated and dropped.
+        lead = tail[-min(int(skip), int(tail.shape[0])):]
+        count = remake_mode.prefix_frames(int(lead.shape[0]))
+        if count:
+            prefix = h3._resize(lead[:count], width, height, "center")
+    if prefix is not None:
+        anchor, anchor_frames = None, 0
+    elif skip:
         anchor, anchor_frames = tail, skip
     elif first is not None:
         anchor, anchor_frames = first, 1
@@ -493,16 +712,36 @@ def _clip_conditioning(h3_context, builder, start: int, length: int, width: int,
         if anchor_frames:
             conditioning = _apply_tail_guide(conditioning, h3_context.video_vae, anchor, anchor_frames,
                                              width, height, length)
+        if prefix is not None:
+            latent = remake_mode.apply_prefix(h3_context.video_vae, latent, prefix)
         return conditioning, latent
-    conditionings = []
-    for index, window in enumerate(windows):
-        conditioning, _latent = _build_window(h3_context, builder, start + window.frame_start, window.frames,
-                                              width, height, **options)
-        if index == 0 and anchor_frames:
-            conditioning = _apply_tail_guide(conditioning, h3_context.video_vae, anchor, anchor_frames,
-                                             width, height, window.frames)
-        conditionings.append(conditioning)
+    built = []
+    # Reference media of every window first (VAE loaded once), then every
+    # prompt (text encoder loaded once).
+    with deferred_text_encoding() as batch:
+        for window in windows:
+            result = _build_window(h3_context, builder, start + window.frame_start, window.frames,
+                                   width, height, **options)
+            built.append(result)
+    pending = [result[0] for result in built]
+    if anchor_frames:
+        # Still on the VAE: the anchor goes on before the prompts are encoded.
+        pending.append(_apply_tail_guide(pending[0], h3_context.video_vae, anchor, anchor_frames,
+                                         width, height, windows[0].frames))
+    resolved = resolve_text_batch(batch, pending)
+    conditionings = resolved[:len(built)]
+    for result, conditioning in zip(built, conditionings):
+        if len(result) > 2:
+            _remember_window(result[2], conditioning, result[1])
+    if anchor_frames:
+        conditionings[0] = resolved[-1]
     latent, _frames = h3._empty_av_latent(width, height, length)
+    if remake:
+        # The whole segment's soundtrack, held clean; each window takes its part.
+        audio = _window_audio(builder.source_audio, start, length) if options.get("soundtrack", True) else None
+        latent = remake_mode.held_audio_latent(h3_context.audio_vae, audio, latent, int(length))
+        if prefix is not None:
+            latent = remake_mode.apply_prefix(h3_context.video_vae, latent, prefix)
     window_set = context_windows.WindowSet(list(windows), conditionings, int(length))
     return context_windows.windowed_conditioning(window_set), latent
 
@@ -559,6 +798,71 @@ def _film_audio(audio: dict | None) -> dict | None:
     return {"waveform": waveform.contiguous(), "sample_rate": FILM_AUDIO_RATE}
 
 
+def _frames_audio(audio, start: int, count: int, fps: float):
+    return _audio_slice(audio, start, count, fps) if isinstance(audio, dict) else audio
+
+
+def _mix_audio_head(audio, held, frames: int, fps: float):
+    """Fade ``held`` (film audio of ``frames`` frames) out over the first ``frames`` of ``audio``."""
+    if not isinstance(audio, dict) or not isinstance(held, dict):
+        return audio
+    audio = _film_audio(audio)
+    wave = audio["waveform"].clone()
+    old = _film_audio(held)["waveform"].to(wave)
+    samples = min(int(round(frames * FILM_AUDIO_RATE / fps)), int(wave.shape[-1]), int(old.shape[-1]))
+    if samples < 1:
+        return audio
+    ramp = torch.linspace(0, 1, samples + 2, dtype=wave.dtype)[1:-1]
+    wave[..., :samples] = old[..., -samples:] * (1 - ramp) + wave[..., :samples] * ramp
+    return {"waveform": wave, "sample_rate": FILM_AUDIO_RATE}
+
+
+def _transition_frames(frames, audio, generated, motion_state, fps: float):
+    """@transition crossfade at both ends of a finished block.
+
+    Opening (``crossfade_lead``): the block was rendered that many frames early; those frames
+    are blended with the frames the previous block held back (picture and sound).  Without
+    them (e.g. a block run on its own) the early frames are dropped: a hard cut.
+    Closing (``crossfade_next``): the next block cross-fades in, so this block keeps its last
+    frames back for it and saves that much shorter; the joined film keeps its length.
+    """
+    block = int(motion_state.get("block") or 1)
+    series = str(motion_state.get("series") or "")
+    lead = int(motion_state.get("crossfade_lead") or 0)
+    if lead:
+        held = load_held(series, block - 1) if block > 1 else None
+        held_frames = None if held is None else held[0]
+        count = 0 if held_frames is None else min(lead, int(held_frames.shape[0]))
+        if count < lead:
+            if count == 0:
+                LOGGER.warning("Easy H3 motion transfer: 分镜 %d 要叠化进入，但找不到上一块留下的尾帧"
+                               "（单独重跑这一块时会这样），按硬切处理", block)
+            drop = lead - count
+            total = int(frames.shape[0])
+            frames = frames[drop:]
+            audio = _frames_audio(audio, drop, total - drop, fps)
+            generated = _frames_audio(generated, drop, total - drop, fps)
+        if count:
+            old = held_frames[-count:].to(frames)
+            weight = torch.linspace(0, 1, count + 2, dtype=frames.dtype)[1:-1].view(-1, 1, 1, 1)
+            frames = frames.clone()
+            frames[:count] = old * (1 - weight) + frames[:count] * weight
+            audio = _mix_audio_head(audio, held[1], count, fps)
+            LOGGER.info("Easy H3 motion transfer: 分镜 %d 开头 %d 帧和上一块叠化（%.2f 秒）", block, count, count / fps)
+    hold = int(motion_state.get("crossfade_next") or 0)
+    last_block = bool(motion_state.get("is_last", block >= int(motion_state.get("blocks") or 1)))
+    if hold and not last_block:
+        total = int(frames.shape[0])
+        hold = min(hold, total - 1)
+        if hold > 0:
+            save_held(series, block, frames[-hold:], _film_audio(_frames_audio(audio, total - hold, hold, fps)))
+            frames = frames[:total - hold]
+            audio = _frames_audio(audio, 0, total - hold, fps)
+            generated = _frames_audio(generated, 0, total - hold, fps)
+            LOGGER.info("Easy H3 motion transfer: 分镜 %d 最后 %d 帧留给下一块叠化，本块存 %d 帧", block, hold, total - hold)
+    return frames, audio, generated
+
+
 def _unit_frames(frames: torch.Tensor) -> torch.Tensor:
     """Float frames in 0-1 (8-bit frames are scaled)."""
     return frames.float().div_(255) if frames.dtype == torch.uint8 else frames.float()
@@ -573,7 +877,8 @@ def _join_audio(parts: list) -> dict | None:
 
 
 def _prepare_fixed_segments(h3_context, builder, length: int, overlap: int, max_segments: int,
-                            start: str, width: int, height: int, fps: float, soundtrack: bool = True):
+                            start: str, width: int, height: int, fps: float, soundtrack: bool = True,
+                            remake: bool = False, face_blur=None, face_detector: str = remake_mode.FACE_DETECTOR):
     """Fixed-length segmentation: one ``segment_frames`` window per run (no shot list)."""
     step = length - overlap
     total = _segment_count(builder.source_frames, length, step)
@@ -593,12 +898,20 @@ def _prepare_fixed_segments(h3_context, builder, length: int, overlap: int, max_
     _RUN.update(builder=builder, builder_signature=builder.signature)
     index = int(_RUN["next"])
     frame_start = index * step
-    conditioning, latent = builder.build(frame_start, length, width, height, soundtrack=soundtrack)
+    options = _remake_options(remake, face_blur, face_detector)
+    conditioning, latent = builder.build(frame_start, length, width, height, soundtrack=soundtrack, **options)
     if index > 0:
         previous_video, _audio = _split_av(_RUN["previous"]["samples"])
         new_video, _audio = _split_av(latent["samples"])
         tail = _RUN.get("tail")
-        if previous_video.shape[-2:] != new_video.shape[-2:] and tail is not None and int(tail.shape[0]):
+        held = remake_mode.prefix_frames(overlap) if remake and tail is not None else 0
+        if held and int(tail.shape[0]) >= held:
+            # Remake: keep the held soundtrack; the previous frames open the segment held clean.
+            prefix = h3._resize(tail[-overlap:][:held], width, height, "center")
+            latent = remake_mode.apply_prefix(h3_context.video_vae, latent, prefix)
+        elif remake and tail is not None and int(tail.shape[0]):
+            conditioning = _apply_tail_guide(conditioning, h3_context.video_vae, tail, overlap, width, height, length)
+        elif previous_video.shape[-2:] != new_video.shape[-2:] and tail is not None and int(tail.shape[0]):
             # Two-pass: the collected latent is the 2nd-pass canvas, this one the
             # 1st pass; continue from the decoded tail frames like shot blocks do.
             conditioning = _apply_tail_guide(conditioning, h3_context.video_vae, tail, overlap, width, height, length)
@@ -608,19 +921,28 @@ def _prepare_fixed_segments(h3_context, builder, length: int, overlap: int, max_
              "source_frames": builder.source_frames, "source_audio": builder.source_audio,
              "source_window": getattr(builder, "source_window", None),
              "video_vae": h3_context.video_vae, "audio_vae": h3_context.audio_vae, "fps": fps,
-             "window_start": frame_start, "window_length": length,
+             "window_start": frame_start, "window_length": length, "remake": remake, "face_blur": face_blur,
+             "face_detector": face_detector,
              "skip": 0 if index == 0 else overlap, "keep": length - (0 if index == 0 else overlap)}
     return conditioning, latent, state, index, count, total
 
 
 def _prepare_shot_block(h3_context, builder, shot: dict, overlap: int, width: int, height: int, fps: float,
                         soundtrack: bool = True, context: tuple[int, int] | None = None,
-                        segment_length: int | None = None):
+                        segment_length: int | None = None, context_segment: int | None = None,
+                        remake: bool = False, face_blur=None, face_detector: str = remake_mode.FACE_DETECTOR,
+                        face_people=None):
     """One sampling segment of the current markdown shot block.
 
     ``context`` = (window frames, overlap frames): the whole block is one
-    segment sampled with joint context windows (only blocks with reference
-    video; a talk block without it keeps the sequential segments).
+    segment sampled with joint context windows.  A talk block without
+    reference video needs its dialogue lines time-tagged (``shot["speech"]``):
+    each window then speaks only its own lines and the windows are placed so
+    their overlaps fall in the pauses; without tags it keeps the sequential
+    segments.
+    ``context_segment`` (frames): a longer block is cut into segments of at
+    most that many frames, chained on the window overlap; each one is still
+    sampled with context windows.
     """
     fingerprint = str(shot.get("fingerprint") or "")
     block = int(shot.get("block") or 1)
@@ -631,17 +953,37 @@ def _prepare_shot_block(h3_context, builder, shot: dict, overlap: int, width: in
     continues = bool(shot.get("continue"))
     if block_frames < 1:
         raise ValueError("分镜提示词：本块的帧数无效，请检查 md 的 @range。")
-    if context is not None and not shot.get("video", True):
-        LOGGER.info("Easy H3 motion transfer: 分镜 %d 没有参考视频（口播块），上下文窗口不适用，按帧窗口分段", block)
+    # @transition crossfade: render that many frames before the block too; Collect blends
+    # them with the frames the previous block held back.
+    lead = min(int(shot.get("crossfade") or 0), block_start) if not continues else 0
+    splits = shot.get("splits")
+    if lead:
+        block_start -= lead
+        block_frames += lead
+        splits = [int(point) + lead for point in (splits or ())]
+        LOGGER.info("Easy H3 motion transfer: 分镜 %d 叠化进入（@transition crossfade）：多采本块前面 %d 帧，"
+                    "和上一块留下的最后 %d 帧叠化", block, lead, lead)
+    speech = [(int(start), int(end)) for start, end in (shot.get("speech") or ())]
+    if context is not None and not shot.get("video", True) and not speech:
+        LOGGER.info("Easy H3 motion transfer: 分镜 %d 没有参考视频（口播块），台词没标时间，上下文窗口不适用，按帧窗口分段"
+                    "（台词行写成 [00:02.0-00:05.5] …<d>…</d> 才能用上下文窗口）", block)
         context = None
-    if context is not None:
+    blend = False
+    if context is not None and context_segment and block_frames > int(context_segment):
+        chain = max(int(overlap), int(context[1]))
+        plan = _block_segments(block_frames, block_start, chain, continues, None, int(context_segment),
+                               head_overlap=overlap)
+        overlap, blend = chain, True
+        LOGGER.info("Easy H3 motion transfer: 分镜 %d 有 %.1f 秒，上下文窗口按每段最多 %.0f 秒分成 %d 段（段间重叠 %d 帧），每次运行采一段",
+                    block, block_frames / h3.FPS, int(context_segment) / h3.FPS, len(plan), chain)
+    elif context is not None:
         skip = min(overlap if continues else 0, block_start)
         plan = [_Segment(block_start - skip, _ceil_grid(block_frames + skip), skip, block_frames)]
     else:
-        plan = _block_segments(block_frames, block_start, overlap, continues, shot.get("splits"), segment_length)
+        plan = _block_segments(block_frames, block_start, overlap, continues, splits, segment_length)
     same_run = (_RUN.get("mode") == "block" and _RUN.get("fingerprint") == fingerprint
                 and _RUN.get("series") == series)
-    if not same_run or int(_RUN.get("block") or 0) != block:
+    if not same_run or int(_RUN.get("block") or 0) != block or shot.get("restart"):
         # Keep the finished block's tail: the next block may continue it.
         carried = _RUN.get("tail") if same_run and int(_RUN.get("block") or 0) == block - 1 else None
         _RUN.clear()
@@ -651,13 +993,18 @@ def _prepare_shot_block(h3_context, builder, shot: dict, overlap: int, width: in
     if index >= len(plan):
         raise ValueError("动作迁移：分镜块的段号超出范围，请把「分镜提示词」的 start 设为从头开始后重新运行。")
     segment = plan[index]
+    # Later segments of a split context block are rendered on their own: only the source
+    # and the pictures, no anchor to the previous segment's output (anchoring carried its
+    # sharpening, saturation and grain into the next segment, worse with every segment).
+    # Their overlap is rendered too and cross-faded into the previous segment by Collect.
+    independent = blend and index > 0
     tail = _RUN.get("tail")
-    if segment.skip and (tail is None or int(getattr(tail, "shape", (0,))[0]) == 0):
+    if segment.skip and not independent and (tail is None or int(getattr(tail, "shape", (0,))[0]) == 0):
         if index == 0 and continues:
             tail = load_tail(series, block - 1)
             _RUN["tail"] = tail
     first_frame = getattr(builder, "first_frame", None)
-    if segment.skip and (tail is None or int(getattr(tail, "shape", (0,))[0]) == 0):
+    if segment.skip and not independent and (tail is None or int(getattr(tail, "shape", (0,))[0]) == 0):
         LOGGER.warning("动作迁移：分镜 %d 第 %d 段缺少上一段的尾帧，改为从头生成%s",
                        block, index + 1, "，用 @first 首帧图锚定开头" if first_frame is not None and index == 0
                        else "（接缝可能可见）")
@@ -668,28 +1015,54 @@ def _prepare_shot_block(h3_context, builder, shot: dict, overlap: int, width: in
         LOGGER.info("Easy H3 motion transfer: 分镜 %d 用 @first 首帧图作为第 0 帧关键帧", block)
     windows = None
     if context is not None:
-        windows = context_windows.plan_windows(segment.length, *context)
+        if speech:
+            local = [(start - segment.start, end - segment.start) for start, end in speech
+                     if end > segment.start and start < segment.start + segment.length]
+            windows, crossed = context_windows.plan_speech_windows(segment.length, *context, local)
+            if len(windows) > 1:
+                LOGGER.info("Easy H3 motion transfer: 分镜 %d 上下文窗口按台词停顿排位：%s", block,
+                            "每句台词都完整落在一个窗口里" if not crossed else
+                            f"有 {crossed} 帧台词落在窗口重叠处（句间停顿不够长，接缝处可能吞字或重音；"
+                            "把那里的停顿拉长到 1.5 秒以上，或调整台词时间）")
+                if crossed:
+                    LOGGER.warning("Easy H3 motion transfer: 分镜 %d 有 %d 帧台词落在上下文窗口的重叠处", block, crossed)
+        else:
+            windows = context_windows.plan_windows(segment.length, *context)
         if len(windows) < 2:
             windows = None
         else:
-            LOGGER.info("Easy H3 motion transfer: 分镜 %d 上下文窗口 %d 个（每个 %d 帧，起点 %s），整块一次采样",
-                        block, len(windows), windows[0].frames,
+            sizes = sorted({window.frames for window in windows})
+            LOGGER.info("Easy H3 motion transfer: 分镜 %d 上下文窗口 %d 个（%s，起点 %s），整块一次采样",
+                        block, len(windows),
+                        f"每个 {sizes[0]} 帧" if len(sizes) == 1 else
+                        "长度 " + " / ".join(str(window.frames) for window in windows) + " 帧",
                         ", ".join(str(segment.start + window.frame_start) for window in windows))
+    if blend:
+        LOGGER.info("Easy H3 motion transfer: 分镜 %d 第 %d/%d 段，输出帧 %d-%d（%s）",
+                    block, index + 1, len(plan), segment.start + segment.skip,
+                    segment.start + segment.skip + segment.keep - 1,
+                    f"开头 {segment.skip} 帧和上一段重叠：本段独立生成，拼接时渐变过渡" if independent
+                    else f"开头 {segment.skip} 帧接上一段" if segment.skip else "第一段")
     # Reference videos keep the size set where they were loaded (VHS, or the Media card's 媒体设置).
     # ``end`` stops the window at the block's last frame instead of showing the next shot.
     conditioning, latent = _clip_conditioning(h3_context, builder, segment.start, segment.length, width, height,
-                                              windows, _RUN.get("tail"), segment.skip, first,
-                                              end=block_start + block_frames, soundtrack=soundtrack)
+                                              windows, None if independent else _RUN.get("tail"),
+                                              0 if independent else segment.skip, first,
+                                              end=block_start + block_frames, soundtrack=soundtrack,
+                                              **_remake_options(remake, face_blur, face_detector, face_people))
     state = {"run": _RUN, "mode": "block", "index": index, "count": len(plan), "skip": segment.skip,
              "windows": windows, "context_windows": len(windows) if windows else 0, "first": first,
+             "blend": blend, "independent": independent,
              "sound": str(shot.get("sound") or ""),
+             "crossfade_lead": lead, "crossfade_next": int(shot.get("crossfade_next") or 0),
              "keep": segment.keep, "overlap": overlap, "block": block, "blocks": blocks, "series": series,
              "is_last": (bool(shot["is_last"]) if "is_last" in shot else block >= blocks),
              "fingerprint": fingerprint, "block_start": block_start, "block_frames": block_frames,
              "source_frames": builder.source_frames, "source_audio": builder.source_audio,
              "source_window": getattr(builder, "source_window", None),
              "video_vae": h3_context.video_vae, "audio_vae": h3_context.audio_vae, "fps": fps,
-             "window_start": segment.start, "window_length": segment.length}
+             "window_start": segment.start, "window_length": segment.length, "remake": remake,
+             "face_blur": face_blur, "face_detector": face_detector, "face_people": face_people}
     return conditioning, latent, state, index, len(plan), blocks
 
 
@@ -703,12 +1076,16 @@ def _window_context(h3_context, builder, state, conditioning, latent, soundtrack
     start, length = int(state["window_start"]), int(state["window_length"])
     skip = int(state.get("skip") or 0)
     end = (int(state["block_start"]) + int(state["block_frames"])) if state.get("mode") == "block" else None
-    tail = state["run"].get("tail") if skip else None
+    # An independent segment (later part of a split context block) has no anchor in either pass.
+    tail = state["run"].get("tail") if skip and not state.get("independent") else None
     windows = state.get("windows")
     first = state.get("first")
 
     def build(width, height, trigger_prefix=""):
         options = {"soundtrack": soundtrack, "trigger_prefix": trigger_prefix}
+        options.update(_remake_options(bool(state.get("remake")), state.get("face_blur"),
+                                       state.get("face_detector") or remake_mode.FACE_DETECTOR,
+                                       state.get("face_people")))
         if end is not None:
             options["end"] = end
         return _clip_conditioning(h3_context, builder, start, length, width, height, windows, tail,
@@ -726,6 +1103,18 @@ def _first_pass(model, context, sampler_name, scheduler, steps, first_steps, cfg
     """
     return FeiHouEasyH3DualSample1st.prepare(model, context, int(steps), int(first_steps), sampler_name,
                                              False, NONE_OPTION, 0.0, float(cfg), "", scheduler, False)
+
+
+def _remake_first_pass(result, first_steps):
+    """Remake two-pass: the 1st pass runs the swap schedule's first steps, the 2nd pass the rest."""
+    guider, sampler, _sigmas, latent, context = result
+    full = remake_mode.swap_sigmas()
+    split = max(1, min(int(first_steps), full.numel() - 2))
+    plan = dict(context.dual_plan or {})
+    plan.update(start_sigma=float(full[split]), tail=full[split:].clone(), remake=True)
+    LOGGER.info("Easy H3 Remake 替换：二段式，一采 swap 曲线前 %d 步 %s，二采跑剩下的 %s",
+                split, full[:split + 1].tolist(), full[split:].tolist())
+    return guider, sampler, full[:split + 1].clone(), latent, replace(context, dual_plan=plan)
 
 
 def _segment_noise():
@@ -776,7 +1165,8 @@ class FeiHouEasyH3MotionSegment:
                 "model": ("MODEL", {"tooltip": "采样模型（Setup 的模型，可先接注意力补丁）。本节点内部用官方 ModelSamplingMiniMaxH3 设置 shift。"}),
                 "h3_context": ("MINIMAX_H3_CONTEXT", {"tooltip": "接 Setup 的 h3_context（参考生视频模式）。画幅、提示词、参考图都取自 Setup。"}),
                 "sampler_name": (SEGMENT_SAMPLERS, {"default": "euler",
-                                 "tooltip": "采样器。dual_clock_euler（视频/音频各走各的时钟）只用于二段式，二采沿用这里的选择。"}),
+                                 "tooltip": "采样器，单次采样和二段式都用 euler（二采沿用这里的选择）。"
+                                            "旧的 dual_clock_euler 会让口播音频多出一层像背景音乐的持续音，已隐藏，旧工作流里存的会按 euler 运行。"}),
                 "scheduler": (comfy.samplers.SCHEDULER_NAMES, {"default": "simple"}),
                 "steps": ("INT", {"default": 8, "min": 1, "max": 200,
                                   "tooltip": "单次采样：每段采样步数（加速 LoRA 常用 4~8）。二段式：调度总步数，一采跑前 first_steps 步。"}),
@@ -791,35 +1181,40 @@ class FeiHouEasyH3MotionSegment:
             "optional": {
                 "shot_prompts": (SHOT_TYPE, {"forceInput": True, "tooltip":
                     "接「分镜提示词」节点的 production_shot（同一个输出再拉一根线过来）。接上后按 md 的分镜块跑："
-                    "写了 @split 的块按切点分段；没写的按本节点的 frame_window：帧窗口分段按 segment_frames 分段，整段一次采完则整块一次采样（不限时长）。"
+                    "写了 @split 的块按切点分段；没写的按本节点的 segmentation：帧窗口按 segment_frames 分段，不分段则整块一次采样（不限时长），上下文窗口整块按窗口一次采样。"
                     "块内和 @continue 的块用尾部帧接续；不接则按每段帧数固定分段。"}),
                 "reference_soundtrack": ([SOUNDTRACK_TO_MODEL, SOUNDTRACK_COLLECT_ONLY], {"default": SOUNDTRACK_TO_MODEL,
                     "tooltip": "参考视频 1 的原声要不要送进模型。送入模型：原声作为 <Audio 1> 参与生成（人物替换跟唱、对口型用），音色参考等音频卡顺延成 <Audio 2> 起。"
                                "不送入模型：视频只做动作参考，原声不编码（参考 token 更少），音频卡的第一条就是 <Audio 1>；原声照样交给「动作迁移收束」按 @sound / audio_output 输出。"}),
                 # Saved workflows store widgets by position: the frontend
                 # (feihou_segment_layout) maps older saves onto this order by name.
-                "segmentation": ([SEGMENTATION_CHAIN, SEGMENTATION_CONTEXT], {"default": SEGMENTATION_CHAIN,
-                    "tooltip": "分段方式（只对接了分镜提示词、长于一个窗口的跳舞/动作块生效）。"
-                               "帧窗口：块内按 @split 或 segment_frames 分段逐段采样，后一段锁定上一段解码出的尾部帧接上，段数越多细节越掉、噪点越多。"
-                               "上下文窗口：整块一次采样，每一步把整块 latent 切成互相重叠的窗口分别预测、在重叠处线性混合，"
+                "segmentation": (SEGMENTATION_CHOICES, {"default": SEGMENTATION_AUTO,
+                    "tooltip": "分段方式，下面的 segment_frames / overlap_frames 跟着它换选项（每种方式各记各的值）。"
+                               "自动：完全按分镜 md——每块的 @segment（或 md 开头写的 @segment，对所有块生效）决定，"
+                               "例如 @segment context,window=192,overlap=39,chunk=30、@segment chain,length=124,overlap=22、@segment whole（没写的参数用推荐值；旧的中文写法 @分段 上下文窗口 窗口=192 也能读）；md 没写就按不分段。自动和不分段时下面三项变灰、不起作用。"
+                               "不分段：没写 @split 的块整块一次采样（不限时长，视频长时很吃显存），写了 @split 的按切点分段；没接分镜提示词时参考视频 1 整段一次采。"
+                               "帧窗口：块内按 @split 或 segment_frames 分段逐段采样，后一段锁定上一段解码出的尾部 overlap_frames 帧接上，段数越多细节越掉、噪点越多。"
+                               "上下文窗口：整块一次采样，每一步把整块 latent 切成 segment_frames 长、至少重叠 overlap_frames 帧的窗口分别预测、在重叠处线性混合，"
                                "每个窗口拿自己时间段的参考视频（参考图和提示词每个窗口都带），窗口之间不传解码画面，画质不随长度累积变差；"
-                               "单块一次跑完（不再自动排队块内下一段），@split 不再分段。二段式的一采和 2nd Sample Enhancer 都按窗口采样。"
+                               "单块一次跑完，@split 不再分段，@continue 的块按 22 帧尾帧接续。二段式的一采和 2nd Sample Enhancer 都按窗口采样。"
                                "没有参考视频的口播块自动按帧窗口处理。"}),
-                "frame_window": ("BOOLEAN", {"default": True, "label_on": "帧窗口分段", "label_off": "整段一次采完",
-                    "tooltip": "帧窗口分段：按 segment_frames 逐段采样，后一段接上一段结尾 overlap_frames 帧，直到跑完。"
-                               "整段一次采完：不分段，一次采样（视频长时很吃显存）。没接「分镜提示词」时作用于参考视频 1 整段；"
-                               "接了分镜提示词时作用于没写 @split 的分镜块，写了 @split 的块按切点分段。"}),
                 "segment_frames": (SEGMENT_FRAME_CHOICES, {"default": SEGMENT_FRAME_DEFAULT,
-                                           "tooltip": "固定分段的每段帧数（24fps），H3 只接受 5+17N 帧：124 帧 ≈ 5.17 秒，其它可选 107、141、158…。"
-                                                      "接「分镜提示词」时，用于没写 @split 的分镜块（帧窗口分段打开时）；写了 @split 的块按切点分段。"}),
-                "overlap_frames": (OVERLAP_CHOICES, {"default": "22",
-                                                    "tooltip": "相邻两段重叠帧数：上一段结尾这么多帧的 latent 被锁定作为下一段开头。22 帧 = 7 个视频 token。"}),
-                "context_window_frames": (CONTEXT_WINDOW_CHOICES, {"default": CONTEXT_WINDOW_DEFAULT,
-                    "tooltip": "仅上下文窗口：每个窗口的帧数（24fps，都是 H3 要求的 5+17N），124 ≈ 5.2 秒到 362 ≈ 15.1 秒。"
-                               "默认 345 ≈ 14.4 秒，和平时单段一样长，显存也和单段相当；窗口越短，窗口数越多、越慢。"}),
-                "context_overlap_frames": (CONTEXT_OVERLAP_CHOICES, {"default": CONTEXT_OVERLAP_DEFAULT,
-                    "tooltip": "仅上下文窗口：相邻窗口至少重叠的帧数，在重叠处线性混合。34 ≈ 1.4 秒、68 ≈ 2.8 秒（默认）、102 ≈ 4.3 秒；"
-                               "窗口从 17 帧的格点开始，所以重叠是 17 的倍数。越大接缝越稳；窗口起点在块内均匀分布，实际重叠往往更大。"}),
+                    "tooltip": "分段帧数（24fps，H3 只接受 5+17N 帧）。帧窗口：每段帧数，默认 124 ≈ 5.17 秒，可选 39～497；"
+                               "上下文窗口：每个窗口帧数，默认 345 ≈ 14.4 秒，可选 124～362，越短窗口越多、越慢；不分段：不用。"
+                               "接「分镜提示词」时只作用于没写 @split 的块。"}),
+                "overlap_frames": (SEGMENT_OVERLAP_CHOICES, {"default": "22",
+                    "tooltip": "重叠帧数。帧窗口 / 不分段：上一段结尾这么多帧的 latent 被锁定作为下一段开头（@split 段和 @continue 块），可选 22 / 39 / 5，22 帧 = 7 个视频 token；"
+                               "上下文窗口：相邻窗口重叠的帧数，可选 22 / 39 / 56 / 73（默认）/ 90 / 107，越大接缝越稳、越慢。窗口从开头按这个重叠依次往后排，"
+                               "最后一个窗口只跑到块尾（至少约 2 秒，不够时往前多重叠一些）。"}),
+                "context_segment": (CONTEXT_SEGMENT_CHOICES, {"default": CONTEXT_SEGMENT_DEFAULT,
+                    "tooltip": "上下文窗口每段上限（只在上下文窗口时用）。比它长的块按这个长度分段，每次运行采一段、存一段，跑完一段就能看效果，"
+                               "中途停了前面的不白跑；每段只按原片和参考图独立生成，不锁定上一段的画面（不会一段比一段锐、艳、噪），后一段多生成开头和上一段重叠的 overlap_frames 帧，拼接时在重叠处从上一段渐变到这一段。"
+                               "整块一次：整块一次采完（最平滑，长片要等很久）。总计算量基本不变，分段多出段间重叠的那几帧。"}),
+                "crossfade_frames": (CROSSFADE_CHOICES, {"default": CROSSFADE_DEFAULT,
+                    "tooltip": "叠化帧数（只在上下文窗口按每段上限分段时用）：段与段重叠处，取中间这么多帧从上一段渐变到下一段，"
+                               "之前是上一段的画面，之后直接是下一段的画面。默认 12 帧 = 0.5 秒（24fps）；"
+                               "6 帧更干脆，24 帧更柔和；全部重叠 = 整个重叠段都在渐变（较长，重影更明显）。"
+                               "分段方式为自动时按 md 的 @segment context,...,fade=12。"}),
             },
         })
 
@@ -829,24 +1224,35 @@ class FeiHouEasyH3MotionSegment:
         return types
 
     @classmethod
-    def VALIDATE_INPUTS(cls, context_window_frames=CONTEXT_WINDOW_DEFAULT, segmentation=SEGMENTATION_CHAIN,
-                        segment_frames=SEGMENT_FRAME_DEFAULT):
+    def VALIDATE_INPUTS(cls, segmentation=SEGMENTATION_CHAIN, segment_frames=SEGMENT_FRAME_DEFAULT,
+                        overlap_frames="22", context_segment=CONTEXT_SEGMENT_DEFAULT,
+                        crossfade_frames=CROSSFADE_DEFAULT):
+        if str(context_segment) not in CONTEXT_SEGMENT_CHOICES:
+            return f"context_segment 必须是{'、'.join(CONTEXT_SEGMENT_CHOICES)}之一：{context_segment!r}"
+        if str(crossfade_frames) not in CROSSFADE_CHOICES:
+            return f"crossfade_frames 必须是{'、'.join(CROSSFADE_CHOICES)}之一：{crossfade_frames!r}"
+        # Workflows saved with 接续 still run.
+        mode = _segmentation(segmentation)
+        if mode not in SEGMENTATION_CHOICES:
+            return f"segmentation 必须是{'、'.join(f'「{choice}」' for choice in SEGMENTATION_CHOICES)}之一：{segmentation!r}"
+        if mode == SEGMENTATION_AUTO:
+            return True
         # Saved before the option list: a bare frame count (aligned down to 5+17N when used).
         try:
             frames = _window_frames(segment_frames)
         except (TypeError, ValueError):
             return f"segment_frames 无效：{segment_frames!r}"
+        if mode == SEGMENTATION_CONTEXT:
+            if _window_label(frames) not in CONTEXT_WINDOW_CHOICES:
+                return f"上下文窗口的 segment_frames 必须是 5+17N 且在 124～362 帧之间：{segment_frames!r}"
+            if context_windows.LEGACY_OVERLAPS.get(str(overlap_frames), str(overlap_frames)) not in CONTEXT_OVERLAP_CHOICES:
+                return f"上下文窗口的 overlap_frames 必须是 {' / '.join(CONTEXT_OVERLAP_CHOICES)}：{overlap_frames!r}"
+            return True
         if not SEGMENT_FRAME_RANGE[0] <= frames <= SEGMENT_FRAME_RANGE[1]:
             return f"segment_frames 必须在 {SEGMENT_FRAME_RANGE[0]}～{SEGMENT_FRAME_RANGE[1]} 帧之间：{segment_frames!r}"
-        # Workflows saved with the earlier bare-number options ("345") or 接续 still run.
-        if SEGMENTATION_LEGACY.get(str(segmentation), str(segmentation)) not in (SEGMENTATION_CHAIN, SEGMENTATION_CONTEXT):
-            return f"segmentation 必须是「{SEGMENTATION_CHAIN}」或「{SEGMENTATION_CONTEXT}」：{segmentation!r}"
-        try:
-            frames = _window_frames(context_window_frames)
-        except (TypeError, ValueError):
-            return f"context_window_frames 无效：{context_window_frames!r}"
-        return True if _window_label(frames) in CONTEXT_WINDOW_CHOICES else \
-            f"context_window_frames 必须是 5+17N 且在 124～362 帧之间：{context_window_frames!r}"
+        if str(overlap_frames) not in OVERLAP_CHOICES:
+            return f"{mode}的 overlap_frames 必须是 {' / '.join(OVERLAP_CHOICES)}：{overlap_frames!r}"
+        return True
 
     @classmethod
     def IS_CHANGED(cls, **kwargs):
@@ -903,9 +1309,8 @@ class FeiHouEasyH3MotionSegment:
                 segment_frames=SEGMENT_FRAME_DEFAULT,
                 overlap_frames="22", start=START_AUTO, shot_prompts=None,
                 reference_soundtrack=SOUNDTRACK_TO_MODEL, sampling_mode=SAMPLING_SINGLE, first_steps=4,
-                segmentation=SEGMENTATION_CHAIN, context_window_frames=CONTEXT_WINDOW_DEFAULT,
-                context_overlap_frames=CONTEXT_OVERLAP_DEFAULT, frame_window=True, prompt=None, unique_id=None,
-                **_removed):
+                segmentation=SEGMENTATION_CHAIN, context_segment=CONTEXT_SEGMENT_DEFAULT,
+                crossfade_frames=CROSSFADE_DEFAULT, prompt=None, unique_id=None, **_removed):
         if not isinstance(h3_context, MiniMaxH3Context):
             raise ValueError("h3_context 必须接 FeiHou Easy H3 Setup 的 h3_context。")
         builder = getattr(h3_context, "segment_builder", None)
@@ -918,12 +1323,49 @@ class FeiHouEasyH3MotionSegment:
             raise ValueError("动作迁移需要至少一个参考视频：参考视频 1 决定总长度。"
                              "只做参考生视频（不跟随视频）时，分镜 md 的每块写 @video none。")
 
+        mode = _segmentation(segmentation)
+        if mode == SEGMENTATION_AUTO:
+            written = shot.get("segmentation") if shot else None
+            if written:
+                mode = written["mode"]
+                segment_frames = written.get("segment_frames", segment_frames)
+                overlap_frames = written.get("overlap_frames", overlap_frames)
+                context_segment = written.get("context_segment", context_segment)
+                crossfade_frames = written.get("crossfade_frames", crossfade_frames)
+                LOGGER.info("Easy H3 motion transfer: 分段方式 自动，按 md 的 @segment：%s%s", mode,
+                            "" if mode == SEGMENTATION_WHOLE else f" {segment_frames} 帧 / 重叠 {overlap_frames}"
+                            + (f" / 每段 {context_segment}" if mode == SEGMENTATION_CONTEXT else ""))
+            else:
+                mode = SEGMENTATION_WHOLE
+                LOGGER.info("Easy H3 motion transfer: 分段方式 自动，%s，按不分段（整块一次采样）",
+                            "md 没写 @segment" if shot else "没接分镜提示词")
+        if mode == SEGMENTATION_WHOLE:
+            overlap_frames = WHOLE_OVERLAP
+        # Calls made before the shared fields: frame_window off = 不分段,
+        # context_window_frames / context_overlap_frames = the window fields.
+        if mode == SEGMENTATION_CHAIN and _removed.get("frame_window") is False:
+            mode = SEGMENTATION_WHOLE
+        if mode == SEGMENTATION_CONTEXT and "context_window_frames" in _removed:
+            segment_frames = _removed["context_window_frames"]
+            overlap_frames = _removed.get("context_overlap_frames", CONTEXT_OVERLAP_DEFAULT)
+        if mode == SEGMENTATION_CONTEXT and not CONTEXT_WINDOWS_ENABLED:
+            LOGGER.info("Easy H3 motion transfer: 上下文窗口暂时关闭，按帧窗口分段")
+            mode = SEGMENTATION_CHAIN
+            segment_frames, overlap_frames = SEGMENT_FRAME_DEFAULT, "22"
+        frame_window = mode != SEGMENTATION_WHOLE
         length = _grid_frames(_window_frames(segment_frames))
+        context = None
+        if mode == SEGMENTATION_CONTEXT:
+            overlap_frames = context_windows.LEGACY_OVERLAPS.get(str(overlap_frames), str(overlap_frames))
+            context = (length, int(overlap_frames))
+            # The window overlap is not a tail overlap: @continue blocks and
+            # the fixed-length fallback anchor on CONTEXT_CHAIN_OVERLAP frames.
+            overlap_frames = CONTEXT_CHAIN_OVERLAP
         whole = not frame_window and not isinstance(shot_prompts, dict)
         if whole:
-            # 整段一次采完: one segment as long as reference video 1.
+            # 不分段: one segment as long as reference video 1.
             length = _ceil_grid(builder.source_frames)
-            LOGGER.info("Easy H3 motion transfer: 帧窗口关闭，参考视频 1 整段 %d 帧一次采样", length)
+            LOGGER.info("Easy H3 motion transfer: 不分段，参考视频 1 整段 %d 帧一次采样", length)
         overlap = int(overlap_frames)
         if overlap >= length:
             raise ValueError("重叠帧数必须小于每段帧数。")
@@ -937,32 +1379,57 @@ class FeiHouEasyH3MotionSegment:
         context_index = list(FeiHouEasyH3MotionSegment.RETURN_NAMES).index("h3_context")
         two_pass = (_feeds_second_pass(prompt, unique_id, context_index) if prompt is not None
                     else str(sampling_mode) == SAMPLING_TWO_PASS)
+        sampler_name = dual_clock.resolve_sampler_name(sampler_name)
         if not two_pass and sampler_name not in comfy.samplers.SAMPLER_NAMES:
             raise ValueError(f"动作迁移分段：{sampler_name} 只用于二段式。二段式要把本节点的 h3_context 输出接到 2nd Sample Enhancer（不能接 Setup 的 h3_context）；单次采样请选 euler 等 ComfyUI 原生采样器。")
         if two_pass and not 1 <= int(first_steps) < int(steps):
             raise ValueError("动作迁移分段：二段式的 first_steps 必须小于 steps（总步数）。")
 
+        preprocess = getattr(h3_context, "motion_preprocess", None)
+        # Remake 替换 is switched on only by the H3 动作迁移预处理 node.
+        remake = _block_mode(preprocess, shot) == MODE_SWAP
+        face_blur, face_detector = _block_face_blur(preprocess, shot)
+        if shot and shot.get("video") is False and (remake or face_blur):
+            # A talk block (@video none) has no source video to edit or blur: plain reference generation.
+            LOGGER.info("Easy H3 动作迁移预处理：分镜 %s 写了 @video none（口播块），不送参考视频，本块不做人物替换和脸部模糊",
+                        shot.get("block"))
+            remake, face_blur = False, None
+        if face_blur and not remake:
+            LOGGER.warning("Easy H3 动作迁移预处理：脸部模糊只在 Remake 替换时生效，本次没开 Remake，不模糊")
+            face_blur = None
+        face_people = None
+        if face_blur:
+            LOGGER.info("Easy H3 动作迁移预处理：本段原片脸部模糊 %s（%s）",
+                        "自动" if face_blur == "auto" else f"{face_blur} 档", face_detector)
+            face_people = _block_people(builder, shot, face_detector, _preprocess_recognizer(preprocess))
+        if remake:
+            # The Remake LoRA comes from the workflow's LoRA list (bypass, strength 1).
+            model = remake_mode.keyframe_until(model)
+            if float(cfg) > 1.0:
+                LOGGER.warning("Easy H3 Remake 替换：Remake 按 cfg 1 训练，cfg %.1f 可能过曝", float(cfg))
+
         def first_pass(context):
-            return _first_pass(model, context, sampler_name, scheduler, steps, first_steps, cfg)
+            result = _first_pass(model, context, sampler_name, scheduler, steps, first_steps, cfg)
+            if remake:
+                result = _remake_first_pass(result, first_steps)
+            return result
 
         if shot and shot.get("passthrough"):
             return FeiHouEasyH3MotionSegment._prepare_passthrough(model, h3_context, builder, shot, sampler_name,
                                                                   width, height, fps,
                                                                   first_pass if two_pass else None)
-        context = None
-        if str(segmentation) == SEGMENTATION_CONTEXT and not CONTEXT_WINDOWS_ENABLED:
-            LOGGER.info("Easy H3 motion transfer: 上下文窗口暂时关闭，按帧窗口分段")
-        elif str(segmentation) == SEGMENTATION_CONTEXT:
-            context = (_grid_frames(_window_frames(context_window_frames)), int(context_overlap_frames))
-            if not shot:
-                LOGGER.warning("Easy H3 motion transfer: 上下文窗口需要接「分镜提示词」，固定分段仍按帧窗口采样")
+        if context is not None and not shot:
+            LOGGER.warning("Easy H3 motion transfer: 上下文窗口需要接「分镜提示词」，固定分段仍按帧窗口采样")
         if shot:
             conditioning, latent, state, index, count, total = _prepare_shot_block(
                 h3_context, builder, shot, overlap, width, height, fps, soundtrack, context,
-                length if frame_window else None)
+                length if frame_window else None,
+                _context_segment_frames(context_segment) if context is not None else None, remake, face_blur, face_detector,
+                face_people)
+            state["crossfade"] = _crossfade_frames(crossfade_frames)
         else:
             conditioning, latent, state, index, count, total = _prepare_fixed_segments(
-                h3_context, builder, length, overlap, 0, start, width, height, fps, soundtrack)
+                h3_context, builder, length, overlap, 0, start, width, height, fps, soundtrack, remake, face_blur, face_detector)
 
         context = _window_context(h3_context, builder, state, conditioning, latent, soundtrack)
         noise = _segment_noise()
@@ -976,7 +1443,11 @@ class FeiHouEasyH3MotionSegment:
                     context)
 
         shifted = _node_value(h3.MiniMaxH3SigmaShift.execute(model, float(shift_video), float(shift_audio)))
-        sigmas = _node_value(custom_sampler.BasicScheduler.execute(shifted, scheduler, int(steps), 1.0))
+        if remake:
+            sigmas = remake_mode.swap_sigmas()
+            LOGGER.info("Easy H3 Remake 替换：用 swap 曲线 %d 步 %s（steps 不起作用）", sigmas.numel() - 1, sigmas.tolist())
+        else:
+            sigmas = _node_value(custom_sampler.BasicScheduler.execute(shifted, scheduler, int(steps), 1.0))
         sampler = _node_value(custom_sampler.KSamplerSelect.execute(sampler_name))
         negative = _encode_negative(h3_context.clip, "") if float(cfg) > 1.0 else None
         guider = _guider(shifted, conditioning, cfg, _with_canvas(negative, conditioning) if negative is not None else None)
@@ -1021,13 +1492,12 @@ class FeiHouEasyH3MotionCollect:
                                                        "算出的校正套用到整个镜头（含替换后的人物），人物不会被拉向原表演者的颜色。"
                                                        "可对比的背景太少（人占满画面）或背景本身被换掉（换新场景）的镜头自动跳过；每镜一套参数，不会闪烁。"}),
                 "save_segments": ("BOOLEAN", {"default": False, "label_on": "保存每段视频", "label_off": "不保存分段",
-                                              "tooltip": "开启后块内每一段采样完就把这一段（已去掉开头接续用的重叠帧，配这一块选用的声音）存成 mp4 到输出目录，"
+                                              "tooltip": "开启后块内每一段采样完就把这一段（已去掉开头接续用的重叠帧，配这一块选用的声音）存成 mp4，存到接在 images 输出上的合并节点（如 Video Combine V2）的 filename_prefix 目录，文件名后加 _b块号_seg段号，并在那个节点里预览；"
                                                          "方便逐段检查；整块视频照常由 Video Combine V2 保存。"}),
-                "filename_prefix": ("STRING", {"default": "FeiHou_H3_motion/segment",
-                                               "tooltip": "分段视频的文件名前缀（相对输出目录），后面会加 _b块号_seg段号。"}),
                 "color_match_strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.05,
                                                    "tooltip": "调色强度：1 = 完全对齐原片，0.5 = 一半。换上去的人颜色和原片差很多（如金色紧身裤换黑裤）时可适当调低。"}),
             },
+            "hidden": {"prompt": "PROMPT", "unique_id": "UNIQUE_ID"},
         }
 
     @staticmethod
@@ -1042,6 +1512,9 @@ class FeiHouEasyH3MotionCollect:
             images=frames, audio=audio, frame_rate=Fraction(round(float(fps) * 1000), 1000)))
         video.save_to(os.path.join(folder, name), format=Types.VideoContainer.MP4, codec=Types.VideoCodec.H264)
         LOGGER.info("Easy H3 motion transfer: saved segment %s to %s", label, os.path.join(subfolder, name))
+        # Preview parameters (the /view query) for the video node fed by Collect.
+        return {"filename": name, "subfolder": subfolder, "type": "output", "format": "video/h264-mp4",
+                "frame_rate": float(fps)}
 
     @staticmethod
     def _audio_for(run, motion_state, audio_output, start, frames, fps):
@@ -1093,26 +1566,35 @@ class FeiHouEasyH3MotionCollect:
         skip = min(max(0, int(motion_state.get("skip") or 0)), max(0, decoded_frames - 1))
         keep = max(1, min(int(motion_state.get("keep") or decoded_frames), decoded_frames - skip))
         segment = decoded[skip:skip + keep].detach().cpu()
+        if motion_state.get("blend") and skip and run.get("images"):
+            _cross_fade(run["images"], decoded[:skip].detach().cpu(), motion_state.get("crossfade"))
         if segment.dtype == torch.uint8:
             run.setdefault("images", []).append(segment)
         else:
             run.setdefault("images", []).append((segment.clamp(0, 1) * 255).round().to(torch.uint8))
         sound = _node_value(comfy_audio_nodes.VAEDecodeAudio.execute(motion_state["audio_vae"], sampled))
         run.setdefault("audio", []).append(_audio_slice(sound, skip, keep, fps))
-        if save_segments:
+        if save_segments and int(count) <= 1:
+            # The block is this one segment: Video Combine saves the same video as the block.
+            LOGGER.info("Easy H3 motion transfer: 分镜 %d 只有一段，不另存 _seg01（和整块视频相同）", block)
+        if save_segments and int(count) > 1:
             source_audio = motion_state.get("source_audio")
             if audio_output == AUDIO_SOURCE and source_audio is not None:
                 segment_audio = _audio_slice(source_audio, int(motion_state.get("window_start") or 0) + skip, keep, fps)
             else:
                 segment_audio = run["audio"][-1]
-            FeiHouEasyH3MotionCollect._save_segment(_unit_frames(segment), segment_audio, fps, filename_prefix,
-                                                    f"b{block:03d}_seg{index + 1:02d}")
+            saved = FeiHouEasyH3MotionCollect._save_segment(_unit_frames(segment), segment_audio, fps, filename_prefix,
+                                                            f"b{block:03d}_seg{index + 1:02d}")
+        else:
+            saved = None
         # The next segment (or a continued block) anchors to these frames.
         run["tail"] = _unit_frames(segment[-overlap:]) if overlap else None
         run["segment"] = index + 1
         del decoded, sound
         ui = {"feihou_motion": [{"next": bool(auto_queue), "done": index + 1, "count": count,
                                  "block": block, "blocks": blocks}]}
+        if saved:
+            ui["feihou_motion"][0]["segment_video"] = saved
         LOGGER.info("Easy H3 motion transfer: block %d/%d segment %d/%d collected (%d frames)",
                     block, blocks, index + 1, count, keep)
 
@@ -1133,8 +1615,9 @@ class FeiHouEasyH3MotionCollect:
             if audio_output == AUDIO_SOURCE:
                 LOGGER.warning("Easy H3 motion transfer: reference video 1 has no soundtrack; using generated audio")
             audio = _audio_slice(generated, 0, frame_count, fps) if generated is not None else None
-        return FeiHouEasyH3MotionCollect._finish_block(
-            run, motion_state, frames, audio, generated, ui, frames[-overlap:] if overlap else None)
+        tail = frames[-overlap:] if overlap else None
+        frames, audio, generated = _transition_frames(frames, audio, generated, motion_state, fps)
+        return FeiHouEasyH3MotionCollect._finish_block(run, motion_state, frames, audio, generated, ui, tail)
 
     @staticmethod
     def _finish_block(run, motion_state, frames, audio, generated, ui, tail):
@@ -1199,7 +1682,9 @@ class FeiHouEasyH3MotionCollect:
 
     @staticmethod
     def collect(latent, motion_state, audio_output, auto_queue=True, color_match=False, color_match_strength=1.0,
-                save_segments=False, filename_prefix="FeiHou_H3_motion/segment"):
+                save_segments=False, prompt=None, unique_id=None, **_removed):
+        # Segments go where the joined video goes (filename_prefix of the node fed by images).
+        filename_prefix = _segment_prefix(prompt, unique_id) if save_segments else ""
         result = FeiHouEasyH3MotionCollect._collect(latent, motion_state, audio_output, auto_queue, color_match,
                                                     color_match_strength, save_segments, filename_prefix)
         info = result["ui"]["feihou_motion"][0]
@@ -1235,12 +1720,15 @@ class FeiHouEasyH3MotionCollect:
         offset = sum(int(part.shape[0]) for part in run["images"])
         run["images"].append((segment.clamp(0, 1) * 255).round().to(torch.uint8))
         run["audio"].append(_audio_slice(sound, skip, int(decoded.shape[0]) - skip, fps))
-        if save_segments:
+        # A single segment is the whole video: Video Combine saves it already.
+        if save_segments and int(count) > 1:
             if audio_output == AUDIO_SOURCE and motion_state["source_audio"] is not None:
                 segment_audio = _audio_slice(motion_state["source_audio"], offset, int(segment.shape[0]), fps)
             else:
                 segment_audio = run["audio"][-1]
-            FeiHouEasyH3MotionCollect._save_segment(segment, segment_audio, fps, filename_prefix, f"seg{index + 1:03d}")
+            saved = FeiHouEasyH3MotionCollect._save_segment(segment, segment_audio, fps, filename_prefix, f"seg{index + 1:03d}")
+        else:
+            saved = None
         run["previous"] = {"samples": comfy.nested_tensor.NestedTensor(
             tuple(t.detach().to("cpu", copy=True) for t in latent["samples"].unbind()))}
         # Decoded tail: the next segment's anchor when its latent has another size (two-pass).
@@ -1248,6 +1736,8 @@ class FeiHouEasyH3MotionCollect:
         run["next"] = index + 1
         del decoded, sound
         ui = {"feihou_motion": [{"next": bool(auto_queue) and not last, "done": index + 1, "count": count}]}
+        if saved:
+            ui["feihou_motion"][0]["segment_video"] = saved
 
         if not last:
             LOGGER.info("Easy H3 motion transfer: segment %d/%d collected", index + 1, count)
@@ -1266,3 +1756,142 @@ class FeiHouEasyH3MotionCollect:
         run.clear()
         LOGGER.info("Easy H3 motion transfer: all %d segment(s) done, %d frames", count, frame_count)
         return {"ui": ui, "result": (frames, _film_audio(audio), _film_audio(generated_audio), None, fps)}
+
+
+class FeiHouEasyH3MotionPreprocess:
+    """H3 动作迁移预处理: 关闭 / 自动 / 人物替换 (Remake + face blur)."""
+
+    CATEGORY = "FeiHou Easy H3"
+    FUNCTION = "apply"
+    RETURN_TYPES = ("MINIMAX_H3_CONTEXT",)
+    RETURN_NAMES = ("h3_context",)
+    DESCRIPTION = (
+        "H3 动作迁移预处理：接在 Setup 和「动作迁移分段」之间（h3_context 进、h3_context 出）。不用时把节点设为旁路，分段节点就按 H3 原生跑。"
+        "模式：关闭 = H3 原生；自动 = 每块按分镜 md 的 @mode（swap / off，没写就关闭）；"
+        "人物替换 = Remake 替换（配 Viggle Remake LoRA）。"
+        "口播块（@video none）一律关闭。"
+        "脸部模糊：参考视频 1 送进模型前，逐帧检测人脸、把脸（眉毛到下巴的椭圆，柔边）高斯模糊，原片那张脸的长相信号变弱，"
+        "半身和特写的脸更多从参考图来；头的位置、转头、眨眼、张嘴的明暗还在。成片音轨、颜色匹配和原片直出都用没模糊的原片。"
+        "分镜 md 每块可写 @face_blur off/auto/1–5，写了就按它，没写就按这里。"
+    )
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {
+            "h3_context": ("MINIMAX_H3_CONTEXT", {"tooltip": "接 Setup 的 h3_context，输出接「动作迁移分段」的 h3_context。"}),
+            "mode": (PREPROCESS_MODES, {"default": MODE_AUTO,
+                "tooltip": "关闭：H3 原生（参考视频 1 当 <Video 1> 参考）。自动：每块按分镜 md 的 @mode，没写就关闭。"
+                           "人物替换：Remake 替换——按 Viggle Remake 换人 LoRA（viggle_remake_swap）训练时的格式喂模型，参考视频 1 是要改的原片，"
+                           "参考图是目标人物；采样固定用它的 6 步 swap 曲线，接续段用上一段的整 17 帧当干净前缀；"
+                           "Remake LoRA 放在工作流前面的 LoRA 列表里（旁路、强度 1），关掉加速 LoRA，cfg 保持 1。"}),
+            "face_blur_on": ("BOOLEAN", {"default": True, "label_on": "开启", "label_off": "关闭",
+                "tooltip": "原片脸部模糊的总开关（只在 人物替换 时生效）。关闭时不模糊，md 里的 @face_blur 也不起作用，下面两项变灰。"}),
+            "face_blur": ([c for c in remake_mode.FACE_BLUR_CHOICES if c != remake_mode.FACE_BLUR_OFF],
+                          {"default": remake_mode.FACE_BLUR_AUTO,
+                "tooltip": "自动：按每一帧脸在画面里的大小定档，远景小脸几乎不模糊，半身约 2–3 档，脸部特写到 5 档，相邻帧平滑过渡；"
+                           "1–5 档：固定强度，越高越糊，原片长相去得越干净，表情和口型传过去得越少（5 档基本只剩头的位置和眼嘴的明暗）。"
+                           "分镜 md 每块写 @face_blur 关/自动/1–5 时按 md。"}),
+            "face_detector": (remake_mode.detector_choices(), {
+                "tooltip": "人脸检测模型（models/ultralytics/bbox/）。推荐 face_yolov8m.pt：精度和速度最平衡；"
+                           "face_yolov9c.pt 精度略高、慢一些；n/s 版本快但侧脸和小脸容易漏。"}),
+            "face_recognizer": (remake_mode.recognizer_choices(), {"default": remake_mode.RECOGNIZER_DEFAULT,
+                "tooltip": "人脸识别模型：md 写了 @blur_people（只模糊指定的人）时，用它认出每一帧里的脸是谁。"
+                           "列出 models/insightface/models/ 下同时有 2d106det.onnx（对齐五官）和识别模型的包。"
+                           "默认 buffalo_l/w600k_r50.onnx（ArcFace R50，WebFace600K 训练，正脸侧脸都认得准）；"
+                           "antelopev2/glintr100.onnx 是更大的 R100，稍慢。没写 @blur_people 时不用。"}),
+        }, "optional": {
+            "shot_prompts": (SHOT_TYPE, {"forceInput": True, "tooltip":
+                "可选：接「分镜提示词」的 production_shot。接上后预览按本块 md 的 @face_blur；不接时预览按本节点的档位（实际采样仍按 md）。"}),
+        }, "hidden": {"unique_id": "UNIQUE_ID"}}
+
+    def apply(self, h3_context, mode=MODE_AUTO, face_blur_on=True, face_blur=remake_mode.FACE_BLUR_AUTO,
+              face_detector=remake_mode.FACE_DETECTOR, face_recognizer=remake_mode.RECOGNIZER_DEFAULT,
+              shot_prompts=None, unique_id=None, remake=None, **_removed):
+        """Talk blocks (@video none) skip every mode: Motion Segment turns them off there.
+        ``remake`` is the switch saved before 模式 (on = 人物替换, off = 关闭)."""
+        if not isinstance(h3_context, MiniMaxH3Context):
+            raise ValueError("H3 动作迁移预处理：h3_context 要接 FeiHou Easy H3 Setup 的 h3_context。")
+        if remake is not None and mode in (None, MODE_AUTO):  # an API call saved before 模式
+            mode = MODE_SWAP if remake else MODE_OFF
+        if mode in ("动作迁移", "动作引导（实验）"):  # saved before these modes were removed
+            LOGGER.warning("H3 动作迁移预处理：%s模式已移除，按关闭", mode)
+            mode = MODE_OFF
+        if mode not in PREPROCESS_MODES:
+            raise ValueError(f"H3 动作迁移预处理：模式只能是 {' / '.join(PREPROCESS_MODES)}，实际是 {mode!r}")
+        setting = remake_mode.parse_face_blur(face_blur) if face_blur_on else None
+        LOGGER.info("Easy H3 动作迁移预处理：%s，脸部模糊 %s，检测模型 %s",
+                    mode,
+                    f"{face_blur}（md 每块的 @face_blur 优先）" if setting else "关闭", face_detector)
+        preprocess = {"mode": mode, "remake": mode == MODE_SWAP, "face_blur": setting, "face_detector": str(face_detector),
+                      "face_recognizer": str(face_recognizer)}
+        result = replace(h3_context, motion_preprocess=preprocess)
+        shot = shot_prompts.get("motion") if isinstance(shot_prompts, dict) else None
+        block_mode = _block_mode(preprocess, shot)
+        remake = block_mode == MODE_SWAP
+        preview = {"summary": "人物替换，脸部模糊已关闭" if remake else f"{block_mode}，不模糊"}
+        if not remake and mode == MODE_AUTO and not shot:
+            # 自动 without the md here: Motion Segment still follows each block's @mode.
+            preview = {"summary": "操作是「自动」：实际采样时由「动作迁移分段」按每块 md 的 @mode 决定换不换人、模糊不模糊。"
+                                  "本节点没接「分镜提示词」，所以这里看不到模糊预览；要预览就把分镜提示词也接到本节点。"}
+        elif not remake and mode == MODE_AUTO and not shot.get("mode"):
+            # 自动 with an md block that has no @mode: nothing is swapped or blurred; say why.
+            preview = {"summary": "操作是「自动」，但本块 md 没写 @mode swap，所以关闭：不换人、不模糊。"
+                                  "要换人：md 页头加一行 @mode swap，或把操作改成「人物替换」。"}
+        if shot and shot.get("video") is False:
+            preview = {"summary": f"分镜 {shot.get('block')} 是口播块（@video none），不送参考视频，不做人物替换和脸部模糊"}
+        elif remake and setting:
+            block_setting, detector = _block_face_blur(preprocess, shot)
+            if block_setting:
+                preview = self._preview(h3_context, block_setting, detector, shot, str(face_recognizer))
+            else:
+                preview = {"summary": "本块 md 写了 @face_blur 关，不模糊"}
+        return {"ui": {"feihou_preprocess": [preview]}, "result": (result,)}
+
+    @staticmethod
+    def _preview(h3_context, setting, detector, shot, recognizer=remake_mode.RECOGNIZER_DEFAULT):
+        """Detect the faces of the whole block (progress bar), then write the blurred preview video."""
+        builder = getattr(h3_context, "segment_builder", None)
+        window = getattr(builder, "source_window", None)
+        if window is None:
+            return {"summary": "没有参考视频 1，无法预览"}
+        frames = window(0, 10 ** 9)
+        count = int(frames.shape[0])
+        if count == 0:
+            return {"summary": "参考视频 1 没有画面"}
+        video, _audio = _split_av(h3_context.latent["samples"])
+        width, height = int(video.shape[-1]) * VAE_DOWNSAMPLE, int(video.shape[-2]) * VAE_DOWNSAMPLE
+        canvas = lambda start, stop: remake_mode.cover(frames[start:stop], width, height)
+        bar = comfy.utils.ProgressBar(count * 2)
+        chunk = 32
+        people_key = _block_people(builder, shot, detector, recognizer)
+        vectors = remake_mode.people(people_key)
+        faces = []
+        for start in range(0, count, chunk):
+            stop = min(count, start + chunk)
+            progress = lambda done, s=start: bar.update_absolute(s + done, count * 2)
+            if vectors:
+                faces += remake_mode.frame_faces(canvas(start, stop), detector, progress=progress, recognizer=recognizer)
+            else:
+                faces += [[box] if box is not None else []
+                          for box in remake_mode.face_boxes(canvas(start, stop), detector, progress=progress)]
+            bar.update_absolute(stop, count * 2)
+        if vectors:
+            tracks = remake_mode.assign_people(faces, vectors)
+        else:
+            tracks = [remake_mode._smooth_boxes([found[0] if found else None for found in faces])]
+        boxes = [box for track in tracks for box in track]
+        found = sum(any(track[i] is not None for track in tracks) for i in range(count))
+        divisors = [remake_mode.blur_plan(track, setting, height) for track in tracks]
+        name = f"preprocess_{uuid.uuid4().hex[:12]}.mp4"
+        subfolder = "feihou_preprocess"
+        folder = os.path.join(folder_paths.get_temp_directory(), subfolder)
+        os.makedirs(folder, exist_ok=True)
+        remake_mode.write_preview(os.path.join(folder, name), canvas, count, tracks, divisors, chunk=chunk,
+                                  progress=lambda done: bar.update_absolute(count + done, count * 2))
+        block = f"分镜 {shot.get('block')} · " if isinstance(shot, dict) and shot.get("block") else ""
+        who = (f"{found} 帧认出要模糊的 {len(tracks)} 个人" if vectors else f"{found} 帧检测到人脸")
+        summary = (f"{block}{count} 帧（{count / h3.FPS:.1f} 秒）{width}x{height}，{who}，"
+                   f"脸部模糊 {remake_mode.describe_plan(boxes, setting, height)}")
+        LOGGER.info("Easy H3 动作迁移预处理：预览 %s", summary)
+        return {"filename": name, "subfolder": subfolder, "type": "temp", "format": "video/h264-mp4",
+                "summary": summary}

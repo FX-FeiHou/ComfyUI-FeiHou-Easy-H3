@@ -29,7 +29,7 @@ from .production_continuation import FeiHouEasyH3ContinueOut
 from .face_refine import FeiHouEasyH3FaceRefine
 from .split_nodes import FeiHouEasyH3Media, FeiHouEasyH3MediaBridge, FeiHouEasyH3Setup
 from .dual_sample import FeiHouEasyH3SampleEnhancer1st, FeiHouEasyH3SampleEnhancer2nd
-from .motion_transfer import FeiHouEasyH3MotionCollect, FeiHouEasyH3MotionSegment
+from .motion_transfer import FeiHouEasyH3MotionCollect, FeiHouEasyH3MotionPreprocess, FeiHouEasyH3MotionSegment
 
 NODE_CLASS_MAPPINGS = {
     "FeiHouEasyH3FaceRefine": FeiHouEasyH3FaceRefine,
@@ -50,6 +50,7 @@ NODE_CLASS_MAPPINGS = {
     "FeiHouEasyH3PromptPreview": FeiHouEasyH3PromptPreview,
     "FeiHouEasyH3SampleEnhancer1st": FeiHouEasyH3SampleEnhancer1st,
     "FeiHouEasyH3SampleEnhancer2nd": FeiHouEasyH3SampleEnhancer2nd,
+    "FeiHouEasyH3MotionPreprocess": FeiHouEasyH3MotionPreprocess,
     "FeiHouEasyH3MotionSegment": FeiHouEasyH3MotionSegment,
     "FeiHouEasyH3MotionCollect": FeiHouEasyH3MotionCollect,
 }
@@ -73,6 +74,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "FeiHouEasyH3PromptPreview": "FeiHou Easy H3 Prompt Preview",
     "FeiHouEasyH3SampleEnhancer1st": "FeiHou Easy H3 1st Sample Enhancer（一采）",
     "FeiHouEasyH3SampleEnhancer2nd": "FeiHou Easy H3 2nd Sample Enhancer（二采）",
+    "FeiHouEasyH3MotionPreprocess": "H3动作迁移预处理",
     "FeiHouEasyH3MotionSegment": "FeiHou Easy H3 Motion Segment（动作迁移分段）",
     "FeiHouEasyH3MotionCollect": "FeiHou Easy H3 Motion Collect（动作迁移收束）",
 }

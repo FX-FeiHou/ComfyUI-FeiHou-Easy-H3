@@ -45,6 +45,8 @@ VAE_DOWNSAMPLE = 16
 NONE_OPTION = "无（不使用）"
 BICUBIC_OPTION = "bicubic（无模型，会有重影，不推荐）"
 PUBLISHED_REFINE_SIGMAS = learned.UPSTREAM_REFINE_VIDEO_SIGMAS
+SAMPLER_TOOLTIP = ("采样器，二采沿用。推荐 euler：ComfyUI 原生 H3 采样，视频和音频各按自己的节奏去噪。"
+                   "旧的 dual_clock_euler 会让口播音频多出一层像背景音乐的持续音，已隐藏，旧工作流里存的会按 euler 运行。")
 DEFAULT_TRIGGER_WORDS = (
     "Enhance this video with sharp, crisp details while preserving a natural photorealistic appearance,prfight2svg\n"
     "prfin1svg,"
@@ -256,9 +258,13 @@ def _reconcile(upscaled: dict, template: dict | None) -> dict:
             )
         mask = template.get("noise_mask")
         if mask is not None:
-            _, audio_mask = _split_av(mask)
+            video_mask, audio_mask = _split_av(mask)
             if isinstance(audio_mask, torch.Tensor) and bool(torch.any(audio_mask < 1.0)):
                 audio = t_audio
+            if isinstance(video_mask, torch.Tensor) and bool(torch.any(video_mask < 1.0)):
+                # Frames held clean at the HIGH canvas (a Remake prefix) replace their upscaled copy.
+                held = (video_mask < 1.0).to(video.device)
+                video = torch.where(held, t_video.to(video), video)
             result["noise_mask"] = mask
     result["samples"] = comfy.nested_tensor.NestedTensor((video, audio))
     return result
@@ -293,7 +299,7 @@ class FeiHouEasyH3DualSample1st:
                 "h3_context": ("MINIMAX_H3_CONTEXT", {"tooltip": "接 Easy H3 的 h3_context；Easy H3 的分辨率就是一采画幅。"}),
                 "total_steps": ("INT", {"default": 9, "min": 2, "max": 100, "tooltip": "simple 调度总步数。"}),
                 "first_steps": ("INT", {"default": 4, "min": 1, "max": 99, "tooltip": "一采实际只跑前几步。"}),
-                "sampler_name": (list(dual_clock.SAMPLER_OPTIONS), {"default": dual_clock.DEFAULT_SAMPLER_NAME, "tooltip": "dual_clock_euler：视频/音频各走各的时钟（推荐）。二采沿用同一个。"}),
+                "sampler_name": (list(dual_clock.SAMPLER_OPTIONS), {"default": dual_clock.PREFERRED_SAMPLER_NAME, "tooltip": SAMPLER_TOOLTIP}),
                 "semantic_bridge_on": ("BOOLEAN", {"default": True, "label_on": "开", "label_off": "关", "tooltip": "语义桥开关；关闭后下面两项不生效。"}),
                 "semantic_bridge": (bridges, {"default": NONE_OPTION, "tooltip": "语义桥模型（models/semantic_bridge），一采和二采都会应用。"}),
                 "bridge_strength": ("FLOAT", {"default": 0.10, "min": 0.0, "max": 1.0, "step": 0.01}),
@@ -316,6 +322,7 @@ class FeiHouEasyH3DualSample1st:
             raise ValueError("h3_context 必须接 ComfyUI-FeiHou-Easy-H3 主节点的 h3_context")
         _refuse_motion_placeholder(h3_context)
         total_steps, first_steps = int(total_steps), int(first_steps)
+        sampler_name = dual_clock.resolve_sampler_name(sampler_name)
         if not 1 <= first_steps < total_steps:
             raise ValueError("first_steps 必须小于 total_steps")
 
@@ -408,11 +415,17 @@ class FeiHouEasyH3DualSample2nd:
         latent = _reconcile(upscaled, template)
 
         refine_model = model if model is not None else plan["model"]
+        if plan.get("remake"):
+            # Remake 替换 (Motion Segment): keyframes stay dropped below sigma 0.9 on this model too.
+            from . import remake as remake_mode
+            refine_model = remake_mode.keyframe_until(refine_model)
         patched, sampler, _ = dual_clock.setup_dual_clock_sampling(
             refine_model, latent, 1, SHIFT_VIDEO, SHIFT_AUDIO, plan["sampler_name"], dual_clock.DEFAULT_SCHEDULER_NAME,
         )
         tail = plan.get("tail")
-        if int(second_steps) not in PUBLISHED_REFINE_SIGMAS and tail is not None and int(second_steps) == tail.numel() - 1:
+        if plan.get("remake") and tail is not None:
+            sigmas = tail.clone()  # Remake: the rest of the swap schedule; second_steps is not used
+        elif int(second_steps) not in PUBLISHED_REFINE_SIGMAS and tail is not None and int(second_steps) == tail.numel() - 1:
             sigmas = tail.clone()  # the rest of the 1st-pass schedule
         else:
             sigmas = _refine_sigmas(second_steps, float(plan.get("start_sigma", PUBLISHED_REFINE_SIGMAS[5][0])))
@@ -452,7 +465,7 @@ class FeiHouEasyH3SampleEnhancer1st:
             "required": {
                 "model": ("MODEL", {"tooltip": "一采模型（小画幅、高噪声段）。"}),
                 "h3_context": ("MINIMAX_H3_CONTEXT", {"tooltip": "接 Easy H3 主节点的 h3_context；Easy H3 的分辨率就是一采画幅。"}),
-                "sampler_name": (list(dual_clock.SAMPLER_OPTIONS), {"default": dual_clock.DEFAULT_SAMPLER_NAME, "tooltip": "dual_clock_euler：视频/音频各走各的时钟（推荐）；其它为 ComfyUI 原生采样器。二采沿用。"}),
+                "sampler_name": (list(dual_clock.SAMPLER_OPTIONS), {"default": dual_clock.PREFERRED_SAMPLER_NAME, "tooltip": SAMPLER_TOOLTIP}),
                 "scheduler": (list(dual_clock.SCHEDULER_OPTIONS), {"default": "simple", "tooltip": "一采调度器。native_flow = shift 12 下均匀的 H3 原生流调度（与 simple 几乎相同）；beta57 = beta(0.5, 0.7)；二采按 second_steps 规则续接。"}),
                 "total_steps": ("INT", {"default": 9, "min": 2, "max": 200, "tooltip": "调度总步数。"}),
                 "first_steps": ("INT", {"default": 4, "min": 1, "max": 199, "tooltip": "一采只跑前几步（高噪声段）。"}),

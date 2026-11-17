@@ -69,3 +69,14 @@ documentation/workflow changes.
 
 When redistributing this project or substantial portions of it, retain the
 LICENSE and this NOTICE file.
+
+The Remake 替换 mode (remake.py) is adapted from the Viggle Remake ComfyUI
+nodes:
+  Viggle Remake
+  https://huggingface.co/Viggle/Viggle-Remake
+  Copyright Viggle
+
+That code is published under the Apache License, Version 2.0
+(https://www.apache.org/licenses/LICENSE-2.0). remake.py carries its SPDX
+identifier; the adapted parts are the 2 fps time-stamp labels, the held
+target audio, the keyframe release below sigma 0.9 and the clean prefix.

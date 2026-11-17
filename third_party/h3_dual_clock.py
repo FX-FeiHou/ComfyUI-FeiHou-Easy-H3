@@ -2,7 +2,9 @@
 # Adapted for ComfyUI-FeiHou-Easy-H3 from comfyui-minimax-h3-audio-T8
 # (h3_t8/sampling.py), Copyright (C) 2026 MiniMax H3 Audio T8 contributors,
 # distributed under GNU GPL-3.0-or-later (see LICENSES/). Changes: module
-# layout, imports and user-visible names only; numerical behavior is unchanged.
+# layout, imports and user-visible names; the offered samplers (dual_clock_euler
+# only without native ModelSamplingAV, see SAMPLER_OPTIONS). The dual-clock
+# numerical behavior itself is unchanged.
 from __future__ import annotations
 
 import math
@@ -31,11 +33,26 @@ DEFAULT_SCHEDULER_NAME = "native_flow"
 BETA57_SCHEDULER_NAME = "beta57"
 BETA57_ALPHA = 0.5
 BETA57_BETA = 0.7
-SAMPLER_OPTIONS = [DEFAULT_SAMPLER_NAME]
-if hasattr(comfy.model_sampling, "ModelSamplingAV"):
-    SAMPLER_OPTIONS.extend(
-        name for name in comfy.samplers.SAMPLER_NAMES if name != DEFAULT_SAMPLER_NAME
-    )
+# FeiHou change (2026-11-16): ComfyUI with native H3 audio/video sampling
+# (ModelSamplingAV) samples two-pass talk audio cleanly with euler, while
+# dual_clock_euler added a steady music-like bed there.  So dual_clock_euler is
+# only offered on older ComfyUI builds without ModelSamplingAV; elsewhere a
+# saved dual_clock_euler is read as euler.
+NATIVE_AV = hasattr(comfy.model_sampling, "ModelSamplingAV")
+if NATIVE_AV:
+    SAMPLER_OPTIONS = [name for name in comfy.samplers.SAMPLER_NAMES if name != DEFAULT_SAMPLER_NAME]
+    PREFERRED_SAMPLER_NAME = "euler"
+else:
+    SAMPLER_OPTIONS = [DEFAULT_SAMPLER_NAME]
+    PREFERRED_SAMPLER_NAME = DEFAULT_SAMPLER_NAME
+
+
+def resolve_sampler_name(name) -> str:
+    """The sampler to run: a saved dual_clock_euler becomes euler where native H3 sampling exists."""
+    name = str(name or PREFERRED_SAMPLER_NAME)
+    if name == DEFAULT_SAMPLER_NAME and NATIVE_AV:
+        return "euler"
+    return name
 SCHEDULER_OPTIONS = [
     DEFAULT_SCHEDULER_NAME,
     BETA57_SCHEDULER_NAME,
@@ -334,6 +351,7 @@ def setup_dual_clock_sampling(
     sampler_name: str = DEFAULT_SAMPLER_NAME,
     scheduler: str = DEFAULT_SCHEDULER_NAME,
 ):
+    sampler_name = resolve_sampler_name(sampler_name)
     video, audio = nested_av_parts(av_latent)
     if video.shape[1] != 24 or audio.shape[1] != 32 or audio.shape[2] != 2:
         raise ValueError(

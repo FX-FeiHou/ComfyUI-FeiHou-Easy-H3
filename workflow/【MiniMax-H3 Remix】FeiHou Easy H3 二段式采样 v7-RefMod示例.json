@@ -1979,7 +1979,7 @@
         }
       },
       "widgets_values": [
-        "dual_clock_euler",
+        "euler",
         "simple",
         9,
         4,
@@ -1991,7 +1991,7 @@
         true
       ],
       "widgets_values_named": {
-        "sampler_name": "dual_clock_euler",
+        "sampler_name": "euler",
         "scheduler": "simple",
         "total_steps": 9,
         "first_steps": 4,
