@@ -10,12 +10,12 @@
 2. 在制作包路径填写 **运行 ComfyUI 的电脑**上的目录，例如 `F:\Codex\机甲女团2`，点击“制作包状态检测”；也可以点击“上传 ZIP 压缩包”。底部检测信息窗口显示检测结果和逐镜问题。
 3. 自动递归寻找唯一的 `*Shotlist*.html`，选择包内唯一的歌曲。多个候选时会报错，不猜选：请选择只含目标 Shotlist 和歌曲的制作包目录，或在结构化分镜中用 `audio_file` 声明歌曲相对路径。界面不再显示两个相对路径栏。
 4. 检测通过后，选择中文 `zh` 或英文 `en`，点击“预览当前分镜”，会将提示词、参数及引用图片/音频/视频回填到已连接的 Easy H3 节点。缺少所选语言会报错。检测不运行模型，不保证文件可以解码或生成效果。
-5. 从头生成时将“分镜序号”设为 **1**，“生成顺序控制”设为 **正序**，ComfyUI 队列次数设为 **36**（或实际镜头数）。倒序从当前镜号递减，通常先选择最后一镜；随机可能重复；固定重复当前镜。顺序控制使用 ComfyUI 原生提交后行为，队列次数请勿超过计划镜数；达到边界的处理遵循安装的 ComfyUI 前端。
+5. 「生成方式」选 **顺序生成**，「分镜序号」填要开始的那一镜（从头就填 1），ComfyUI 的运行次数保持 **1**，点一次运行即可：每跑完一镜，服务器把下一镜排在队列最前面，分镜序号跟着走，直到最后一镜；全部跑完分镜序号回到 1。只想跑其中几镜时选 **手动设置**，分镜序号填 `6,9` 或 `3-5`（`0` = 全部），这几镜依次跑完就停。和「分镜提示词」节点的顺序生成是同一套逻辑。
 6. 原有模型加载、LoRA、采样器和保存视频节点继续使用。为了把 H3 向上补齐的帧数裁回歌曲片段时长，请保留/连接既有的“数字人/MV 时长裁剪”节点：Easy H3 输出节点的时长控制输出连接裁剪节点，解码结果经裁剪后再保存。
 
 上传 ZIP 按钮位于路径栏下一行。上传后路径栏显示 ZIP 文件名，真实服务器缓存路径保存在节点属性中；手动输入路径后立即切换到该路径，以最后一次操作为准（未完成的旧上传不会覆盖新路径）。工作流保存会保留文件名与缓存路径的对应关系。底部检测信息框随节点可用高度伸缩，最小为三行文字加内边距，不限制最大高度。
 
-**编号在提交任务后变化，不是在成功后变化。** 如果第 12 镜失败，修复原因后把序号设回 12，单镜重跑选“固定”；继续批量改回“正序”。加载器不额外向服务器提交任务，不更改采样器的种子规则。原“制作包准备编号”是内部不可变缓存快照 ID，现已隐藏并保留自动保存，无需手动填写。
+**分镜序号在一镜跑完之后才变。** 某一镜失败或被中断时不会排下一镜，分镜序号停在这一镜；修复原因后直接再点运行，就从这一镜接着跑。单独重跑某一镜：选手动设置，分镜序号填那一镜。运行次数请保持 1，否则每个排进去的任务都会各自从头跑一遍。不更改采样器的种子规则。原“制作包准备编号”是内部不可变缓存快照 ID，现已隐藏并保留自动保存，无需手动填写。
 
 ## 应用规则
 
@@ -56,7 +56,7 @@
 
 ## 保存、缓存与安全
 
-- 保存工作流时会保存路径、镜号、生成后操作和已准备制作包 ID。重启可继续读取本机缓存；换电脑、清缓存或修改 HTML 后需要重新“载入 / 刷新”，不能只复制一个缓存 ID。
+- 保存工作流时会保存路径、分镜序号、生成方式和已准备制作包 ID（旧工作流打开后：正序 / 倒序 / 随机 → 顺序生成，固定 → 手动设置）。顺序生成的进度按已准备的分镜页记录，分镜页改了就重新从头算。重启可继续读取本机缓存；换电脑、清缓存或修改 HTML 后需要重新“载入 / 刷新”，不能只复制一个缓存 ID。
 - 导入信息/解压包保存在 `ComfyUI/user/feihou_h3_production_packs`；当前镜媒体副本保存在 `ComfyUI/input/feihou_h3_pack_media`。不改写原始制作包。成功导入的缓存不会自动删除，以免已排队任务引用失效；不用相关工作流且队列停止后可自行清理这两个专用目录，随后重新导入。
 - 制作包接口支持本机与远程同源浏览器，不固定或白名单限制云端域名。ZIP 只提取图片、音频、视频和 HTML，拒绝路径越界、符号链接和加密包；限 5000 个文件、4 GiB 解压体积、16 MiB HTML。远程路径读取范围见下方说明。
 - HTML 不在 Python 服务端执行；动态页面在无同源权限、禁止外部资源的隔离 iframe 中渲染，读取完即移除。只导入可信来源的制作包，恶意/极复杂脚本仍可能卡住浏览器，超过 10 秒不返回则报错。
@@ -85,6 +85,6 @@
 
 ## English quick start
 
-Connect **FeiHou Easy H3 Production Pack Loader → production_shot** on the main node. Enter a local folder/ZIP path or upload a ZIP, then click **Check / refresh production package**. Read the bottom report and preview the current shot to populate the connected node. Generation order offers **Forward / Reverse / Random / Fixed**, using native submission-time index control. Random may repeat; reverse starts at the selected index. Internal legacy path/cache slots stay serialized but hidden to preserve saved workflows.
+Connect **FeiHou Easy H3 Production Pack Loader → production_shot** on the main node. Enter a local folder/ZIP path or upload a ZIP, then click **Check / refresh production package**. Read the bottom report and preview the current shot to populate the connected node. Run mode works like the Shot Prompts node: **顺序生成** (sequence) makes every shot from the shot number to the end in one run, the server queueing each next shot at the front of the queue after the previous one finished; **手动设置** (manual) runs only the listed shots (`6,9`, `3-5`). Keep ComfyUI's batch count at 1. A failed or interrupted shot queues nothing and keeps its number. Internal legacy path/cache slots stay serialized but hidden to preserve saved workflows.
 
 The importer supports the sample's rendered Shotlist cards (not arbitrary HTML), resolves ordered asset IDs case-insensitively, loads only referenced images plus Audio 1, and applies the shot's audio range. It enables reference-video/automatic audio duration and disables prompt rewriting. Missing FPS/resolution preserve the main node's settings. Keep the existing duration-crop node before saving to remove H3 frame padding. Original package files are not modified. Local preparation is required again after moving machines, changing the HTML or deleting the cache. RH is not modified.

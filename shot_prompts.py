@@ -1168,12 +1168,12 @@ def finish_standalone_block(markdown_fingerprint: str, block: int) -> dict[str, 
     return {"done": done, "next": None if done else int(progress.get("block") or 0)}
 
 
-# Sample Enhancer runs of 分镜提示词 in flight: prompt_id -> the block it was given.
+# Sample Enhancer runs of 分镜提示词 (and 制作包 shots) in flight: prompt_id -> the block it was given.
 _STANDALONE_RUNS: dict[str, dict[str, Any]] = {}
 
 
-def _remember_standalone_run(unique_id: Any, markdown_fingerprint: str, block: int, start: str) -> None:
-    """Note the running prompt's block; the queue hook finishes it when the run ends."""
+def remember_standalone_run(unique_id: Any, markdown_fingerprint: str, block: int, start: str) -> None:
+    """Note the running prompt's block (or 制作包 shot); the queue hook finishes it when the run ends."""
     try:
         from server import PromptServer
     except ImportError:
@@ -1185,6 +1185,9 @@ def _remember_standalone_run(unique_id: Any, markdown_fingerprint: str, block: i
     _STANDALONE_RUNS[str(prompt_id)] = {"fingerprint": markdown_fingerprint, "block": int(block),
                                         "node": str(unique_id) if unique_id is not None else None,
                                         "start": str(start)}
+
+
+_remember_standalone_run = remember_standalone_run  # older name
 
 
 def install_queue_hook(queue: Any) -> bool:
@@ -1235,9 +1238,18 @@ def _after_task(queue: Any, item: Any, status: Any) -> None:
         return
     prompt = item[2]
     for node in prompt.values():
-        if not isinstance(node, dict) or node.get("class_type") != "FeiHouEasyH3ShotPrompts":
+        if not isinstance(node, dict):
             continue
         inputs = node.setdefault("inputs", {})
+        if node.get("class_type") == "FeiHouEasyH3ProductionPackLoader":
+            # 制作包加载器: 顺序生成 carries the next shot; 手动设置 resumes its list from the state file.
+            from .production_pack import PACK_START_MANUAL, pack_start_mode
+            if pack_start_mode(inputs.get("start")) != PACK_START_MANUAL and not isinstance(inputs.get("shot_index"), list):
+                inputs["start"] = pack_start_mode(inputs.get("start"))
+                inputs["shot_index"] = str(int(progress["next"]))
+            continue
+        if node.get("class_type") != "FeiHouEasyH3ShotPrompts":
+            continue
         if start_mode(inputs.get("start")) == START_MANUAL:
             continue  # the state file resumes the pick list
         inputs["start"] = start_mode(inputs.get("start"))
@@ -1568,7 +1580,7 @@ class FeiHouEasyH3ShotPrompts:
         standalone = not _motion_segment_in(prompt)
         if standalone:
             payload = standalone_payload(payload, shot)
-            _remember_standalone_run(unique_id, markdown_fingerprint, block, start)
+            remember_standalone_run(unique_id, markdown_fingerprint, block, start)
             LOGGER.info("Easy H3 shot prompts: 没有「动作迁移分段」，按采样增强工作流跑（Setup 直接编码本块，"
                         "接续 / 拼接用「视频接续（合并）」+ Video Combine V2）")
         LOGGER.info("Easy H3 shot prompts: 分镜 %d/%d %s (%ss, %s, continue=%s%s, series %s)",

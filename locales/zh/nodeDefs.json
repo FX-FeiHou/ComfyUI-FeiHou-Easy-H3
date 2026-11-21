@@ -107,7 +107,7 @@
   },
   "FeiHouEasyH3ProductionPackLoader": {
     "display_name": "FeiHou Easy H3 制作包分镜加载器",
-    "description": "载入文件夹或 ZIP，读取最终分镜页，每次任务输出一镜。将生成后操作设为 increment 可按序号推进。",
+    "description": "载入文件夹或 ZIP，读取最终分镜页。顺序生成：点一次运行就从分镜序号开始一镜接一镜跑完，每跑完一镜自动把下一镜排在队列最前面；手动设置：只跑分镜序号里列出的分镜。",
     "inputs": {
       "source": {
         "name": "制作包文件夹 / ZIP 路径"
@@ -120,6 +120,9 @@
       },
       "shot_index": {
         "name": "分镜序号"
+      },
+      "start": {
+        "name": "生成方式"
       },
       "prompt_language": {
         "name": "提示词语言"

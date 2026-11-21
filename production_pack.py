@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import ipaddress
 import json
+import logging
 import math
 import os
 import posixpath
@@ -19,6 +20,8 @@ import tempfile
 import uuid
 import zipfile
 from urllib.parse import urlsplit
+
+LOGGER = logging.getLogger(__name__)
 
 SHOT_TYPE = "FEIHOU_H3_PRODUCTION_SHOT"
 PLAN_TYPE = "FEIHOU_H3_PRODUCTION_PLAN"
@@ -706,6 +709,68 @@ def load_plan(source, package_id, prompt_language, shotlist_file="", audio_file=
             "context_frames": 22, "runtime_config": normalize_continuous_runtime_config(runtime_config)}
 
 
+PACK_START_SEQUENCE = "顺序生成"
+PACK_START_MANUAL = "手动设置"
+PACK_START_CHOICES = [PACK_START_SEQUENCE, PACK_START_MANUAL]
+
+
+def pack_start_mode(value) -> str:
+    """顺序生成 or 手动设置; older saves held the native increment/fixed/… choice here."""
+    value = str(value or "")
+    if value in PACK_START_CHOICES:
+        return value
+    return PACK_START_MANUAL if value == "fixed" else PACK_START_SEQUENCE
+
+
+def pack_fingerprint(package_id) -> str:
+    """Progress key of a prepared pack: the same Shotlist page (and its content) resumes, an edited one starts over."""
+    data = read_pack(package_id)
+    identity = f"pack|{_resolve_pack_source(data['source'])}|{data['html_file']}|{data['html_sha256']}"
+    return hashlib.sha256(identity.encode()).hexdigest()[:32]
+
+
+def pick_pack_shot(package_id, total: int, start: str, shot_index) -> tuple[int, list[int]]:
+    """The shot this run makes, as 分镜提示词 picks its block, and the progress written for it.
+
+    顺序生成: 分镜序号 is the shot (0 or empty = 1); the queued next run carries the next one.
+    手动设置: the listed shots in order, resumed from the progress file while the list is the same.
+    """
+    from .shot_prompts import parse_picks, read_state, write_state
+    key = pack_fingerprint(package_id)
+    text = str(shot_index if shot_index is not None else "").strip().rstrip("!").strip()
+    state = read_state(key)
+    resumable = state is not None and not state.get("done")
+    if start == PACK_START_MANUAL:
+        picks = parse_picks(text, total) or list(range(1, total + 1))
+        resumable = resumable and [int(item) for item in (state.get("picks") or [])] == picks
+        index = int(state.get("block") or picks[0]) if resumable else picks[0]
+        if index not in picks:
+            index = picks[0]
+        LOGGER.info("Easy H3 production pack: 手动设置，分镜 %d/%d（本次要跑 %s）", index, total,
+                    ",".join(str(item) for item in picks))
+    else:
+        if re.fullmatch(r"0*", text):
+            index = 1
+        else:
+            index = parse_picks(text, total)[0]
+        picks = []
+        LOGGER.info("Easy H3 production pack: 顺序生成，分镜 %d/%d，跑完自动排下一镜", index, total)
+    write_state(key, {"block": index, "total": total, "series": "", "done": False, "picks": picks})
+    return index, picks
+
+
+def preview_index(shot_index) -> int:
+    """预览当前分镜: the first shot named in 分镜序号 (6,9 or 3-5 previews 6 or 3; 0 or empty previews 1)."""
+    numbers = re.findall(r"\d+", str(shot_index or ""))
+    return max(1, int(numbers[0])) if numbers else 1
+
+
+def remember_pack_run(unique_id, package_id, index: int, total: int, start: str) -> None:
+    """Queue the next shot when this run finishes (the 分镜提示词 queue hook)."""
+    from .shot_prompts import remember_standalone_run
+    remember_standalone_run(unique_id, pack_fingerprint(package_id), index, start)
+
+
 CONTEXT_CHOICES = ["自动", "0+5", "5+0", "5+5", "22+0", "22+5", "22+22", "39+0", "39+5", "39+22", "39+39"]
 CONTEXT_DEFAULT = "自动"
 TRANSITION_CHOICES = ["自动", "接续", "硬切"]
@@ -717,7 +782,9 @@ class FeiHouEasyH3ProductionPackLoader:
     RETURN_TYPES = (SHOT_TYPE,)
     RETURN_NAMES = ("production_shot",)
     DESCRIPTION = (
-        "Read one prepared Shotlist shot. Set shot_index to increment after generation, then queue the remaining shot count. "
+        "Read one prepared Shotlist shot. 顺序生成 runs the pack shot by shot from 分镜序号: each finished shot queues the "
+        "next one at the front of the queue (like 分镜提示词), so one 运行 makes the whole pack. 手动设置 runs only the "
+        "listed shots (e.g. 6,9 or 3-5). "
         "视频接续开启时，分镜 2 起自动接上一个分镜的结尾（配合「FeiHou Easy H3 接续合并」输出完整视频）。"
     )
 
@@ -727,7 +794,10 @@ class FeiHouEasyH3ProductionPackLoader:
             "source": ("STRING", {"default": ""}),
             "shotlist_file": ("STRING", {"default": "", "tooltip": "Optional relative HTML path when multiple Shotlists exist"}),
             "audio_file": ("STRING", {"default": "", "tooltip": "Optional MV soundtrack path. Digital-human packs use voice_reference from the Shotlist."}),
-            "shot_index": ("INT", {"default": 1, "min": 1, "max": 1000000, "control_after_generate": True}),
+            "shot_index": ("STRING", {"default": "1", "tooltip":
+                "顺序生成时：分镜序号跟着进度走（1/20、2/20…）。点一次运行就从这里一镜接一镜跑到最后一镜，每跑完一镜自动排下一镜；"
+                "中断后不动它再运行，就从中断的那一镜重跑；改成 0 或 1 = 从第 1 镜重跑全部；改成别的序号 = 从那一镜往下跑。"
+                "全部跑完回到 1。手动设置时填要跑的分镜，例如 6,9 或 3-5，0 = 全部。"}),
             "prompt_language": (["zh", "en"], {"default": "zh"}),
             "package_id": ("STRING", {"default": ""}),
             # Legacy hidden slot, kept so saved widget positions do not shift.
@@ -745,22 +815,34 @@ class FeiHouEasyH3ProductionPackLoader:
                 "接续视频：点下方「选择接续视频」按钮弹出窗口选上一段的视频（也可直接填视频完整路径），当前分镜就接着它往后生成；"
                 "视频旁边有同名 .latent 时用 .latent，没有就直接读视频结尾。只对本次排队的第一个分镜生效，之后自动回到「自动」。"
                 "自动：接内存里或已保存的上一分镜。分镜衔接选「硬切」时不接续。"}),
-        }}
+        }, "optional": {
+            # Optional: API prompts written before it existed (e.g. the canvas client's Remix workflows,
+            # which only use the loader with use_pack off) still validate; they run as 顺序生成.
+            "start": (PACK_START_CHOICES, {"default": PACK_START_SEQUENCE, "tooltip":
+                "顺序生成：从分镜序号开始一镜接一镜跑完整个制作包，不用改运行次数。手动设置：只跑分镜序号里列出的分镜（例如 6,9 或 3-5）。"}),
+        }, "hidden": {"unique_id": "UNIQUE_ID"}}
 
     @classmethod
     def IS_CHANGED(cls, **kwargs):
         return float("nan")
 
     def load(self, source, shot_index, prompt_language, package_id, continuation="自动", context_frames=CONTEXT_DEFAULT,
-             continue_video="自动", use_pack=True, **kwargs):
+             continue_video="自动", use_pack=True, start=PACK_START_SEQUENCE, unique_id=None, **kwargs):
         if use_pack is False or str(use_pack).strip().lower() in ("false", "0", "off"):
             from .production_continuation import manual_continuation
             return {"result": (manual_continuation(continuation, context_frames, continue_video),)}
         # Legacy path slots remain serializable but no longer override detection.
-        shot = load_shot(source, package_id, shot_index, prompt_language)
+        total = len(read_pack(package_id).get("shots", []))
+        if total < 1:
+            raise ValueError("制作包里没有分镜：请先点「制作包状态检测」")
+        start = pack_start_mode(start)
+        index, picks = pick_pack_shot(package_id, total, start, shot_index)
+        shot = load_shot(source, package_id, index, prompt_language)
         from .production_continuation import continue_shot
         continued = continue_shot(shot, continuation, context_frames, continue_video)
-        return {"ui": {"production_shot": [shot]}, "result": (continued,)}
+        remember_pack_run(unique_id, package_id, index, total, start)
+        info = {**shot, "start": start, "picks": picks}
+        return {"ui": {"production_shot": [info]}, "result": (continued,)}
 
 
 CONTINUE_VIDEO_EXTENSIONS = (".mp4", ".webm", ".mov", ".mkv", ".m4v", ".latent")
@@ -863,7 +945,7 @@ def register_routes(routes, is_local):
                     result = await asyncio.to_thread(_continue_find, str(payload.get("name") or ""), int(payload.get("size") or -1))
                 elif action == "preview":
                     _authorize_pack_source(read_pack(payload["package_id"])["source"], local)
-                    result = await asyncio.to_thread(load_shot, payload["source"], payload["package_id"], payload["shot_index"], payload["prompt_language"], payload.get("shotlist_file", ""), payload.get("audio_file", ""))
+                    result = await asyncio.to_thread(load_shot, payload["source"], payload["package_id"], preview_index(payload["shot_index"]), payload["prompt_language"], payload.get("shotlist_file", ""), payload.get("audio_file", ""))
                 else:
                     raise ValueError("Unknown package operation")
             return web.json_response(result)

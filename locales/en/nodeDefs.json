@@ -98,7 +98,7 @@
   },
   "FeiHouEasyH3ProductionPackLoader": {
     "display_name": "FeiHou Easy H3 Production Pack Loader",
-    "description": "Import a folder or ZIP, read the final Shotlist, and supply one shot per queued task. Enable increment after generation to advance the shot index.",
+    "description": "Import a folder or ZIP and read the final Shotlist. 顺序生成 (sequence): one run makes every shot from the shot number on; each finished shot queues the next at the front of the queue. 手动设置 (manual): only the listed shots.",
     "inputs": {
       "source": {
         "name": "Package folder / ZIP path"
@@ -110,7 +110,10 @@
         "name": "Soundtrack path (optional)"
       },
       "shot_index": {
-        "name": "Shot index"
+        "name": "Shot number"
+      },
+      "start": {
+        "name": "Run mode"
       },
       "prompt_language": {
         "name": "Prompt language"

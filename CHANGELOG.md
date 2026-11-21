@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.5
+
+- 制作包分镜加载器: shots now run like 分镜提示词. The native 生成后操作 (increment / decrement / randomize / fixed, shown as 生成顺序控制) is replaced by 生成方式: 顺序生成 (default) / 手动设置, and 分镜序号 becomes a text field.
+  - 分镜序号 is drawn like 分镜提示词's 镜号: the shot number and the pack total (2/5, 3/5 …; the total comes from 制作包状态检测 or the last run), arrows step by one, dragging the middle changes it, a click opens a box for a number or a list (6,9 / 3-5).
+  - 顺序生成: one 运行 makes every shot from 分镜序号 to the last one. When a shot finishes, the server queues the next one at the front of the queue (a task another tab queued waits), and 分镜序号 follows it. An interrupted or failed shot queues nothing and keeps its number, so 运行 again redoes that shot. 0 or 1 starts from the first shot; when the pack is done 分镜序号 goes back to 1.
+  - 手动设置: only the listed shots run, e.g. `6,9` or `3-5` (`0` = all), one after the other; the list stays as typed.
+  - Keep ComfyUI's 运行次数 at 1: every queued copy would otherwise start its own pass through the pack.
+  - Saved workflows open as 顺序生成 at their saved index (fixed opens as 手动设置 with that shot). Progress belongs to the prepared Shotlist page and starts over when the page changes. 预览当前分镜 shows the first listed shot.
+  - 生成方式 is an optional input, so API prompts written before it (such as the 花果山画布 Remix Easy H3 Turbo / V2 workflows, which send an integer `shot_index` with `use_pack` off) validate and run unchanged; with `use_pack` off nothing is queued.
+
 ## v1.4.33
 
 - Samplers: Motion Segment, 1st Sample Enhancer and Dual Sample 1st now default to euler, also for two-pass, and dual_clock_euler is no longer offered where ComfyUI samples H3 audio and video natively (ModelSamplingAV). On talk blocks (`@sound generated`) two-pass with dual_clock_euler gave the speech a steady music-like bed (pauses about -39 dB); the same run with euler was clean (about -55 to -61 dB). A saved dual_clock_euler opens as euler when the workflow is loaded in the browser (an API prompt that still names it is refused by ComfyUI's input check). On ComfyUI builds without native H3 sampling it is still the only choice. The bundled workflows now use euler.

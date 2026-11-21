@@ -1,6 +1,6 @@
 # ComfyUI-FeiHou-Easy-H3
 
-Standard-edition experimental feature: [Production Pack Loader](docs/production-packs.md#english-quick-start). Read a folder/ZIP Shotlist, apply per-shot prompts, audio ranges and referenced images, and advance with native queue increment.
+Standard-edition experimental feature: [Production Pack Loader](docs/production-packs.md#english-quick-start). Read a folder/ZIP Shotlist, apply per-shot prompts, audio ranges and referenced images, and run the whole pack from one queue click (the next shot is queued when one finishes).
 
 **English** | [中文](README.md)
 

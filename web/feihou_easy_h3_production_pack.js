@@ -3,9 +3,11 @@ import { api } from "../../scripts/api.js";
 import { renderShotlist } from "./production_pack_parser.js";
 import { applyProductionShotPreview } from "./feihou_easy_h3_ui.js";
 
+const PROGRESS_EVENT = "feihou_shot_progress";
 const CLASS = "FeiHouEasyH3ProductionPackLoader";
 // Original serialized positions: presentation-only buttons must never shift them.
-const SAVED_WIDGETS = ["source", "shotlist_file", "audio_file", "shot_index", "control_after_generate", "prompt_language", "package_id", "continuous_runtime_config", "continuation", "context_frames", "continue_video", "use_pack"];
+// Slot 4 held ComfyUI's control_after_generate (increment / fixed / ...) before 生成方式 replaced it.
+const SAVED_WIDGETS = ["source", "shotlist_file", "audio_file", "shot_index", "start", "prompt_language", "package_id", "continuous_runtime_config", "continuation", "context_frames", "continue_video", "use_pack"];
 const zh = () => /^zh/i.test(String(app.ui?.settings?.getSettingValue?.("Comfy.Locale") || navigator.language));
 const tr = (en, cn) => zh() ? cn : en;
 const widget = (node, name) => node.widgets?.find((w) => w.name === name);
@@ -45,6 +47,10 @@ async function uploadContinueFile(file, batch) {
 }
 
 const AUTO = "自动";
+const SEQUENCE = "顺序生成";
+const MANUAL = "手动设置";
+// Older saves: fixed repeated one shot (now 手动设置 with that number); every other order runs the pack in sequence.
+const startFromSaved = (saved) => [SEQUENCE, MANUAL].includes(saved) ? saved : (saved === "fixed" ? MANUAL : SEQUENCE);
 const baseName = (path) => String(path || "").split(/[\\/]/).pop();
 
 // The visible "接续视频" combo: 自动 plus the last chosen file (shown by its name).
@@ -118,6 +124,7 @@ function status(node, message) {
 }
 
 function display(node, shot) {
+    if (Number(shot?.total) > 0) { node.properties ||= {}; node.properties.feihou_pack_total = Number(shot.total); }
     let applied = 0;
     const graph = node.graph;
     // Follow standard reroutes as well as direct links. Never modify unrelated nodes.
@@ -187,8 +194,6 @@ async function prepare(node, file) {
         set(node, "package_id", ready.package_id);
         node.properties ||= {};
         node.properties.feihou_pack_total = ready.total;
-        const index = widget(node, "shot_index");
-        if (index) { index.options ||= {}; index.options.max = ready.total; }
         status(node, [ready.errors?.length ? tr("INCOMPLETE — fix the following items before generation.", "检测未通过：制作包不完整，请修复下列问题后重新检测。")
             : tr("PASS — referenced files, prompts and timing are valid.", "检测通过：引用文件、提示词和时间参数完整（不代表已验证媒体解码或生成效果）。"),
             `Shotlist: ${ready.html_file || info.html_file}`, `Audio: ${ready.audio_file || "—"}`,
@@ -206,14 +211,14 @@ function localize(node) {
         source: ["Package folder / ZIP path", "制作包文件夹 / ZIP 路径"],
         shotlist_file: ["Shotlist path (optional)", "分镜 HTML 相对路径（可留空）"],
         audio_file: ["Soundtrack path (optional)", "歌曲相对路径（可留空）"],
-        shot_index: ["Shot index", "分镜序号"],
+        shot_index: ["Shot number", "分镜序号"],
+        start: ["Run mode", "生成方式"],
         prompt_language: ["Prompt language", "提示词语言"],
         package_id: ["Prepared package ID (automatic)", "制作包准备编号（自动）"],
         load_pack: ["Check / refresh production package", "制作包状态检测"],
         upload_zip: ["Upload ZIP", "上传 ZIP 压缩包"],
         preview_shot: ["Preview current shot", "预览当前分镜"],
         pack_report: ["Detection report", "检测信息"],
-        generation_order: ["Generation order", "生成顺序控制"],
         continuation: ["Shot transition", "分镜衔接"],
         context_frames: ["Continuation frames (1st+2nd pass)", "接续帧数（一采+二采）"],
         continue_video: ["Continue from video", "接续视频"],
@@ -222,16 +227,7 @@ function localize(node) {
         use_pack: ["Run production pack in batch", "批量运行制作包"],
     };
     for (const w of node.widgets || []) if (names[w.name]) w.label = tr(...names[w.name]);
-    const order = widget(node, "generation_order");
-    if (order) {
-        order.options.values = Object.values(orderNames());
-        order.value = orderNames()[value(node, "control_after_generate")] || orderNames().fixed;
-    }
     if (node.outputs?.[0]) node.outputs[0].label = tr("Production shot", "制作包分镜");
-}
-
-function orderNames() {
-    return { increment: tr("Forward", "正序"), decrement: tr("Reverse", "倒序"), randomize: tr("Random", "随机"), fixed: tr("Fixed", "固定") };
 }
 
 function hideInternal(w) {
@@ -245,6 +241,137 @@ function hideInternal(w) {
     if (w.inputEl) w.inputEl.style.display = "none";
 }
 
+// 分镜序号 drawn like 分镜提示词's 镜号: arrows step by one, dragging the middle changes it,
+// a click opens a prompt (手动设置 takes lists like 6,9 / 3-5), a single number shows as N/T.
+// The value stays a string, so the Python input and saved workflows are unchanged.
+const SHOT_WIDGET_TYPE = "feihou_pack_shot_number";
+const SHOT_ARROW_ZONE = 22;
+const SHOT_DRAG_PIXELS = 8;
+
+function packTotal(node) {
+    const total = Number(node?.properties?.feihou_pack_total);
+    return Number.isFinite(total) && total > 0 ? Math.round(total) : 0;
+}
+
+function firstShotNumber(text) {
+    const match = String(text ?? "").match(/\d+/);
+    return match ? Number(match[0]) : 1;
+}
+
+function packShotLabel(text, total) {
+    const value = String(text ?? "").trim() || "1";
+    if (!/^\d+$/.test(value)) return value;
+    const number = Math.max(1, Number(value));
+    return total ? `${number}/${total}` : String(number);
+}
+
+function setShotIndex(node, w, data) {
+    w.value = String(data);
+    if (w._state) w._state.value = w.value;
+    node.setDirtyCanvas?.(true, true);
+    app.graph?.change?.();
+}
+
+function stepShotIndex(node, w, number) {
+    const total = packTotal(node);
+    setShotIndex(node, w, Math.max(1, Math.min(total || 9999, Math.round(number))));
+}
+
+function promptShotIndex(node, w, event) {
+    const ask = tr("Shot number (顺序生成: start shot; 手动设置: 6,9 or 3-5)",
+        "分镜序号（顺序生成：从这一镜开始往下跑；手动设置可填 6,9 或 3-5）");
+    const apply = (input) => {
+        const text = String(input ?? "").trim();
+        if (!/^[\d\s,，;；~-]*$/.test(text)) {
+            app.extensionManager?.toast?.add?.({ severity: "warn", summary: "Easy H3",
+                detail: tr(`Only numbers, 6,9 or 3-5: got "${text}"`, `分镜序号只能填数字、6,9 或 3-5，收到「${text}」`), life: 6000 });
+            return;
+        }
+        setShotIndex(node, w, text || "1");
+    };
+    if (typeof app.canvas?.prompt === "function") app.canvas.prompt(ask, w.value, apply, event);
+    else apply(window.prompt?.(ask, w.value) ?? w.value);
+}
+
+function installShotIndexWidget(node) {
+    const widgets = node?.widgets || [];
+    const index = widgets.findIndex((w) => w?.name === "shot_index");
+    if (index < 0 || widgets[index].type === SHOT_WIDGET_TYPE || typeof node.addCustomWidget !== "function") return;
+    const original = widgets[index];
+    const drag = { active: false, zone: "", startX: 0, startValue: 1, moved: false };
+    const added = node.addCustomWidget({
+        name: "shot_index",
+        type: SHOT_WIDGET_TYPE,
+        value: String(original.value ?? "").trim() || "1",
+        label: original.label,
+        options: {},
+        draw(ctx, owner, width, y, height) {
+            const margin = 15;
+            const middle = y + height * 0.7;
+            ctx.save();
+            ctx.fillStyle = LiteGraph.WIDGET_BGCOLOR;
+            ctx.strokeStyle = LiteGraph.WIDGET_OUTLINE_COLOR;
+            ctx.beginPath();
+            ctx.roundRect(margin, y, width - margin * 2, height, [height * 0.5]);
+            ctx.fill();
+            ctx.stroke();
+            ctx.fillStyle = LiteGraph.WIDGET_TEXT_COLOR;
+            ctx.beginPath();
+            ctx.moveTo(margin + 16, y + 5);
+            ctx.lineTo(margin + 6, y + height * 0.5);
+            ctx.lineTo(margin + 16, y + height - 5);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.moveTo(width - margin - 16, y + 5);
+            ctx.lineTo(width - margin - 6, y + height * 0.5);
+            ctx.lineTo(width - margin - 16, y + height - 5);
+            ctx.fill();
+            ctx.fillStyle = LiteGraph.WIDGET_SECONDARY_TEXT_COLOR;
+            ctx.textAlign = "left";
+            ctx.fillText(this.label || tr("Shot number", "分镜序号"), margin + SHOT_ARROW_ZONE + 4, middle);
+            ctx.fillStyle = LiteGraph.WIDGET_TEXT_COLOR;
+            ctx.textAlign = "right";
+            ctx.fillText(packShotLabel(this.value, packTotal(owner)), width - margin - SHOT_ARROW_ZONE - 4, middle);
+            ctx.restore();
+        },
+        mouse(event, pos, owner) {
+            const type = String(event?.type || "");
+            const x = pos[0];
+            const width = owner.size[0];
+            if (type.endsWith("down")) {
+                const zone = x < 15 + SHOT_ARROW_ZONE ? "dec" : x > width - 15 - SHOT_ARROW_ZONE ? "inc" : "mid";
+                Object.assign(drag, { active: true, zone, startX: x, startValue: firstShotNumber(this.value), moved: false });
+                if (zone === "dec") stepShotIndex(owner, this, drag.startValue - 1);
+                if (zone === "inc") stepShotIndex(owner, this, drag.startValue + 1);
+                return true;
+            }
+            if (type.endsWith("move")) {
+                if (!drag.active || drag.zone !== "mid") return false;
+                const steps = Math.trunc((x - drag.startX) / SHOT_DRAG_PIXELS);
+                if (steps !== 0 || drag.moved) {
+                    drag.moved = true;
+                    stepShotIndex(owner, this, drag.startValue + steps);
+                }
+                return true;
+            }
+            if (type.endsWith("up")) {
+                const clicked = drag.active && drag.zone === "mid" && !drag.moved;
+                drag.active = false;
+                if (clicked) promptShotIndex(owner, this, event);
+                return true;
+            }
+            return false;
+        },
+        computeSize(width) {
+            return [width, LiteGraph.NODE_WIDGET_HEIGHT || 20];
+        },
+    });
+    // addCustomWidget appends: put it into the old slot so the widget order stays.
+    const w = node.widgets.includes(added) ? added : node.widgets[node.widgets.length - 1];
+    node.widgets.splice(node.widgets.indexOf(w), 1);
+    node.widgets.splice(index, 1, w);
+}
+
 app.registerExtension({
     name: "FeiHou.EasyH3.ProductionPack",
     beforeRegisterNodeDef(nodeType, nodeData) {
@@ -252,17 +379,6 @@ app.registerExtension({
         const created = nodeType.prototype.onNodeCreated;
         nodeType.prototype.onNodeCreated = function () {
             const result = created?.apply(this, arguments);
-            // Native ComfyUI batching snapshots this index for each queued prompt.
-            // onConfigure restores the user's saved fixed/increment choice later.
-            const control = widget(this, "control_after_generate");
-            if (control) control.value = "increment";
-            // With the pack switched off the loader only continues videos: keep the shot index still.
-            for (const hook of ["beforeQueued", "afterQueued"]) {
-                const original = control?.[hook];
-                if (typeof original === "function") {
-                    control[hook] = (...args) => (value(this, "use_pack") === false ? undefined : original.apply(control, args));
-                }
-            }
             // A chosen continuation video applies to the first queued shot only.
             const chosen = widget(this, "continue_video");
             if (chosen) {
@@ -272,11 +388,8 @@ app.registerExtension({
                     if (chosen.value !== AUTO) { set(this, "continue_video", AUTO); syncContinue(this); }
                 };
             }
-            for (const name of ["shotlist_file", "audio_file", "package_id", "control_after_generate", "continuous_runtime_config", "continue_video"]) hideInternal(widget(this, name));
-            this.addWidget("combo", "generation_order", orderNames().increment, (label) => {
-                const entry = Object.entries(orderNames()).find(([, text]) => text === label);
-                if (entry) { set(this, "control_after_generate", entry[0]); app.graph?.change?.(); }
-            }, { values: Object.values(orderNames()), serialize: false });
+            for (const name of ["shotlist_file", "audio_file", "package_id", "continuous_runtime_config", "continue_video"]) hideInternal(widget(this, name));
+            installShotIndexWidget(this);
             const usePack = widget(this, "use_pack");
             if (usePack) {
                 this.widgets.splice(this.widgets.indexOf(usePack), 1);
@@ -290,11 +403,6 @@ app.registerExtension({
                             "批量运行制作包：关，Setup 使用自己的提示词和素材，只作为接续加载器；在下面选择要接续的视频。"
                             + "没选视频时，分镜衔接为「接续」会中止任务，「自动」/「硬切」独立生成并保存结尾 latent，供下一段接续。"));
                 };
-            }
-            const order = widget(this, "generation_order"), language = widget(this, "prompt_language");
-            if (order && language) {
-                this.widgets.splice(this.widgets.indexOf(order), 1);
-                this.widgets.splice(this.widgets.indexOf(language) + 1, 0, order);
             }
             this.addWidget("button", "upload_zip", null, () => {
                 const picker = document.createElement("input");
@@ -331,7 +439,8 @@ app.registerExtension({
                 serialize: false, getValue: () => report.value, setValue: (v) => { report.value = v; },
                 getMinHeight: () => 72, getMaxHeight: () => Infinity,
             });
-            status(this, tr("Check the package, then preview the current shot. Reverse starts from the selected index.", "先点击制作包状态检测，再预览当前分镜。倒序从所选分镜开始；随机可能重复；固定重复当前分镜。"));
+            status(this, tr("Check the package, then preview the current shot. 顺序生成: one run makes every shot from the shot number on, each finished shot queues the next. 手动设置: only the listed shots (6,9 or 3-5).",
+                "先点击制作包状态检测，再预览当前分镜。顺序生成：点一次运行就从分镜序号开始一镜接一镜跑完，每跑完一镜自动排下一镜；手动设置：只跑分镜序号里列出的分镜（例如 6,9 或 3-5）。"));
             for (const name of ["source"]) {
                 const w = widget(this, name), callback = w?.callback;
                 if (w) w.callback = (...args) => {
@@ -363,6 +472,8 @@ app.registerExtension({
                     let saved = info.widgets_values[i];
                     // Older saves stored the continuation switch as true/false.
                     if (name === "continuation" && typeof saved === "boolean") saved = saved ? "自动" : "硬切";
+                    if (name === "start") saved = startFromSaved(saved);
+                    if (name === "shot_index" && typeof saved === "number") saved = String(saved);
                     if (i < info.widgets_values.length && saved !== null && saved !== undefined) set(this, name, saved);
                 });
             };
@@ -371,19 +482,20 @@ app.registerExtension({
             // Some frontends re-apply widgets_values by position after onConfigure,
             // which would put the hidden slots (e.g. the package ID) on the wrong widgets.
             setTimeout(() => { restore(); syncContinue(this); }, 0);
-            for (const name of ["shotlist_file", "audio_file", "package_id", "control_after_generate", "continuous_runtime_config", "continue_video"]) hideInternal(widget(this, name));
-            const index = widget(this, "shot_index");
-            if (index && this.properties?.feihou_pack_total > 0) {
-                index.options ||= {};
-                index.options.max = this.properties.feihou_pack_total;
-            }
+            for (const name of ["shotlist_file", "audio_file", "package_id", "continuous_runtime_config", "continue_video"]) hideInternal(widget(this, name));
             localize(this);
             return result;
         };
         const executed = nodeType.prototype.onExecuted;
         nodeType.prototype.onExecuted = function (message) {
             const result = executed?.apply(this, arguments);
-            if (message?.production_shot?.[0]) display(this, message.production_shot[0]);
+            const shot = message?.production_shot?.[0];
+            if (shot) {
+                display(this, shot);
+                if (shot.index && shot.total) status(this, tr(`Running shot ${shot.index}/${shot.total} (${shot.id || ""}).`,
+                    `正在跑第 ${shot.index}/${shot.total} 镜（${shot.id || ""}）。`
+                    + (shot.start === MANUAL ? "手动设置：只跑列出的分镜。" : "顺序生成：跑完会自动排下一镜。")));
+            }
             return result;
         };
     },
@@ -398,6 +510,8 @@ app.registerExtension({
             }
         };
         api.addEventListener?.("graphConfigured", refresh);
+        // A finished shot (server queue hook, as for 分镜提示词): 分镜序号 follows the pack.
+        api.addEventListener?.(PROGRESS_EVENT, (event) => showPackProgress(event?.detail));
         app.ui?.settings?.addEventListener?.("change", refresh);
     },
     nodeCreated(node) {
@@ -407,6 +521,22 @@ app.registerExtension({
         }
     },
 });
+
+function showPackProgress(info) {
+    if (!info || info.node == null) return;
+    const node = app.graph?.getNodeById?.(info.node);
+    if ((node?.comfyClass || node?.type) !== CLASS) return;   // 分镜提示词, or another workflow tab
+    if (info.shot_done) {
+        if (value(node, "start") !== MANUAL) set(node, "shot_index", "1");
+        status(node, tr("Every shot of the pack is done. The shot number is back to 1.", "制作包的分镜全部跑完，分镜序号回到 1。"));
+    } else if (info.shot_next) {
+        if (value(node, "start") !== MANUAL) set(node, "shot_index", String(Math.round(Number(info.shot_next))));
+        status(node, tr(`Shot ${info.block} done; shot ${info.shot_next} is queued next.`,
+            `第 ${info.block} 镜完成，第 ${info.shot_next} 镜已排在队列最前面。`));
+    }
+    node.setDirtyCanvas?.(true, true);
+    return node;
+}
 
 function nodeSourceEdited(node) {
     node.__h3PackRevision = (node.__h3PackRevision || 0) + 1;
