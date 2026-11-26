@@ -2258,8 +2258,8 @@
         1347.086044194066
       ],
       "size": [
-        351.83331909179685,
-        945.1014245074729
+        352,
+        360
       ],
       "flags": {},
       "order": 52,
@@ -2404,7 +2404,7 @@
           "links": []
         }
       ],
-      "title": "Final Video (one clip per block; the last block joins the full video)",
+      "title": "Final Video",
       "properties": {
         "cnr_id": "feihou-toolbox",
         "ver": "f9edc9a0e03250478d92149248bddfd0115784fb",
@@ -4160,7 +4160,7 @@
       ],
       "size": [
         291.0425165013537,
-        212
+        420
       ],
       "flags": {},
       "order": 34,
@@ -5070,7 +5070,7 @@
           "shadow": false,
           "effect": "champagne"
         },
-        "text": "🐵 Xiao Fei Hou",
+        "text": "👧 Xiao Fei Hou",
         "ue_properties": {
           "widget_ue_connectable": {},
           "version": "8.0",
@@ -5078,10 +5078,10 @@
         }
       },
       "widgets_values": [
-        "🐵 Xiao Fei Hou"
+        "👧 Xiao Fei Hou"
       ],
       "widgets_values_named": {
-        "text": "🐵 Xiao Fei Hou"
+        "text": "👧 Xiao Fei Hou"
       },
       "color": "#432",
       "bgcolor": "#653"
@@ -5095,14 +5095,14 @@
       ],
       "size": [
         480,
-        270
+        154
       ],
       "flags": {},
       "order": 74,
       "mode": 0,
       "inputs": [],
       "outputs": [],
-      "title": "🐵 Xiao Fei Hou",
+      "title": "👧 Xiao Fei Hou",
       "properties": {
         "ue_properties": {
           "widget_ue_connectable": {},
@@ -5112,10 +5112,10 @@
         "Node name for S&R": "MarkdownNote"
       },
       "widgets_values": [
-        "- 💬 **WeChat**: fx-feihou\n- 💬 **LINE**: fx-feihou\n- 👥 **QQ group**: 1091593367\n- 📺 **Bilibili**: https://space.bilibili.com/389291683\n- ▶️ **YouTube**: https://www.youtube.com/@ivever5\n- 🎨 **Civitai**: https://civitai.com/models/2879272/minimax-h3-remix\n- 🐙 **GitHub**: https://github.com/FX-FeiHou\n- 💿 **Cloud drive (models, LoRAs, assets)**: https://pan.quark.cn/s/27fe4727197b\n\nWhen you add me on WeChat or LINE, please say why (to join the group, or business)."
+        "- 💬 **WeChat**: fx-feihou\n- 💬 **LINE**: fx-feihou\n- 👥 **QQ group**: 1091593367\n- 📺 **Bilibili**: [https://space.bilibili.com/389291683](https://space.bilibili.com/389291683)\n- ▶️ **YouTube**: [https://www.youtube.com/@ivever5](https://www.youtube.com/@ivever5)\n- 🎨 **Civitai**: [https://civitai.com/models/2879272/minimax-h3-remix](https://civitai.com/models/2879272/minimax-h3-remix)\n- 🐙 **GitHub**: [https://github.com/FX-FeiHou](https://github.com/FX-FeiHou)\n\n*When you add me on WeChat or LINE, please say why (to join the group, or business).*"
       ],
       "widgets_values_named": {
-        "text": "- 💬 **WeChat**: fx-feihou\n- 💬 **LINE**: fx-feihou\n- 👥 **QQ group**: 1091593367\n- 📺 **Bilibili**: https://space.bilibili.com/389291683\n- ▶️ **YouTube**: https://www.youtube.com/@ivever5\n- 🎨 **Civitai**: https://civitai.com/models/2879272/minimax-h3-remix\n- 🐙 **GitHub**: https://github.com/FX-FeiHou\n- 💿 **Cloud drive (models, LoRAs, assets)**: https://pan.quark.cn/s/27fe4727197b\n\nWhen you add me on WeChat or LINE, please say why (to join the group, or business)."
+        "text": "- 💬 **WeChat**: fx-feihou\n- 💬 **LINE**: fx-feihou\n- 👥 **QQ group**: 1091593367\n- 📺 **Bilibili**: [https://space.bilibili.com/389291683](https://space.bilibili.com/389291683)\n- ▶️ **YouTube**: [https://www.youtube.com/@ivever5](https://www.youtube.com/@ivever5)\n- 🎨 **Civitai**: [https://civitai.com/models/2879272/minimax-h3-remix](https://civitai.com/models/2879272/minimax-h3-remix)\n- 🐙 **GitHub**: [https://github.com/FX-FeiHou](https://github.com/FX-FeiHou)\n\n*When you add me on WeChat or LINE, please say why (to join the group, or business).*"
       },
       "color": "#233",
       "bgcolor": "#355",

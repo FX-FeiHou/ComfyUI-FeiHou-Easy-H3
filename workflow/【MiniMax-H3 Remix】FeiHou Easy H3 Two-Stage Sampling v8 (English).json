@@ -1,85 +1,9 @@
 {
   "id": "b5daee3b-52ee-4638-9df1-7ccaebdafbff",
   "revision": 0,
-  "last_node_id": 542,
+  "last_node_id": 562,
   "last_link_id": 842,
   "nodes": [
-    {
-      "id": 96,
-      "type": "Label (rgthree)",
-      "pos": [
-        1230.61,
-        -770
-      ],
-      "size": [
-        2152.78,
-        50
-      ],
-      "flags": {
-        "allow_interaction": true
-      },
-      "order": 1,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [],
-      "title": "By: Xiao Fei Hou (三层楼的小肥猴)   WeChat: fx-feihou   LINE: fx-feihou   QQ group: 1091593367",
-      "properties": {
-        "fontSize": 50,
-        "fontFamily": "Arial",
-        "fontColor": "#ffffff",
-        "textAlign": "left",
-        "backgroundColor": "transparent",
-        "padding": 0,
-        "borderRadius": 0,
-        "angle": 0,
-        "ue_properties": {
-          "widget_ue_connectable": {},
-          "input_ue_unconnectable": {},
-          "version": "7.5.2"
-        },
-        "widget_ue_connectable": {}
-      },
-      "color": "#fff0",
-      "bgcolor": "#fff0"
-    },
-    {
-      "id": 97,
-      "type": "Label (rgthree)",
-      "pos": [
-        617.42,
-        -700
-      ],
-      "size": [
-        3379.15,
-        50
-      ],
-      "flags": {
-        "allow_interaction": true
-      },
-      "order": 2,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [],
-      "title": "Bilibili: https://space.bilibili.com/389291683   YouTube: https://www.youtube.com/@ivever5   Civitai: https://civitai.com/models/2879272/minimax-h3-remix",
-      "properties": {
-        "fontSize": 50,
-        "fontFamily": "Arial",
-        "fontColor": "#ffffff",
-        "textAlign": "left",
-        "backgroundColor": "transparent",
-        "padding": 0,
-        "borderRadius": 0,
-        "angle": 0,
-        "ue_properties": {
-          "widget_ue_connectable": {},
-          "input_ue_unconnectable": {},
-          "version": "7.5.2"
-        },
-        "widget_ue_connectable": {}
-      },
-      "color": "#fff0",
-      "bgcolor": "#fff0"
-    },
     {
       "id": 9,
       "type": "VAEDecode",
@@ -132,44 +56,6 @@
       },
       "color": "#b0c2e1",
       "bgcolor": "#2f4b7c"
-    },
-    {
-      "id": 93,
-      "type": "Label (rgthree)",
-      "pos": [
-        -233.99,
-        -1050
-      ],
-      "size": [
-        5081.98,
-        150
-      ],
-      "flags": {
-        "allow_interaction": true
-      },
-      "order": 3,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [],
-      "title": "[MiniMax-H3 Remix] FeiHou Easy H3 Two-Stage High-Dynamic Workflow v8",
-      "properties": {
-        "fontSize": 150,
-        "fontFamily": "Arial",
-        "fontColor": "#ffff00",
-        "textAlign": "left",
-        "backgroundColor": "transparent",
-        "padding": 0,
-        "borderRadius": 0,
-        "angle": 0,
-        "ue_properties": {
-          "widget_ue_connectable": {},
-          "input_ue_unconnectable": {},
-          "version": "7.5.2"
-        },
-        "widget_ue_connectable": {}
-      },
-      "color": "#fff0",
-      "bgcolor": "#fff0"
     },
     {
       "id": 281,
@@ -432,44 +318,6 @@
       "extensions": {
         "textcolor": "#FFFFFF"
       }
-    },
-    {
-      "id": 94,
-      "type": "Label (rgthree)",
-      "pos": [
-        188.34,
-        -860
-      ],
-      "size": [
-        4237.32,
-        60
-      ],
-      "flags": {
-        "allow_interaction": true
-      },
-      "order": 4,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [],
-      "title": "[Multi-Image Ref] [Multi-Audio Ref] [Multi-Video Ref] [Image-to-Video] [Text-to-Video] [First/Last Frame] [Digital Human] [Character Replacement] [Video Editing]",
-      "properties": {
-        "fontSize": 60,
-        "fontFamily": "Arial",
-        "fontColor": "#00ff00",
-        "textAlign": "left",
-        "backgroundColor": "transparent",
-        "padding": 0,
-        "borderRadius": 0,
-        "angle": 0,
-        "ue_properties": {
-          "widget_ue_connectable": {},
-          "input_ue_unconnectable": {},
-          "version": "7.5.2"
-        },
-        "widget_ue_connectable": {}
-      },
-      "color": "#fff0",
-      "bgcolor": "#fff0"
     },
     {
       "id": 87,
@@ -4118,43 +3966,6 @@
       "bgcolor": "#29699c"
     },
     {
-      "id": 453,
-      "type": "MarkdownNote",
-      "pos": [
-        -1224.1778925344186,
-        -281.6902489121099
-      ],
-      "size": [
-        560,
-        190
-      ],
-      "flags": {},
-      "order": 24,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [],
-      "title": "Notes",
-      "properties": {
-        "ue_properties": {
-          "widget_ue_connectable": {},
-          "version": "7.8",
-          "input_ue_unconnectable": {}
-        }
-      },
-      "widgets_values": [
-        "## Better image quality\n1st pass: turn ON the turbo (acceleration) LoRA, 1st pass 4 steps, 2nd pass 5 steps.\n\n## Stronger motion\n1st pass: turn OFF the turbo LoRA, turn ON the Remix Enhancer LoRA, 1st pass 8 steps, 2nd pass 5–6 steps."
-      ],
-      "widgets_values_named": {
-        "text": "## Better image quality\n1st pass: turn ON the turbo (acceleration) LoRA, 1st pass 4 steps, 2nd pass 5 steps.\n\n## Stronger motion\n1st pass: turn OFF the turbo LoRA, turn ON the Remix Enhancer LoRA, 1st pass 8 steps, 2nd pass 5–6 steps."
-      },
-      "color": "#150821",
-      "bgcolor": "#7b2cbf",
-      "textcolor": "#FFFFFF",
-      "extensions": {
-        "textcolor": "#FFFFFF"
-      }
-    },
-    {
       "id": 455,
       "type": "SetNode",
       "pos": [
@@ -6065,8 +5876,8 @@
         -271.65278145038855
       ],
       "size": [
-        308.6928500179165,
-        88
+        330,
+        112
       ],
       "flags": {},
       "order": 42,
@@ -7467,36 +7278,823 @@
     },
     {
       "id": 542,
-      "type": "MarkdownNote",
+      "type": "Note",
       "pos": [
-        -1224.18,
-        -51.69
+        440.34235081691895,
+        -1060
+      ],
+      "size": [
+        3734,
+        154
+      ],
+      "flags": {},
+      "order": 21,
+      "mode": 0,
+      "title": "Title",
+      "properties": {
+        "nb_title_board": {
+          "fontSize": 96,
+          "fontColor": "#ffffff",
+          "background": "",
+          "align": "left",
+          "bold": true,
+          "font": "yahei",
+          "italic": false,
+          "outline": false,
+          "shadow": false,
+          "effect": "aurora"
+        },
+        "text": "[MiniMax-H3 Remix] FeiHou Easy H3 Two-Stage High-Dynamic Workflow v8",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "8.0",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "[MiniMax-H3 Remix] FeiHou Easy H3 Two-Stage High-Dynamic Workflow v8"
+      ],
+      "widgets_values_named": {
+        "text": "[MiniMax-H3 Remix] FeiHou Easy H3 Two-Stage High-Dynamic Workflow v8"
+      },
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 543,
+      "type": "Note",
+      "pos": [
+        313.34235081691895,
+        -880
+      ],
+      "size": [
+        3988,
+        84
+      ],
+      "flags": {},
+      "order": 22,
+      "mode": 0,
+      "title": "Title",
+      "properties": {
+        "nb_title_board": {
+          "fontSize": 48,
+          "fontColor": "#ffffff",
+          "background": "",
+          "align": "left",
+          "bold": true,
+          "font": "yahei",
+          "italic": false,
+          "outline": false,
+          "shadow": false,
+          "effect": "jade"
+        },
+        "text": "[Multi-Image Ref] [Multi-Audio Ref] [Multi-Video Ref] [Image-to-Video] [Text-to-Video] [First/Last Frame] [Digital Human] [Character Replacement] [Video Editing]",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "8.0",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "[Multi-Image Ref] [Multi-Audio Ref] [Multi-Video Ref] [Image-to-Video] [Text-to-Video] [First/Last Frame] [Digital Human] [Character Replacement] [Video Editing]"
+      ],
+      "widgets_values_named": {
+        "text": "[Multi-Image Ref] [Multi-Audio Ref] [Multi-Video Ref] [Image-to-Video] [Text-to-Video] [First/Last Frame] [Digital Human] [Character Replacement] [Video Editing]"
+      },
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 544,
+      "type": "Note",
+      "pos": [
+        1539.342350816919,
+        -775
+      ],
+      "size": [
+        1536,
+        56
+      ],
+      "flags": {},
+      "order": 23,
+      "mode": 0,
+      "title": "Title",
+      "properties": {
+        "nb_title_board": {
+          "fontSize": 32,
+          "fontColor": "#ffffff",
+          "background": "",
+          "align": "left",
+          "bold": true,
+          "font": "yahei",
+          "italic": false,
+          "outline": false,
+          "shadow": false,
+          "effect": "champagne"
+        },
+        "text": "By: Xiao Fei Hou (三层楼的小肥猴)   WeChat: fx-feihou   LINE: fx-feihou   QQ group: 1091593367",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "8.0",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "By: Xiao Fei Hou (三层楼的小肥猴)   WeChat: fx-feihou   LINE: fx-feihou   QQ group: 1091593367"
+      ],
+      "widgets_values_named": {
+        "text": "By: Xiao Fei Hou (三层楼的小肥猴)   WeChat: fx-feihou   LINE: fx-feihou   QQ group: 1091593367"
+      },
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 545,
+      "type": "Note",
+      "pos": [
+        1033.342350816919,
+        -705
+      ],
+      "size": [
+        2548,
+        56
+      ],
+      "flags": {},
+      "order": 23,
+      "mode": 0,
+      "title": "Title",
+      "properties": {
+        "nb_title_board": {
+          "fontSize": 32,
+          "fontColor": "#ffffff",
+          "background": "",
+          "align": "left",
+          "bold": true,
+          "font": "yahei",
+          "italic": false,
+          "outline": false,
+          "shadow": false,
+          "effect": "champagne"
+        },
+        "text": "Bilibili: https://space.bilibili.com/389291683   YouTube: https://www.youtube.com/@ivever5   Civitai: https://civitai.com/models/2879272/minimax-h3-remix",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "8.0",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "Bilibili: https://space.bilibili.com/389291683   YouTube: https://www.youtube.com/@ivever5   Civitai: https://civitai.com/models/2879272/minimax-h3-remix"
+      ],
+      "widgets_values_named": {
+        "text": "Bilibili: https://space.bilibili.com/389291683   YouTube: https://www.youtube.com/@ivever5   Civitai: https://civitai.com/models/2879272/minimax-h3-remix"
+      },
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 546,
+      "type": "Note",
+      "pos": [
+        -1771.753773,
+        -605
       ],
       "size": [
         560,
-        1900
+        93
       ],
       "flags": {},
-      "order": 24,
+      "order": 90,
       "mode": 0,
-      "inputs": [],
-      "outputs": [],
-      "title": "How to Use & Contact",
+      "title": "Title",
+      "properties": {
+        "nb_title_board": {
+          "fontSize": 54,
+          "fontColor": "#ffffff",
+          "background": "",
+          "align": "left",
+          "bold": true,
+          "font": "yahei",
+          "italic": false,
+          "outline": false,
+          "shadow": false,
+          "effect": "sunset"
+        },
+        "text": "How to Use v8",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "8.0",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "How to Use v8"
+      ],
+      "widgets_values_named": {
+        "text": "How to Use v8"
+      },
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 547,
+      "type": "Note",
+      "pos": [
+        -1771.753773,
+        -464
+      ],
+      "size": [
+        560,
+        57
+      ],
+      "flags": {},
+      "order": 91,
+      "mode": 0,
+      "title": "Title",
+      "properties": {
+        "nb_title_board": {
+          "fontSize": 30,
+          "fontColor": "#ffffff",
+          "background": "",
+          "align": "left",
+          "bold": true,
+          "font": "yahei",
+          "italic": false,
+          "outline": false,
+          "shadow": false,
+          "effect": "jade"
+        },
+        "text": "🚀 Five Steps to Run",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "8.0",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "🚀 Five Steps to Run"
+      ],
+      "widgets_values_named": {
+        "text": "🚀 Five Steps to Run"
+      },
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 548,
+      "type": "MarkdownNote",
+      "pos": [
+        -1771.753773,
+        -369
+      ],
+      "size": [
+        560,
+        332
+      ],
+      "flags": {},
+      "order": 92,
+      "mode": 0,
+      "title": "🚀 Five Steps to Run",
       "properties": {
         "ue_properties": {
           "widget_ue_connectable": {},
           "version": "7.8",
           "input_ue_unconnectable": {}
+        },
+        "Node name for S&R": "MarkdownNote"
+      },
+      "widgets_values": [
+        "> 🎯 One workflow for image-to-video, text-to-video, first/last frame, digital humans, character replacement and video editing. The **1st pass** builds motion and composition; the **2nd pass** upscales the latent and refines detail.\n\n### ① 📦 Remix Loader\nPick the main model, text encoder, video VAE, audio VAE and the 2nd-pass upscaler.\n\n### ② 🖼️ Media\nAdd your references: images are `<Picture 1>`, `<Picture 2>`…, videos `<Video N>`, audio `<Audio N>`.\n\n### ③ ✍️ Setup\nKeep mode **参考生视频** (reference-to-video). Write the prompt (the H3 six-section format works best), pick resolution, aspect ratio and length.\n\n### ④ 🎚️ Settings\nSteps, seed and the audio switch: **true = original audio**, **false = generated audio**.\n\n### ⑤ ▶️ Click Run\nThe 1st-pass preview and the final video are saved to the output folder."
+      ],
+      "widgets_values_named": {
+        "text": "> 🎯 One workflow for image-to-video, text-to-video, first/last frame, digital humans, character replacement and video editing. The **1st pass** builds motion and composition; the **2nd pass** upscales the latent and refines detail.\n\n### ① 📦 Remix Loader\nPick the main model, text encoder, video VAE, audio VAE and the 2nd-pass upscaler.\n\n### ② 🖼️ Media\nAdd your references: images are `<Picture 1>`, `<Picture 2>`…, videos `<Video N>`, audio `<Audio N>`.\n\n### ③ ✍️ Setup\nKeep mode **参考生视频** (reference-to-video). Write the prompt (the H3 six-section format works best), pick resolution, aspect ratio and length.\n\n### ④ 🎚️ Settings\nSteps, seed and the audio switch: **true = original audio**, **false = generated audio**.\n\n### ⑤ ▶️ Click Run\nThe 1st-pass preview and the final video are saved to the output folder."
+      },
+      "color": "#232",
+      "bgcolor": "#353",
+      "textcolor": "#FFFFFF",
+      "extensions": {
+        "textcolor": "#FFFFFF"
+      }
+    },
+    {
+      "id": 549,
+      "type": "Note",
+      "pos": [
+        -1771.753773,
+        11
+      ],
+      "size": [
+        560,
+        57
+      ],
+      "flags": {},
+      "order": 93,
+      "mode": 0,
+      "title": "Title",
+      "properties": {
+        "nb_title_board": {
+          "fontSize": 30,
+          "fontColor": "#ffffff",
+          "background": "",
+          "align": "left",
+          "bold": true,
+          "font": "yahei",
+          "italic": false,
+          "outline": false,
+          "shadow": false,
+          "effect": "ice"
+        },
+        "text": "🎛️ Step Presets",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "8.0",
+          "input_ue_unconnectable": {}
         }
       },
       "widgets_values": [
-        "# How to Use — Two-Stage Sampling v8\n\nOne MiniMax-H3 Remix workflow for image-to-video, text-to-video, first/last-frame video, digital humans, character replacement and video editing, with up to several image, audio and video references. It samples twice: the **1st pass** builds motion and composition, the **2nd pass** upscales the latent and refines detail.\n\n## Steps\n1. **Remix Loader**: pick the Remix main model, text encoder, video VAE, audio VAE and the 2nd-pass latent upscaler. Put LoRAs in the 1st / 2nd pass LoRA stacks (see the tips above for two presets).\n2. **Media**: add your reference cards. Image 1, 2, 3… are `<Picture 1>`, `<Picture 2>`…; video cards are `<Video N>`, audio cards `<Audio N>`.\n3. **Setup**: mode **参考生视频** (reference-to-video) is the default. Write the prompt, choose resolution, aspect ratio and length. The H3 six-section prompt format works best (`subject_definitions`, `summary`, `retention_analysis`, `detailed_description`, `overall_soundscape`, `non_diegetic_music`).\n4. **Settings**: total steps / 1st pass steps / 2nd pass steps, the seed, and the audio switch: **true = keep the original audio** from your audio card, **false = audio generated by the model**.\n5. Click **Run**. The 1st-pass preview and the final video (with audio) are saved to the output folder, one sub-folder per day.\n\n## Optional groups (off by default)\nTurn them on with the **Fast Groups Bypasser** switches.\n- **Shot Prompts / Production Pack Loader**: run a shot md or a production pack shot by shot instead of the Setup prompt. 顺序生成 (sequential) runs every shot from the shot number on and queues the next one automatically; 手动设置 (manual) runs only the shots you list, e.g. `3`, `3-5` or `6,9`.\n- **RefMods Reference Pack Loader**: needs ComfyUI-MiniMaxH3Mod; muted by default.\n- **Face Refine** (experimental): re-renders faces after the 2nd pass. Images uploaded in **Upload Character Images** take priority over the Media images; with that group off it uses the first Media image.\n- **Continue & Merge Output**: continue a long video segment by segment. `latent` continues from the end of the 2nd pass, `images` from the end of Face Refine. Each segment is saved with its `.latent`, and the last one joins the full video.\n\n## Tips\n- Out of VRAM: lower the resolution in Setup, or shorten the clip.\n- An `unexpected keyword argument 'attention'` error: update ComfyUI-KJNodes.\n- After updating the nodes, restart ComfyUI and refresh the browser.\n\n## Required nodes\nComfyUI-FeiHou-Easy-H3, ComfyUI-FeiHou-Toolbox, ComfyUI-KJNodes, ComfyUI-VideoHelperSuite, rgthree-comfy (ComfyUI-MiniMaxH3Mod is optional). Models: see the cloud drive below or https://huggingface.co/Comfy-Org/MiniMax-H3.\n\n## 🐵 Xiao Fei Hou (三层楼的小肥猴)\n- 💬 **WeChat**: fx-feihou\n- 💬 **LINE**: fx-feihou\n- 👥 **QQ group**: 1091593367\n- 📺 **Bilibili**: https://space.bilibili.com/389291683\n- ▶️ **YouTube**: https://www.youtube.com/@ivever5\n- 🎨 **Civitai**: https://civitai.com/models/2879272/minimax-h3-remix\n- 🐙 **GitHub**: https://github.com/FX-FeiHou\n- 💿 **Cloud drive (models, LoRAs, assets)**: https://pan.quark.cn/s/27fe4727197b\n\nWhen you add me on WeChat or LINE, please say why (to join the group, or business)."
+        "🎛️ Step Presets"
       ],
       "widgets_values_named": {
-        "text": "# How to Use — Two-Stage Sampling v8\n\nOne MiniMax-H3 Remix workflow for image-to-video, text-to-video, first/last-frame video, digital humans, character replacement and video editing, with up to several image, audio and video references. It samples twice: the **1st pass** builds motion and composition, the **2nd pass** upscales the latent and refines detail.\n\n## Steps\n1. **Remix Loader**: pick the Remix main model, text encoder, video VAE, audio VAE and the 2nd-pass latent upscaler. Put LoRAs in the 1st / 2nd pass LoRA stacks (see the tips above for two presets).\n2. **Media**: add your reference cards. Image 1, 2, 3… are `<Picture 1>`, `<Picture 2>`…; video cards are `<Video N>`, audio cards `<Audio N>`.\n3. **Setup**: mode **参考生视频** (reference-to-video) is the default. Write the prompt, choose resolution, aspect ratio and length. The H3 six-section prompt format works best (`subject_definitions`, `summary`, `retention_analysis`, `detailed_description`, `overall_soundscape`, `non_diegetic_music`).\n4. **Settings**: total steps / 1st pass steps / 2nd pass steps, the seed, and the audio switch: **true = keep the original audio** from your audio card, **false = audio generated by the model**.\n5. Click **Run**. The 1st-pass preview and the final video (with audio) are saved to the output folder, one sub-folder per day.\n\n## Optional groups (off by default)\nTurn them on with the **Fast Groups Bypasser** switches.\n- **Shot Prompts / Production Pack Loader**: run a shot md or a production pack shot by shot instead of the Setup prompt. 顺序生成 (sequential) runs every shot from the shot number on and queues the next one automatically; 手动设置 (manual) runs only the shots you list, e.g. `3`, `3-5` or `6,9`.\n- **RefMods Reference Pack Loader**: needs ComfyUI-MiniMaxH3Mod; muted by default.\n- **Face Refine** (experimental): re-renders faces after the 2nd pass. Images uploaded in **Upload Character Images** take priority over the Media images; with that group off it uses the first Media image.\n- **Continue & Merge Output**: continue a long video segment by segment. `latent` continues from the end of the 2nd pass, `images` from the end of Face Refine. Each segment is saved with its `.latent`, and the last one joins the full video.\n\n## Tips\n- Out of VRAM: lower the resolution in Setup, or shorten the clip.\n- An `unexpected keyword argument 'attention'` error: update ComfyUI-KJNodes.\n- After updating the nodes, restart ComfyUI and refresh the browser.\n\n## Required nodes\nComfyUI-FeiHou-Easy-H3, ComfyUI-FeiHou-Toolbox, ComfyUI-KJNodes, ComfyUI-VideoHelperSuite, rgthree-comfy (ComfyUI-MiniMaxH3Mod is optional). Models: see the cloud drive below or https://huggingface.co/Comfy-Org/MiniMax-H3.\n\n## 🐵 Xiao Fei Hou (三层楼的小肥猴)\n- 💬 **WeChat**: fx-feihou\n- 💬 **LINE**: fx-feihou\n- 👥 **QQ group**: 1091593367\n- 📺 **Bilibili**: https://space.bilibili.com/389291683\n- ▶️ **YouTube**: https://www.youtube.com/@ivever5\n- 🎨 **Civitai**: https://civitai.com/models/2879272/minimax-h3-remix\n- 🐙 **GitHub**: https://github.com/FX-FeiHou\n- 💿 **Cloud drive (models, LoRAs, assets)**: https://pan.quark.cn/s/27fe4727197b\n\nWhen you add me on WeChat or LINE, please say why (to join the group, or business)."
+        "text": "🎛️ Step Presets"
       },
-      "color": "#150821",
-      "bgcolor": "#7b2cbf",
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 550,
+      "type": "MarkdownNote",
+      "pos": [
+        -1771.753773,
+        106
+      ],
+      "size": [
+        560,
+        108
+      ],
+      "flags": {},
+      "order": 94,
+      "mode": 0,
+      "title": "🎛️ Step Presets",
+      "properties": {
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        },
+        "Node name for S&R": "MarkdownNote"
+      },
+      "widgets_values": [
+        "| Goal | 1st pass LoRA | Steps 1st / 2nd |\n|---|---|---|\n| ✨ Better image quality | turbo LoRA **on** | 4 / 5 |\n| 💃 Stronger motion | turbo **off**, Remix Enhancer **on** | 8 / 5–6 |"
+      ],
+      "widgets_values_named": {
+        "text": "| Goal | 1st pass LoRA | Steps 1st / 2nd |\n|---|---|---|\n| ✨ Better image quality | turbo LoRA **on** | 4 / 5 |\n| 💃 Stronger motion | turbo **off**, Remix Enhancer **on** | 8 / 5–6 |"
+      },
+      "color": "#223",
+      "bgcolor": "#335",
+      "textcolor": "#FFFFFF",
+      "extensions": {
+        "textcolor": "#FFFFFF"
+      }
+    },
+    {
+      "id": 551,
+      "type": "Note",
+      "pos": [
+        -1771.753773,
+        262
+      ],
+      "size": [
+        560,
+        57
+      ],
+      "flags": {},
+      "order": 95,
+      "mode": 0,
+      "title": "Title",
+      "properties": {
+        "nb_title_board": {
+          "fontSize": 30,
+          "fontColor": "#ffffff",
+          "background": "",
+          "align": "left",
+          "bold": true,
+          "font": "yahei",
+          "italic": false,
+          "outline": false,
+          "shadow": false,
+          "effect": "gold"
+        },
+        "text": "🧩 Optional Groups",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "8.0",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "🧩 Optional Groups"
+      ],
+      "widgets_values_named": {
+        "text": "🧩 Optional Groups"
+      },
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 552,
+      "type": "MarkdownNote",
+      "pos": [
+        -1771.753773,
+        357
+      ],
+      "size": [
+        560,
+        152
+      ],
+      "flags": {},
+      "order": 96,
+      "mode": 0,
+      "title": "🧩 Optional Groups",
+      "properties": {
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        },
+        "Node name for S&R": "MarkdownNote"
+      },
+      "widgets_values": [
+        "Off by default; turn them on with the **Fast Groups Bypasser** switches.\n- 📄 **Shot Prompts / Production Pack**: run a shot md or a production pack shot by shot. 顺序生成 (sequential) runs every shot in order; 手动设置 (manual) runs only `3`, `3-5` or `6,9`.\n- 🎭 **RefMods**: needs ComfyUI-MiniMaxH3Mod.\n- 🙂 **Face Refine** (experimental): re-renders faces after the 2nd pass; images in **Upload Character Images** take priority over Media.\n- 🔗 **Continue & Merge Output**: continue a long video segment by segment (`latent` = from the 2nd pass, `images` = from Face Refine); the last segment joins the full video."
+      ],
+      "widgets_values_named": {
+        "text": "Off by default; turn them on with the **Fast Groups Bypasser** switches.\n- 📄 **Shot Prompts / Production Pack**: run a shot md or a production pack shot by shot. 顺序生成 (sequential) runs every shot in order; 手动设置 (manual) runs only `3`, `3-5` or `6,9`.\n- 🎭 **RefMods**: needs ComfyUI-MiniMaxH3Mod.\n- 🙂 **Face Refine** (experimental): re-renders faces after the 2nd pass; images in **Upload Character Images** take priority over Media.\n- 🔗 **Continue & Merge Output**: continue a long video segment by segment (`latent` = from the 2nd pass, `images` = from Face Refine); the last segment joins the full video."
+      },
+      "color": "#432",
+      "bgcolor": "#653",
+      "textcolor": "#FFFFFF",
+      "extensions": {
+        "textcolor": "#FFFFFF"
+      }
+    },
+    {
+      "id": 553,
+      "type": "Note",
+      "pos": [
+        -1771.753773,
+        557
+      ],
+      "size": [
+        560,
+        57
+      ],
+      "flags": {},
+      "order": 97,
+      "mode": 0,
+      "title": "Title",
+      "properties": {
+        "nb_title_board": {
+          "fontSize": 30,
+          "fontColor": "#ffffff",
+          "background": "",
+          "align": "left",
+          "bold": true,
+          "font": "yahei",
+          "italic": false,
+          "outline": false,
+          "shadow": false,
+          "effect": "rosegold"
+        },
+        "text": "⚠️ Notes",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "8.0",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "⚠️ Notes"
+      ],
+      "widgets_values_named": {
+        "text": "⚠️ Notes"
+      },
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 554,
+      "type": "MarkdownNote",
+      "pos": [
+        -1771.753773,
+        652
+      ],
+      "size": [
+        560,
+        76
+      ],
+      "flags": {},
+      "order": 98,
+      "mode": 0,
+      "title": "⚠️ Notes",
+      "properties": {
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        },
+        "Node name for S&R": "MarkdownNote"
+      },
+      "widgets_values": [
+        "- 💾 Out of VRAM: lower the Setup **resolution** or shorten the clip.\n- 🛠️ `unexpected keyword argument 'attention'` or Sage Attention errors: **update KJNodes**.\n- 🔄 After updating the nodes, **restart ComfyUI** and refresh the browser."
+      ],
+      "widgets_values_named": {
+        "text": "- 💾 Out of VRAM: lower the Setup **resolution** or shorten the clip.\n- 🛠️ `unexpected keyword argument 'attention'` or Sage Attention errors: **update KJNodes**.\n- 🔄 After updating the nodes, **restart ComfyUI** and refresh the browser."
+      },
+      "color": "#322",
+      "bgcolor": "#533",
+      "textcolor": "#FFFFFF",
+      "extensions": {
+        "textcolor": "#FFFFFF"
+      }
+    },
+    {
+      "id": 555,
+      "type": "Note",
+      "pos": [
+        -1155.753773,
+        -605
+      ],
+      "size": [
+        480,
+        93
+      ],
+      "flags": {},
+      "order": 99,
+      "mode": 0,
+      "title": "Title",
+      "properties": {
+        "nb_title_board": {
+          "fontSize": 54,
+          "fontColor": "#ffffff",
+          "background": "",
+          "align": "left",
+          "bold": true,
+          "font": "yahei",
+          "italic": false,
+          "outline": false,
+          "shadow": false,
+          "effect": "aurora"
+        },
+        "text": "Downloads & Contact",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "8.0",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "Downloads & Contact"
+      ],
+      "widgets_values_named": {
+        "text": "Downloads & Contact"
+      },
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 556,
+      "type": "Note",
+      "pos": [
+        -1155.753773,
+        -464
+      ],
+      "size": [
+        480,
+        57
+      ],
+      "flags": {},
+      "order": 100,
+      "mode": 0,
+      "title": "Title",
+      "properties": {
+        "nb_title_board": {
+          "fontSize": 30,
+          "fontColor": "#ffffff",
+          "background": "",
+          "align": "left",
+          "bold": true,
+          "font": "yahei",
+          "italic": false,
+          "outline": false,
+          "shadow": false,
+          "effect": "sunset"
+        },
+        "text": "💿 Models & LoRAs",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "8.0",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "💿 Models & LoRAs"
+      ],
+      "widgets_values_named": {
+        "text": "💿 Models & LoRAs"
+      },
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 557,
+      "type": "MarkdownNote",
+      "pos": [
+        -1155.753773,
+        -369
+      ],
+      "size": [
+        480,
+        275
+      ],
+      "flags": {},
+      "order": 101,
+      "mode": 0,
+      "title": "💿 Models & LoRAs",
+      "properties": {
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        },
+        "Node name for S&R": "MarkdownNote"
+      },
+      "widgets_values": [
+        "> 📁 Everything is on my cloud drive: [https://pan.quark.cn/s/27fe4727197b](https://pan.quark.cn/s/27fe4727197b)\n> 🎨 MiniMax-H3 Remix is also on [Civitai](https://civitai.com/models/2879272/minimax-h3-remix)\n\n| Model | Folder |\n|---|---|\n| 🧠 Remix main model | `diffusion_models/MiniMax-H3/` |\n| 📝 Text encoder `qwen3vl_32b…int8_convrot` | `clip/` |\n| 🎞️ Video VAE + audio VAE | `vae/` |\n| 🎛️ Turbo LoRA, Remix Enhancer LoRA | `loras/H3/` |\n| 🔍 `minimax_h3_latent_upscaler_3d_bf16` | `latent_upscale_models/` |\n\nOfficial files: [Comfy-Org/MiniMax-H3](https://huggingface.co/Comfy-Org/MiniMax-H3) · Turbo LoRA: [lightx2v/Minimax-h3-Turbo](https://huggingface.co/lightx2v/Minimax-h3-Turbo) · Remix: [FX-FeiHou/MiniMax-H3-Remix](https://huggingface.co/FX-FeiHou/MiniMax-H3-Remix)\n\n*Press R to refresh after adding models; if a file name differs, pick it again in its loader.*"
+      ],
+      "widgets_values_named": {
+        "text": "> 📁 Everything is on my cloud drive: [https://pan.quark.cn/s/27fe4727197b](https://pan.quark.cn/s/27fe4727197b)\n> 🎨 MiniMax-H3 Remix is also on [Civitai](https://civitai.com/models/2879272/minimax-h3-remix)\n\n| Model | Folder |\n|---|---|\n| 🧠 Remix main model | `diffusion_models/MiniMax-H3/` |\n| 📝 Text encoder `qwen3vl_32b…int8_convrot` | `clip/` |\n| 🎞️ Video VAE + audio VAE | `vae/` |\n| 🎛️ Turbo LoRA, Remix Enhancer LoRA | `loras/H3/` |\n| 🔍 `minimax_h3_latent_upscaler_3d_bf16` | `latent_upscale_models/` |\n\nOfficial files: [Comfy-Org/MiniMax-H3](https://huggingface.co/Comfy-Org/MiniMax-H3) · Turbo LoRA: [lightx2v/Minimax-h3-Turbo](https://huggingface.co/lightx2v/Minimax-h3-Turbo) · Remix: [FX-FeiHou/MiniMax-H3-Remix](https://huggingface.co/FX-FeiHou/MiniMax-H3-Remix)\n\n*Press R to refresh after adding models; if a file name differs, pick it again in its loader.*"
+      },
+      "color": "#323",
+      "bgcolor": "#535",
+      "textcolor": "#FFFFFF",
+      "extensions": {
+        "textcolor": "#FFFFFF"
+      }
+    },
+    {
+      "id": 558,
+      "type": "Note",
+      "pos": [
+        -1155.753773,
+        -46
+      ],
+      "size": [
+        480,
+        57
+      ],
+      "flags": {},
+      "order": 102,
+      "mode": 0,
+      "title": "Title",
+      "properties": {
+        "nb_title_board": {
+          "fontSize": 30,
+          "fontColor": "#ffffff",
+          "background": "",
+          "align": "left",
+          "bold": true,
+          "font": "yahei",
+          "italic": false,
+          "outline": false,
+          "shadow": false,
+          "effect": "neon"
+        },
+        "text": "🧩 Required Nodes",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "8.0",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "🧩 Required Nodes"
+      ],
+      "widgets_values_named": {
+        "text": "🧩 Required Nodes"
+      },
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 559,
+      "type": "MarkdownNote",
+      "pos": [
+        -1155.753773,
+        49
+      ],
+      "size": [
+        480,
+        152
+      ],
+      "flags": {},
+      "order": 103,
+      "mode": 0,
+      "title": "🧩 Required Nodes",
+      "properties": {
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        },
+        "Node name for S&R": "MarkdownNote"
+      },
+      "widgets_values": [
+        "- 🧩 **FeiHou-Easy-H3**: [https://github.com/FX-FeiHou/ComfyUI-FeiHou-Easy-H3](https://github.com/FX-FeiHou/ComfyUI-FeiHou-Easy-H3)\n- 🧰 **FeiHou-Toolbox**: [https://github.com/FX-FeiHou/ComfyUI-FeiHou-Toolbox](https://github.com/FX-FeiHou/ComfyUI-FeiHou-Toolbox)\n- 🔧 **ComfyUI-KJNodes**: [https://github.com/kijai/ComfyUI-KJNodes](https://github.com/kijai/ComfyUI-KJNodes)\n- 🎬 **ComfyUI-VideoHelperSuite**: [https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite](https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite)\n- 🏷️ **rgthree-comfy** (group switches); **ComfyUI-MiniMaxH3Mod** is optional\n\n✅ **Update them to the latest version** and restart ComfyUI. You can also install them from ComfyUI Manager."
+      ],
+      "widgets_values_named": {
+        "text": "- 🧩 **FeiHou-Easy-H3**: [https://github.com/FX-FeiHou/ComfyUI-FeiHou-Easy-H3](https://github.com/FX-FeiHou/ComfyUI-FeiHou-Easy-H3)\n- 🧰 **FeiHou-Toolbox**: [https://github.com/FX-FeiHou/ComfyUI-FeiHou-Toolbox](https://github.com/FX-FeiHou/ComfyUI-FeiHou-Toolbox)\n- 🔧 **ComfyUI-KJNodes**: [https://github.com/kijai/ComfyUI-KJNodes](https://github.com/kijai/ComfyUI-KJNodes)\n- 🎬 **ComfyUI-VideoHelperSuite**: [https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite](https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite)\n- 🏷️ **rgthree-comfy** (group switches); **ComfyUI-MiniMaxH3Mod** is optional\n\n✅ **Update them to the latest version** and restart ComfyUI. You can also install them from ComfyUI Manager."
+      },
+      "color": "#233",
+      "bgcolor": "#355",
+      "textcolor": "#FFFFFF",
+      "extensions": {
+        "textcolor": "#FFFFFF"
+      }
+    },
+    {
+      "id": 560,
+      "type": "Note",
+      "pos": [
+        -1155.753773,
+        249
+      ],
+      "size": [
+        480,
+        57
+      ],
+      "flags": {},
+      "order": 104,
+      "mode": 0,
+      "title": "Title",
+      "properties": {
+        "nb_title_board": {
+          "fontSize": 30,
+          "fontColor": "#ffffff",
+          "background": "",
+          "align": "left",
+          "bold": true,
+          "font": "yahei",
+          "italic": false,
+          "outline": false,
+          "shadow": false,
+          "effect": "champagne"
+        },
+        "text": "👧 Xiao Fei Hou",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "8.0",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "👧 Xiao Fei Hou"
+      ],
+      "widgets_values_named": {
+        "text": "👧 Xiao Fei Hou"
+      },
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 561,
+      "type": "MarkdownNote",
+      "pos": [
+        -1155.753773,
+        344
+      ],
+      "size": [
+        480,
+        154
+      ],
+      "flags": {},
+      "order": 105,
+      "mode": 0,
+      "title": "👧 Xiao Fei Hou",
+      "properties": {
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        },
+        "Node name for S&R": "MarkdownNote"
+      },
+      "widgets_values": [
+        "- 💬 **WeChat**: fx-feihou\n- 💬 **LINE**: fx-feihou\n- 👥 **QQ group**: 1091593367\n- 📺 **Bilibili**: [https://space.bilibili.com/389291683](https://space.bilibili.com/389291683)\n- ▶️ **YouTube**: [https://www.youtube.com/@ivever5](https://www.youtube.com/@ivever5)\n- 🎨 **Civitai**: [https://civitai.com/models/2879272/minimax-h3-remix](https://civitai.com/models/2879272/minimax-h3-remix)\n- 🐙 **GitHub**: [https://github.com/FX-FeiHou](https://github.com/FX-FeiHou)\n\n*When you add me on WeChat or LINE, please say why (to join the group, or business).*"
+      ],
+      "widgets_values_named": {
+        "text": "- 💬 **WeChat**: fx-feihou\n- 💬 **LINE**: fx-feihou\n- 👥 **QQ group**: 1091593367\n- 📺 **Bilibili**: [https://space.bilibili.com/389291683](https://space.bilibili.com/389291683)\n- ▶️ **YouTube**: [https://www.youtube.com/@ivever5](https://www.youtube.com/@ivever5)\n- 🎨 **Civitai**: [https://civitai.com/models/2879272/minimax-h3-remix](https://civitai.com/models/2879272/minimax-h3-remix)\n- 🐙 **GitHub**: [https://github.com/FX-FeiHou](https://github.com/FX-FeiHou)\n\n*When you add me on WeChat or LINE, please say why (to join the group, or business).*"
+      },
+      "color": "#232",
+      "bgcolor": "#353",
       "textcolor": "#FFFFFF",
       "extensions": {
         "textcolor": "#FFFFFF"

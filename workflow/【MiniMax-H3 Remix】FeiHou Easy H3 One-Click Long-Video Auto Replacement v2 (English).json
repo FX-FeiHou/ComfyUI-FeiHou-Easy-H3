@@ -1,7 +1,7 @@
 {
   "id": "1c0a67f7-2ae6-4cff-a6f6-1245662e5fe6",
   "revision": 0,
-  "last_node_id": 651,
+  "last_node_id": 670,
   "last_link_id": 1048,
   "nodes": [
     {
@@ -2615,8 +2615,8 @@
         1347.086044194066
       ],
       "size": [
-        351.83331909179685,
-        959.5289601201596
+        352,
+        360
       ],
       "flags": {},
       "order": 54,
@@ -2761,7 +2761,7 @@
           "links": []
         }
       ],
-      "title": "Final Video (one clip per block; the last block joins the full video)",
+      "title": "Final Video",
       "properties": {
         "cnr_id": "feihou-toolbox",
         "ver": "f9edc9a0e03250478d92149248bddfd0115784fb",
@@ -4013,77 +4013,6 @@
       "bgcolor": "#215d5e"
     },
     {
-      "id": 538,
-      "type": "MarkdownNote",
-      "pos": [
-        313.7860202437909,
-        -157.58048426515904
-      ],
-      "size": [
-        560,
-        3040
-      ],
-      "flags": {},
-      "order": 24,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [],
-      "title": "How to Use (v2)",
-      "properties": {
-        "Node name for S&R": "MarkdownNote",
-        "ue_properties": {
-          "widget_ue_connectable": {},
-          "version": "8.0",
-          "input_ue_unconnectable": {}
-        }
-      },
-      "widgets_values": [
-        "# How to Use (v2)\n\nUpload a character image and the original video, then give it a **shot md**: the person in the video becomes your character. The workflow renders the md block by block and joins everything into one long video. The original motion, camera, background and sound are kept.\n\n## 1. Prepare\n1. **Character image**: a multi-view sheet works best (half-body close-up on the left; front, side and back full body on the right; clean background). One clear full-body photo also works.\n2. **Original video**: 24 fps is best. Media reads it at 720P by default, no need to compress it yourself.\n3. **Shot md**: one block per shot, saying which part of the video it covers, which images it uses and its prompt. The easiest way is to let an AI agent with the `feihou-h3-motion-ultra` skill write it (see the `skills` folder of this repo).\n\n## 2. Run\n1. **Remix Loader**: main model, text encoder, video VAE and audio VAE are selected.\n2. **1st Pass LoRA**: the turbo LoRA is on (two presets in the Notes node).\n3. **Media**: image 1 = character image, video 1 = original video. More references go to image 2, 3…, used with `@pictures` in the md.\n4. **Shot Prompts**: drag the md onto the node, click the md file button, or paste the whole md into the text box. After editing the md file, click **refresh prompts**.\n   - **start = 顺序生成 (sequential)**: one click runs every block from the shot number on and queues the next block automatically. If it stops midway, click Run again without changing anything and it resumes. Set the shot number to 0 or 1 to rerun the whole film, or to another number to start from that block.\n   - **start = 手动设置 (manual)**: runs only the listed shots, e.g. `3`, `3-5` or `6,9`.\n5. **Setup**: keep mode **参考生视频**. Pick the resolution. With a shot md connected, **prompt, length and aspect come from the md** (header `@aspect`), so the Setup prompt box can stay empty.\n6. **Settings**: total / 1st pass / 2nd pass steps.\n7. **Click Run once and wait.** When every block is done, the **Final Video** node outputs the joined video (dated folders in the output directory).\n\n## 3. Shot md basics\n- Each block starts with `===== FEIHOU_SHOT 01 =====`, numbered 01, 02, 03…\n- `@range 00:00.00-00:02.25`: the part of the original video (min:sec.hundredths). Cut at the edits of the original video, one shot per block.\n- `@pictures 1,2`: image cards used by this block.\n- `@sound source` keeps the original sound; `@sound generated` uses audio made by the model.\n- `@continue`: the block continues from the end of the previous one (a long shot split in two).\n- `@segment …` (header or block) sets how the block is sampled, e.g. `@segment context,window=192,overlap=39,chunk=30`.\n- Then the six-section prompt. `<Picture 1>` = character image, `<Video 1>` = original video, `<Audio 1>` = its sound. Describe the character's hair, clothes, shoes and accessories, who in the video is replaced, and the light and colour of the shot so the character blends in.\n\nTemplate:\n```\n# Character replacement\n@fps 24\n@aspect 16:9\n\n===== FEIHOU_SHOT 01 =====\n@range 00:00.00-00:03.50\n@pictures 1\n@sound source\nsubject_definitions:\n<Subject 1> is the person in <Picture 1>: face, hair, clothes, shoes and accessories all follow <Picture 1>.\n<Subject 2> is the full body motion and facial performance of (the person in the video) in <Video 1>, performed by <Subject 1>.\n<Audio 1> is the original sound of <Video 1>.\n\nsummary:\n[video editing + audio reuse] (The person) in <Video 1> becomes <Subject 1>; motion follows the video, scene and camera stay the same.\n\nretention_analysis:\n<Subject 1>: fully_preserved - looks, hair and clothes come from <Picture 1>.\n<Video 1>: weak_reference - scene, light, colour, camera position, framing, camera moves and rhythm.\n<Subject 2>: attribute_transfer - motion, expressions and gaze are performed by <Subject 1>.\n<Audio 1>: partially_copy - the original sound.\n\ndetailed_description:\n[Shot 1] From the first frame, (the person) in <Video 1> is replaced by <Subject 1>, head to toe as in <Picture 1>. (Describe motion, light and colour.) Scene, light, framing and camera stay as in the video.\n\noverall_soundscape:\nThe original sound of <Audio 1>.\n\nnon_diegetic_music:\nThe music in <Audio 1>, on its original timing.\n```\n\n## 4. H3 Motion Transfer Preprocess\n- **mode = 自动 (auto)** follows each block's `@mode`. Remake character swap needs `@mode swap` in the md header and the Viggle Remake swap LoRA; without `@mode` nothing is swapped or blurred.\n- **face blur = 自动 (auto)** picks the blur level from the face size; a block's `@face_blur 1–5` overrides it.\n\n## 5. Motion Segment\n- **sampler / scheduler**: euler + simple.\n- **reference_soundtrack**: 送入模型 (sent to the model) = the original sound guides lip sync and timing; 不送入模型 = motion only, saves VRAM.\n- **segmentation**: 自动 (auto) follows the md `@segment` (whole block when none); 不分段 = whole block at once; 帧窗口 (frame windows) = fast, segment after segment, quality drops after 2–3 segments; 上下文窗口 (context windows) = slower, no quality loss on long blocks.\n- **segment_frames / overlap_frames**: segment or window length and overlap. **Out of VRAM: lower them.**\n- **context_segment**: the longest stretch of a context-window block sampled per run (default 30 秒).\n\n## 6. Motion Collect\n- **audio_output**: 自动 (auto) follows each block's `@sound`; or force original / generated audio for every block.\n- **auto_queue**: queues the next block automatically. **Keep it on.**\n- **color_match**: matches colours to the original video; turn it on if the colours drift.\n- **save_segments**: also saves every segment as its own video.\n\n## 7. Troubleshooting\n- \"Shot Prompts has no content\": no md in the Shot Prompts node.\n- \"missing @range\" / \"@range must be start-end\": check the time format, e.g. `00:03.08-00:07.21`.\n- Out of VRAM: lower the Setup resolution or the segment frames.\n- The character's colours don't match: describe the shot's light and colour in `detailed_description`, or turn on color_match."
-      ],
-      "widgets_values_named": {
-        "text": "# How to Use (v2)\n\nUpload a character image and the original video, then give it a **shot md**: the person in the video becomes your character. The workflow renders the md block by block and joins everything into one long video. The original motion, camera, background and sound are kept.\n\n## 1. Prepare\n1. **Character image**: a multi-view sheet works best (half-body close-up on the left; front, side and back full body on the right; clean background). One clear full-body photo also works.\n2. **Original video**: 24 fps is best. Media reads it at 720P by default, no need to compress it yourself.\n3. **Shot md**: one block per shot, saying which part of the video it covers, which images it uses and its prompt. The easiest way is to let an AI agent with the `feihou-h3-motion-ultra` skill write it (see the `skills` folder of this repo).\n\n## 2. Run\n1. **Remix Loader**: main model, text encoder, video VAE and audio VAE are selected.\n2. **1st Pass LoRA**: the turbo LoRA is on (two presets in the Notes node).\n3. **Media**: image 1 = character image, video 1 = original video. More references go to image 2, 3…, used with `@pictures` in the md.\n4. **Shot Prompts**: drag the md onto the node, click the md file button, or paste the whole md into the text box. After editing the md file, click **refresh prompts**.\n   - **start = 顺序生成 (sequential)**: one click runs every block from the shot number on and queues the next block automatically. If it stops midway, click Run again without changing anything and it resumes. Set the shot number to 0 or 1 to rerun the whole film, or to another number to start from that block.\n   - **start = 手动设置 (manual)**: runs only the listed shots, e.g. `3`, `3-5` or `6,9`.\n5. **Setup**: keep mode **参考生视频**. Pick the resolution. With a shot md connected, **prompt, length and aspect come from the md** (header `@aspect`), so the Setup prompt box can stay empty.\n6. **Settings**: total / 1st pass / 2nd pass steps.\n7. **Click Run once and wait.** When every block is done, the **Final Video** node outputs the joined video (dated folders in the output directory).\n\n## 3. Shot md basics\n- Each block starts with `===== FEIHOU_SHOT 01 =====`, numbered 01, 02, 03…\n- `@range 00:00.00-00:02.25`: the part of the original video (min:sec.hundredths). Cut at the edits of the original video, one shot per block.\n- `@pictures 1,2`: image cards used by this block.\n- `@sound source` keeps the original sound; `@sound generated` uses audio made by the model.\n- `@continue`: the block continues from the end of the previous one (a long shot split in two).\n- `@segment …` (header or block) sets how the block is sampled, e.g. `@segment context,window=192,overlap=39,chunk=30`.\n- Then the six-section prompt. `<Picture 1>` = character image, `<Video 1>` = original video, `<Audio 1>` = its sound. Describe the character's hair, clothes, shoes and accessories, who in the video is replaced, and the light and colour of the shot so the character blends in.\n\nTemplate:\n```\n# Character replacement\n@fps 24\n@aspect 16:9\n\n===== FEIHOU_SHOT 01 =====\n@range 00:00.00-00:03.50\n@pictures 1\n@sound source\nsubject_definitions:\n<Subject 1> is the person in <Picture 1>: face, hair, clothes, shoes and accessories all follow <Picture 1>.\n<Subject 2> is the full body motion and facial performance of (the person in the video) in <Video 1>, performed by <Subject 1>.\n<Audio 1> is the original sound of <Video 1>.\n\nsummary:\n[video editing + audio reuse] (The person) in <Video 1> becomes <Subject 1>; motion follows the video, scene and camera stay the same.\n\nretention_analysis:\n<Subject 1>: fully_preserved - looks, hair and clothes come from <Picture 1>.\n<Video 1>: weak_reference - scene, light, colour, camera position, framing, camera moves and rhythm.\n<Subject 2>: attribute_transfer - motion, expressions and gaze are performed by <Subject 1>.\n<Audio 1>: partially_copy - the original sound.\n\ndetailed_description:\n[Shot 1] From the first frame, (the person) in <Video 1> is replaced by <Subject 1>, head to toe as in <Picture 1>. (Describe motion, light and colour.) Scene, light, framing and camera stay as in the video.\n\noverall_soundscape:\nThe original sound of <Audio 1>.\n\nnon_diegetic_music:\nThe music in <Audio 1>, on its original timing.\n```\n\n## 4. H3 Motion Transfer Preprocess\n- **mode = 自动 (auto)** follows each block's `@mode`. Remake character swap needs `@mode swap` in the md header and the Viggle Remake swap LoRA; without `@mode` nothing is swapped or blurred.\n- **face blur = 自动 (auto)** picks the blur level from the face size; a block's `@face_blur 1–5` overrides it.\n\n## 5. Motion Segment\n- **sampler / scheduler**: euler + simple.\n- **reference_soundtrack**: 送入模型 (sent to the model) = the original sound guides lip sync and timing; 不送入模型 = motion only, saves VRAM.\n- **segmentation**: 自动 (auto) follows the md `@segment` (whole block when none); 不分段 = whole block at once; 帧窗口 (frame windows) = fast, segment after segment, quality drops after 2–3 segments; 上下文窗口 (context windows) = slower, no quality loss on long blocks.\n- **segment_frames / overlap_frames**: segment or window length and overlap. **Out of VRAM: lower them.**\n- **context_segment**: the longest stretch of a context-window block sampled per run (default 30 秒).\n\n## 6. Motion Collect\n- **audio_output**: 自动 (auto) follows each block's `@sound`; or force original / generated audio for every block.\n- **auto_queue**: queues the next block automatically. **Keep it on.**\n- **color_match**: matches colours to the original video; turn it on if the colours drift.\n- **save_segments**: also saves every segment as its own video.\n\n## 7. Troubleshooting\n- \"Shot Prompts has no content\": no md in the Shot Prompts node.\n- \"missing @range\" / \"@range must be start-end\": check the time format, e.g. `00:03.08-00:07.21`.\n- Out of VRAM: lower the Setup resolution or the segment frames.\n- The character's colours don't match: describe the shot's light and colour in `detailed_description`, or turn on color_match."
-      },
-      "color": "#432",
-      "bgcolor": "#653"
-    },
-    {
-      "id": 610,
-      "type": "MarkdownNote",
-      "pos": [
-        929.595621540516,
-        -157.58048426515904
-      ],
-      "size": [
-        480,
-        1690
-      ],
-      "flags": {},
-      "order": 25,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [],
-      "title": "Downloads: Nodes and Models",
-      "properties": {
-        "ue_properties": {
-          "widget_ue_connectable": {},
-          "version": "7.8",
-          "input_ue_unconnectable": {}
-        }
-      },
-      "widgets_values": [
-        "# Downloads: Nodes and Models\n\n## Required nodes (restart ComfyUI after installing)\n- **ComfyUI-FeiHou-Easy-H3**: this node pack — https://github.com/FX-FeiHou/ComfyUI-FeiHou-Easy-H3\n- **ComfyUI-FeiHou-Toolbox**: https://github.com/FX-FeiHou/ComfyUI-FeiHou-Toolbox\n- **ComfyUI-KJNodes**: https://github.com/kijai/ComfyUI-KJNodes (keep it up to date; old versions fail with `unexpected keyword argument 'attention'`)\n- **ComfyUI-VideoHelperSuite**: https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite\n\nYou can also search for them in ComfyUI Manager.\n\n## Models\nEverything below is on my cloud drive: https://pan.quark.cn/s/27fe4727197b\nMiniMax-H3 Remix is also on Civitai: https://civitai.com/models/2879272/minimax-h3-remix\n\n### Main model → `models/diffusion_models/MiniMax-H3/`\n- `FeiHou_MiniMax-H3_Remix_HSA_v0.7.safetensors` (cloud drive)\n- Newer alternative: https://huggingface.co/FX-FeiHou/MiniMax-H3-Remix (`FeiHou_MiniMax-H3_Remix_HSA_turbo_v0.8_int8_convrotHQ.safetensors`)\n\n### Text encoder → `models/clip/`\n- `qwen3vl_32b_minimax_h3_int8_convrot_uncensored.safetensors` (cloud drive)\n- Official alternative: https://huggingface.co/Comfy-Org/MiniMax-H3 (`text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors`)\n\n### VAE → `models/vae/`\n- `minimax_h3_video_vae_fp16.safetensors`, `minimax_h3_audio_vae_fp32.safetensors` — https://huggingface.co/Comfy-Org/MiniMax-H3 (`vae/`)\n\n### LoRA → `models/loras/H3/`\n- `minimax_h3_ref2v_turbo_8step_v1.1_768p_comfyui_bf16.safetensors` — https://huggingface.co/lightx2v/Minimax-h3-Turbo\n- `FeiHou_H3_Remix_Enhancer_v1.safetensors` (the Remix Enhancer LoRA in the step tips; cloud drive)\n\n### 2nd-pass upscaler → `models/latent_upscale_models/`\n- `minimax_h3_latent_upscaler_3d_bf16.safetensors` (cloud drive)\n\nPress R to refresh after adding models. If a file name differs, pick it again in the loader.\n\n## 🐵 Xiao Fei Hou (三层楼的小肥猴)\n- 💬 **WeChat**: fx-feihou\n- 💬 **LINE**: fx-feihou\n- 👥 **QQ group**: 1091593367\n- 📺 **Bilibili**: https://space.bilibili.com/389291683\n- ▶️ **YouTube**: https://www.youtube.com/@ivever5\n- 🎨 **Civitai**: https://civitai.com/models/2879272/minimax-h3-remix\n- 🐙 **GitHub**: https://github.com/FX-FeiHou\n- 💿 **Cloud drive (models, LoRAs, assets)**: https://pan.quark.cn/s/27fe4727197b\n\nWhen you add me on WeChat or LINE, please say why (to join the group, or business)."
-      ],
-      "widgets_values_named": {
-        "text": "# Downloads: Nodes and Models\n\n## Required nodes (restart ComfyUI after installing)\n- **ComfyUI-FeiHou-Easy-H3**: this node pack — https://github.com/FX-FeiHou/ComfyUI-FeiHou-Easy-H3\n- **ComfyUI-FeiHou-Toolbox**: https://github.com/FX-FeiHou/ComfyUI-FeiHou-Toolbox\n- **ComfyUI-KJNodes**: https://github.com/kijai/ComfyUI-KJNodes (keep it up to date; old versions fail with `unexpected keyword argument 'attention'`)\n- **ComfyUI-VideoHelperSuite**: https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite\n\nYou can also search for them in ComfyUI Manager.\n\n## Models\nEverything below is on my cloud drive: https://pan.quark.cn/s/27fe4727197b\nMiniMax-H3 Remix is also on Civitai: https://civitai.com/models/2879272/minimax-h3-remix\n\n### Main model → `models/diffusion_models/MiniMax-H3/`\n- `FeiHou_MiniMax-H3_Remix_HSA_v0.7.safetensors` (cloud drive)\n- Newer alternative: https://huggingface.co/FX-FeiHou/MiniMax-H3-Remix (`FeiHou_MiniMax-H3_Remix_HSA_turbo_v0.8_int8_convrotHQ.safetensors`)\n\n### Text encoder → `models/clip/`\n- `qwen3vl_32b_minimax_h3_int8_convrot_uncensored.safetensors` (cloud drive)\n- Official alternative: https://huggingface.co/Comfy-Org/MiniMax-H3 (`text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors`)\n\n### VAE → `models/vae/`\n- `minimax_h3_video_vae_fp16.safetensors`, `minimax_h3_audio_vae_fp32.safetensors` — https://huggingface.co/Comfy-Org/MiniMax-H3 (`vae/`)\n\n### LoRA → `models/loras/H3/`\n- `minimax_h3_ref2v_turbo_8step_v1.1_768p_comfyui_bf16.safetensors` — https://huggingface.co/lightx2v/Minimax-h3-Turbo\n- `FeiHou_H3_Remix_Enhancer_v1.safetensors` (the Remix Enhancer LoRA in the step tips; cloud drive)\n\n### 2nd-pass upscaler → `models/latent_upscale_models/`\n- `minimax_h3_latent_upscaler_3d_bf16.safetensors` (cloud drive)\n\nPress R to refresh after adding models. If a file name differs, pick it again in the loader.\n\n## 🐵 Xiao Fei Hou (三层楼的小肥猴)\n- 💬 **WeChat**: fx-feihou\n- 💬 **LINE**: fx-feihou\n- 👥 **QQ group**: 1091593367\n- 📺 **Bilibili**: https://space.bilibili.com/389291683\n- ▶️ **YouTube**: https://www.youtube.com/@ivever5\n- 🎨 **Civitai**: https://civitai.com/models/2879272/minimax-h3-remix\n- 🐙 **GitHub**: https://github.com/FX-FeiHou\n- 💿 **Cloud drive (models, LoRAs, assets)**: https://pan.quark.cn/s/27fe4727197b\n\nWhen you add me on WeChat or LINE, please say why (to join the group, or business)."
-      },
-      "color": "#223",
-      "bgcolor": "#335",
-      "textcolor": "#FFFFFF",
-      "extensions": {
-        "textcolor": "#FFFFFF"
-      }
-    },
-    {
       "id": 617,
       "type": "FeiHouEasyH3PromptPreview",
       "pos": [
@@ -4358,7 +4287,7 @@
       ],
       "size": [
         292.5289527815951,
-        727
+        420
       ],
       "flags": {},
       "order": 36,
@@ -4484,6 +4413,734 @@
       },
       "color": "#0b161e",
       "bgcolor": "#3f7cac"
+    },
+    {
+      "id": 652,
+      "type": "Note",
+      "pos": [
+        313.79,
+        -157.58
+      ],
+      "size": [
+        560,
+        93
+      ],
+      "flags": {},
+      "order": 57,
+      "mode": 0,
+      "title": "Title",
+      "properties": {
+        "nb_title_board": {
+          "fontSize": 54,
+          "fontColor": "#ffffff",
+          "background": "",
+          "align": "left",
+          "bold": true,
+          "font": "yahei",
+          "italic": false,
+          "outline": false,
+          "shadow": false,
+          "effect": "sunset"
+        },
+        "text": "How to Use v2",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "8.0",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "How to Use v2"
+      ],
+      "widgets_values_named": {
+        "text": "How to Use v2"
+      },
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 653,
+      "type": "Note",
+      "pos": [
+        313.79,
+        -16.580000000000013
+      ],
+      "size": [
+        560,
+        57
+      ],
+      "flags": {},
+      "order": 58,
+      "mode": 0,
+      "title": "Title",
+      "properties": {
+        "nb_title_board": {
+          "fontSize": 30,
+          "fontColor": "#ffffff",
+          "background": "",
+          "align": "left",
+          "bold": true,
+          "font": "yahei",
+          "italic": false,
+          "outline": false,
+          "shadow": false,
+          "effect": "jade"
+        },
+        "text": "🚀 Five Steps to Run",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "8.0",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "🚀 Five Steps to Run"
+      ],
+      "widgets_values_named": {
+        "text": "🚀 Five Steps to Run"
+      },
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 654,
+      "type": "MarkdownNote",
+      "pos": [
+        313.79,
+        78.41999999999999
+      ],
+      "size": [
+        560,
+        332
+      ],
+      "flags": {},
+      "order": 59,
+      "mode": 0,
+      "title": "🚀 Five Steps to Run",
+      "properties": {
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        },
+        "Node name for S&R": "MarkdownNote"
+      },
+      "widgets_values": [
+        "> 🎯 Give it a **character image**, the **original video** and a **shot md**: the person in the video becomes your character, block by block, joined into one long video. Motion, camera, background and sound stay.\n\n### ① 🤖 Get a shot md\nLet an AI agent (Claude Code, Codex…) with the `feihou-h3-motion-ultra` skill write it (see the `skills` folder of the repo).\n\n### ② 🖼️ Media node\nImage 1 = character image (a multi-view sheet works best), video 1 = original video (24 fps is best, read at 720P).\n\n### ③ 📄 Shot Prompts node\nDrag the md onto the node. After editing the md, click **refresh prompts**.\n\n### ④ 📐 Setup\nKeep mode **参考生视频** and pick the resolution; prompt, length and aspect come from the md.\n\n### ⑤ ▶️ Click Run once\nEach block queues the next one; the **Final Video** node outputs the joined video."
+      ],
+      "widgets_values_named": {
+        "text": "> 🎯 Give it a **character image**, the **original video** and a **shot md**: the person in the video becomes your character, block by block, joined into one long video. Motion, camera, background and sound stay.\n\n### ① 🤖 Get a shot md\nLet an AI agent (Claude Code, Codex…) with the `feihou-h3-motion-ultra` skill write it (see the `skills` folder of the repo).\n\n### ② 🖼️ Media node\nImage 1 = character image (a multi-view sheet works best), video 1 = original video (24 fps is best, read at 720P).\n\n### ③ 📄 Shot Prompts node\nDrag the md onto the node. After editing the md, click **refresh prompts**.\n\n### ④ 📐 Setup\nKeep mode **参考生视频** and pick the resolution; prompt, length and aspect come from the md.\n\n### ⑤ ▶️ Click Run once\nEach block queues the next one; the **Final Video** node outputs the joined video."
+      },
+      "color": "#232",
+      "bgcolor": "#353",
+      "textcolor": "#FFFFFF",
+      "extensions": {
+        "textcolor": "#FFFFFF"
+      }
+    },
+    {
+      "id": 655,
+      "type": "Note",
+      "pos": [
+        313.79,
+        458.41999999999996
+      ],
+      "size": [
+        560,
+        57
+      ],
+      "flags": {},
+      "order": 60,
+      "mode": 0,
+      "title": "Title",
+      "properties": {
+        "nb_title_board": {
+          "fontSize": 30,
+          "fontColor": "#ffffff",
+          "background": "",
+          "align": "left",
+          "bold": true,
+          "font": "yahei",
+          "italic": false,
+          "outline": false,
+          "shadow": false,
+          "effect": "ice"
+        },
+        "text": "📄 Shot md Basics",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "8.0",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "📄 Shot md Basics"
+      ],
+      "widgets_values_named": {
+        "text": "📄 Shot md Basics"
+      },
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 656,
+      "type": "MarkdownNote",
+      "pos": [
+        313.79,
+        553.42
+      ],
+      "size": [
+        560,
+        118
+      ],
+      "flags": {},
+      "order": 61,
+      "mode": 0,
+      "title": "📄 Shot md Basics",
+      "properties": {
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        },
+        "Node name for S&R": "MarkdownNote"
+      },
+      "widgets_values": [
+        "- `===== FEIHOU_SHOT 01 =====` starts a block (01, 02, 03…).\n- `@range 00:00.00-00:02.25`: the part of the original video.\n- `@pictures 1,2`: the image cards this block uses.\n- `@sound source` = original sound, `@sound generated` = model audio.\n- `@continue`: carry on from the end of the previous block.\n- `@segment context,window=192,overlap=39,chunk=30`: how the block is sampled.\n- Then the six-section prompt: `<Picture 1>` = character, `<Video 1>` = original video, `<Audio 1>` = its sound."
+      ],
+      "widgets_values_named": {
+        "text": "- `===== FEIHOU_SHOT 01 =====` starts a block (01, 02, 03…).\n- `@range 00:00.00-00:02.25`: the part of the original video.\n- `@pictures 1,2`: the image cards this block uses.\n- `@sound source` = original sound, `@sound generated` = model audio.\n- `@continue`: carry on from the end of the previous block.\n- `@segment context,window=192,overlap=39,chunk=30`: how the block is sampled.\n- Then the six-section prompt: `<Picture 1>` = character, `<Video 1>` = original video, `<Audio 1>` = its sound."
+      },
+      "color": "#223",
+      "bgcolor": "#335",
+      "textcolor": "#FFFFFF",
+      "extensions": {
+        "textcolor": "#FFFFFF"
+      }
+    },
+    {
+      "id": 657,
+      "type": "Note",
+      "pos": [
+        313.79,
+        719.42
+      ],
+      "size": [
+        560,
+        57
+      ],
+      "flags": {},
+      "order": 62,
+      "mode": 0,
+      "title": "Title",
+      "properties": {
+        "nb_title_board": {
+          "fontSize": 30,
+          "fontColor": "#ffffff",
+          "background": "",
+          "align": "left",
+          "bold": true,
+          "font": "yahei",
+          "italic": false,
+          "outline": false,
+          "shadow": false,
+          "effect": "gold"
+        },
+        "text": "⚙️ Node Settings",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "8.0",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "⚙️ Node Settings"
+      ],
+      "widgets_values_named": {
+        "text": "⚙️ Node Settings"
+      },
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 658,
+      "type": "MarkdownNote",
+      "pos": [
+        313.79,
+        814.42
+      ],
+      "size": [
+        560,
+        162
+      ],
+      "flags": {},
+      "order": 63,
+      "mode": 0,
+      "title": "⚙️ Node Settings",
+      "properties": {
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        },
+        "Node name for S&R": "MarkdownNote"
+      },
+      "widgets_values": [
+        "| Node | Setting |\n|---|---|\n| 🧪 Preprocess | mode = 自动 (follows `@mode`), face blur = 自动 |\n| ✂️ Motion Segment | euler + simple; segmentation = 自动 (follows `@segment`) |\n| 🔊 reference_soundtrack | 送入模型 = sound guides lip sync; 不送入模型 = saves VRAM |\n| 📦 Motion Collect | audio_output = 自动, **auto_queue on**, color_match if colours drift |"
+      ],
+      "widgets_values_named": {
+        "text": "| Node | Setting |\n|---|---|\n| 🧪 Preprocess | mode = 自动 (follows `@mode`), face blur = 自动 |\n| ✂️ Motion Segment | euler + simple; segmentation = 自动 (follows `@segment`) |\n| 🔊 reference_soundtrack | 送入模型 = sound guides lip sync; 不送入模型 = saves VRAM |\n| 📦 Motion Collect | audio_output = 自动, **auto_queue on**, color_match if colours drift |"
+      },
+      "color": "#432",
+      "bgcolor": "#653",
+      "textcolor": "#FFFFFF",
+      "extensions": {
+        "textcolor": "#FFFFFF"
+      }
+    },
+    {
+      "id": 659,
+      "type": "Note",
+      "pos": [
+        313.79,
+        1024.42
+      ],
+      "size": [
+        560,
+        57
+      ],
+      "flags": {},
+      "order": 64,
+      "mode": 0,
+      "title": "Title",
+      "properties": {
+        "nb_title_board": {
+          "fontSize": 30,
+          "fontColor": "#ffffff",
+          "background": "",
+          "align": "left",
+          "bold": true,
+          "font": "yahei",
+          "italic": false,
+          "outline": false,
+          "shadow": false,
+          "effect": "rosegold"
+        },
+        "text": "🔁 Stopped Midway / Not Happy",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "8.0",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "🔁 Stopped Midway / Not Happy"
+      ],
+      "widgets_values_named": {
+        "text": "🔁 Stopped Midway / Not Happy"
+      },
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 660,
+      "type": "MarkdownNote",
+      "pos": [
+        313.79,
+        1119.42
+      ],
+      "size": [
+        560,
+        91
+      ],
+      "flags": {},
+      "order": 65,
+      "mode": 0,
+      "title": "🔁 Stopped Midway / Not Happy",
+      "properties": {
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        },
+        "Node name for S&R": "MarkdownNote"
+      },
+      "widgets_values": [
+        "- ⏸️ **Stopped midway**: change nothing and click Run again; it resumes and still joins the full video.\n- 🔢 **Rerun the film**: set the shot number to 0 or 1; another number starts from that block.\n- 🎬 **Only some shots**: start = 手动设置 (manual), then `3`, `3-5` or `6,9`.\n- 😕 **Not happy**: send the result to the AI, say what is wrong, refresh prompts and run again."
+      ],
+      "widgets_values_named": {
+        "text": "- ⏸️ **Stopped midway**: change nothing and click Run again; it resumes and still joins the full video.\n- 🔢 **Rerun the film**: set the shot number to 0 or 1; another number starts from that block.\n- 🎬 **Only some shots**: start = 手动设置 (manual), then `3`, `3-5` or `6,9`.\n- 😕 **Not happy**: send the result to the AI, say what is wrong, refresh prompts and run again."
+      },
+      "color": "#322",
+      "bgcolor": "#533",
+      "textcolor": "#FFFFFF",
+      "extensions": {
+        "textcolor": "#FFFFFF"
+      }
+    },
+    {
+      "id": 661,
+      "type": "Note",
+      "pos": [
+        313.79,
+        1258.42
+      ],
+      "size": [
+        560,
+        57
+      ],
+      "flags": {},
+      "order": 66,
+      "mode": 0,
+      "title": "Title",
+      "properties": {
+        "nb_title_board": {
+          "fontSize": 30,
+          "fontColor": "#ffffff",
+          "background": "",
+          "align": "left",
+          "bold": true,
+          "font": "yahei",
+          "italic": false,
+          "outline": false,
+          "shadow": false,
+          "effect": "sunset"
+        },
+        "text": "💾 Out of VRAM & Errors",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "8.0",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "💾 Out of VRAM & Errors"
+      ],
+      "widgets_values_named": {
+        "text": "💾 Out of VRAM & Errors"
+      },
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 662,
+      "type": "MarkdownNote",
+      "pos": [
+        313.79,
+        1353.42
+      ],
+      "size": [
+        560,
+        104
+      ],
+      "flags": {},
+      "order": 67,
+      "mode": 0,
+      "title": "💾 Out of VRAM & Errors",
+      "properties": {
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        },
+        "Node name for S&R": "MarkdownNote"
+      },
+      "widgets_values": [
+        "- 📉 Lower the Setup **resolution** or the **segment frames**.\n- ❓ \"Shot Prompts has no content\": no md in the node.\n- ⏱️ \"missing @range\": check the time format, e.g. `00:03.08-00:07.21`.\n- 🎨 Colours don't match: describe the shot's light in the md, or turn on color_match.\n- 🛠️ Attention errors: **update KJNodes**; restart ComfyUI after updates."
+      ],
+      "widgets_values_named": {
+        "text": "- 📉 Lower the Setup **resolution** or the **segment frames**.\n- ❓ \"Shot Prompts has no content\": no md in the node.\n- ⏱️ \"missing @range\": check the time format, e.g. `00:03.08-00:07.21`.\n- 🎨 Colours don't match: describe the shot's light in the md, or turn on color_match.\n- 🛠️ Attention errors: **update KJNodes**; restart ComfyUI after updates."
+      },
+      "color": "#323",
+      "bgcolor": "#535",
+      "textcolor": "#FFFFFF",
+      "extensions": {
+        "textcolor": "#FFFFFF"
+      }
+    },
+    {
+      "id": 663,
+      "type": "Note",
+      "pos": [
+        929.79,
+        -157.58
+      ],
+      "size": [
+        480,
+        93
+      ],
+      "flags": {},
+      "order": 68,
+      "mode": 0,
+      "title": "Title",
+      "properties": {
+        "nb_title_board": {
+          "fontSize": 54,
+          "fontColor": "#ffffff",
+          "background": "",
+          "align": "left",
+          "bold": true,
+          "font": "yahei",
+          "italic": false,
+          "outline": false,
+          "shadow": false,
+          "effect": "aurora"
+        },
+        "text": "Downloads & Contact",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "8.0",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "Downloads & Contact"
+      ],
+      "widgets_values_named": {
+        "text": "Downloads & Contact"
+      },
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 664,
+      "type": "Note",
+      "pos": [
+        929.79,
+        -16.580000000000013
+      ],
+      "size": [
+        480,
+        57
+      ],
+      "flags": {},
+      "order": 69,
+      "mode": 0,
+      "title": "Title",
+      "properties": {
+        "nb_title_board": {
+          "fontSize": 30,
+          "fontColor": "#ffffff",
+          "background": "",
+          "align": "left",
+          "bold": true,
+          "font": "yahei",
+          "italic": false,
+          "outline": false,
+          "shadow": false,
+          "effect": "neon"
+        },
+        "text": "💿 Models & LoRAs",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "8.0",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "💿 Models & LoRAs"
+      ],
+      "widgets_values_named": {
+        "text": "💿 Models & LoRAs"
+      },
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 665,
+      "type": "MarkdownNote",
+      "pos": [
+        929.79,
+        78.41999999999999
+      ],
+      "size": [
+        480,
+        275
+      ],
+      "flags": {},
+      "order": 70,
+      "mode": 0,
+      "title": "💿 Models & LoRAs",
+      "properties": {
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        },
+        "Node name for S&R": "MarkdownNote"
+      },
+      "widgets_values": [
+        "> 📁 Everything is on my cloud drive: [https://pan.quark.cn/s/27fe4727197b](https://pan.quark.cn/s/27fe4727197b)\n> 🎨 MiniMax-H3 Remix is also on [Civitai](https://civitai.com/models/2879272/minimax-h3-remix)\n\n| Model | Folder |\n|---|---|\n| 🧠 Remix main model | `diffusion_models/MiniMax-H3/` |\n| 📝 Text encoder `qwen3vl_32b…int8_convrot` | `clip/` |\n| 🎞️ Video VAE + audio VAE | `vae/` |\n| 🎛️ Turbo LoRA, Remix Enhancer LoRA | `loras/H3/` |\n| 🔍 `minimax_h3_latent_upscaler_3d_bf16` | `latent_upscale_models/` |\n\nOfficial files: [Comfy-Org/MiniMax-H3](https://huggingface.co/Comfy-Org/MiniMax-H3) · Turbo LoRA: [lightx2v/Minimax-h3-Turbo](https://huggingface.co/lightx2v/Minimax-h3-Turbo) · Remix: [FX-FeiHou/MiniMax-H3-Remix](https://huggingface.co/FX-FeiHou/MiniMax-H3-Remix)\n\n*Press R to refresh after adding models; if a file name differs, pick it again in its loader.*"
+      ],
+      "widgets_values_named": {
+        "text": "> 📁 Everything is on my cloud drive: [https://pan.quark.cn/s/27fe4727197b](https://pan.quark.cn/s/27fe4727197b)\n> 🎨 MiniMax-H3 Remix is also on [Civitai](https://civitai.com/models/2879272/minimax-h3-remix)\n\n| Model | Folder |\n|---|---|\n| 🧠 Remix main model | `diffusion_models/MiniMax-H3/` |\n| 📝 Text encoder `qwen3vl_32b…int8_convrot` | `clip/` |\n| 🎞️ Video VAE + audio VAE | `vae/` |\n| 🎛️ Turbo LoRA, Remix Enhancer LoRA | `loras/H3/` |\n| 🔍 `minimax_h3_latent_upscaler_3d_bf16` | `latent_upscale_models/` |\n\nOfficial files: [Comfy-Org/MiniMax-H3](https://huggingface.co/Comfy-Org/MiniMax-H3) · Turbo LoRA: [lightx2v/Minimax-h3-Turbo](https://huggingface.co/lightx2v/Minimax-h3-Turbo) · Remix: [FX-FeiHou/MiniMax-H3-Remix](https://huggingface.co/FX-FeiHou/MiniMax-H3-Remix)\n\n*Press R to refresh after adding models; if a file name differs, pick it again in its loader.*"
+      },
+      "color": "#233",
+      "bgcolor": "#355",
+      "textcolor": "#FFFFFF",
+      "extensions": {
+        "textcolor": "#FFFFFF"
+      }
+    },
+    {
+      "id": 666,
+      "type": "Note",
+      "pos": [
+        929.79,
+        401.41999999999996
+      ],
+      "size": [
+        480,
+        57
+      ],
+      "flags": {},
+      "order": 71,
+      "mode": 0,
+      "title": "Title",
+      "properties": {
+        "nb_title_board": {
+          "fontSize": 30,
+          "fontColor": "#ffffff",
+          "background": "",
+          "align": "left",
+          "bold": true,
+          "font": "yahei",
+          "italic": false,
+          "outline": false,
+          "shadow": false,
+          "effect": "champagne"
+        },
+        "text": "🧩 Required Nodes",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "8.0",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "🧩 Required Nodes"
+      ],
+      "widgets_values_named": {
+        "text": "🧩 Required Nodes"
+      },
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 667,
+      "type": "MarkdownNote",
+      "pos": [
+        929.79,
+        496.41999999999996
+      ],
+      "size": [
+        480,
+        138
+      ],
+      "flags": {},
+      "order": 72,
+      "mode": 0,
+      "title": "🧩 Required Nodes",
+      "properties": {
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        },
+        "Node name for S&R": "MarkdownNote"
+      },
+      "widgets_values": [
+        "- 🧩 **FeiHou-Easy-H3**: [https://github.com/FX-FeiHou/ComfyUI-FeiHou-Easy-H3](https://github.com/FX-FeiHou/ComfyUI-FeiHou-Easy-H3)\n- 🧰 **FeiHou-Toolbox**: [https://github.com/FX-FeiHou/ComfyUI-FeiHou-Toolbox](https://github.com/FX-FeiHou/ComfyUI-FeiHou-Toolbox)\n- 🔧 **ComfyUI-KJNodes**: [https://github.com/kijai/ComfyUI-KJNodes](https://github.com/kijai/ComfyUI-KJNodes)\n- 🎬 **ComfyUI-VideoHelperSuite**: [https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite](https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite)\n\n✅ **Update them to the latest version** and restart ComfyUI. You can also install them from ComfyUI Manager."
+      ],
+      "widgets_values_named": {
+        "text": "- 🧩 **FeiHou-Easy-H3**: [https://github.com/FX-FeiHou/ComfyUI-FeiHou-Easy-H3](https://github.com/FX-FeiHou/ComfyUI-FeiHou-Easy-H3)\n- 🧰 **FeiHou-Toolbox**: [https://github.com/FX-FeiHou/ComfyUI-FeiHou-Toolbox](https://github.com/FX-FeiHou/ComfyUI-FeiHou-Toolbox)\n- 🔧 **ComfyUI-KJNodes**: [https://github.com/kijai/ComfyUI-KJNodes](https://github.com/kijai/ComfyUI-KJNodes)\n- 🎬 **ComfyUI-VideoHelperSuite**: [https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite](https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite)\n\n✅ **Update them to the latest version** and restart ComfyUI. You can also install them from ComfyUI Manager."
+      },
+      "color": "#232",
+      "bgcolor": "#353",
+      "textcolor": "#FFFFFF",
+      "extensions": {
+        "textcolor": "#FFFFFF"
+      }
+    },
+    {
+      "id": 668,
+      "type": "Note",
+      "pos": [
+        929.79,
+        682.42
+      ],
+      "size": [
+        480,
+        57
+      ],
+      "flags": {},
+      "order": 73,
+      "mode": 0,
+      "title": "Title",
+      "properties": {
+        "nb_title_board": {
+          "fontSize": 30,
+          "fontColor": "#ffffff",
+          "background": "",
+          "align": "left",
+          "bold": true,
+          "font": "yahei",
+          "italic": false,
+          "outline": false,
+          "shadow": false,
+          "effect": "jade"
+        },
+        "text": "👧 Xiao Fei Hou",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "8.0",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "👧 Xiao Fei Hou"
+      ],
+      "widgets_values_named": {
+        "text": "👧 Xiao Fei Hou"
+      },
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 669,
+      "type": "MarkdownNote",
+      "pos": [
+        929.79,
+        777.42
+      ],
+      "size": [
+        480,
+        154
+      ],
+      "flags": {},
+      "order": 74,
+      "mode": 0,
+      "title": "👧 Xiao Fei Hou",
+      "properties": {
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        },
+        "Node name for S&R": "MarkdownNote"
+      },
+      "widgets_values": [
+        "- 💬 **WeChat**: fx-feihou\n- 💬 **LINE**: fx-feihou\n- 👥 **QQ group**: 1091593367\n- 📺 **Bilibili**: [https://space.bilibili.com/389291683](https://space.bilibili.com/389291683)\n- ▶️ **YouTube**: [https://www.youtube.com/@ivever5](https://www.youtube.com/@ivever5)\n- 🎨 **Civitai**: [https://civitai.com/models/2879272/minimax-h3-remix](https://civitai.com/models/2879272/minimax-h3-remix)\n- 🐙 **GitHub**: [https://github.com/FX-FeiHou](https://github.com/FX-FeiHou)\n\n*When you add me on WeChat or LINE, please say why (to join the group, or business).*"
+      ],
+      "widgets_values_named": {
+        "text": "- 💬 **WeChat**: fx-feihou\n- 💬 **LINE**: fx-feihou\n- 👥 **QQ group**: 1091593367\n- 📺 **Bilibili**: [https://space.bilibili.com/389291683](https://space.bilibili.com/389291683)\n- ▶️ **YouTube**: [https://www.youtube.com/@ivever5](https://www.youtube.com/@ivever5)\n- 🎨 **Civitai**: [https://civitai.com/models/2879272/minimax-h3-remix](https://civitai.com/models/2879272/minimax-h3-remix)\n- 🐙 **GitHub**: [https://github.com/FX-FeiHou](https://github.com/FX-FeiHou)\n\n*When you add me on WeChat or LINE, please say why (to join the group, or business).*"
+      },
+      "color": "#223",
+      "bgcolor": "#335",
+      "textcolor": "#FFFFFF",
+      "extensions": {
+        "textcolor": "#FFFFFF"
+      }
     }
   ],
   "links": [
