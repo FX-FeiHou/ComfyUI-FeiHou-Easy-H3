@@ -3240,11 +3240,11 @@
       "id": 602,
       "type": "Note",
       "pos": [
-        1425.925019092896,
-        -550.4096083744123
+        1374.73,
+        -550.41
       ],
       "size": [
-        3610,
+        3705,
         154
       ],
       "flags": {},
@@ -3266,7 +3266,7 @@
           "shadow": false,
           "effect": "aurora"
         },
-        "text": "[MiniMax-H3 Remix] FeiHou Easy H3 Character Replacement Long-Video One-Click Automation v3",
+        "text": "[MiniMax-H3 Remix] FeiHou Easy H3 Long-Video Character Replacement v3",
         "ue_properties": {
           "widget_ue_connectable": {},
           "version": "8.0",
@@ -3274,10 +3274,10 @@
         }
       },
       "widgets_values": [
-        "[MiniMax-H3 Remix] FeiHou Easy H3 Character Replacement Long-Video One-Click Automation v3"
+        "[MiniMax-H3 Remix] FeiHou Easy H3 Long-Video Character Replacement v3"
       ],
       "widgets_values_named": {
-        "text": "[MiniMax-H3 Remix] FeiHou Easy H3 Character Replacement Long-Video One-Click Automation v3"
+        "text": "[MiniMax-H3 Remix] FeiHou Easy H3 Long-Video Character Replacement v3"
       },
       "color": "#432",
       "bgcolor": "#653"
@@ -3286,11 +3286,11 @@
       "id": 603,
       "type": "Note",
       "pos": [
-        2292.53631590016,
-        -400.83276098924097
+        1834.23,
+        -400.83
       ],
       "size": [
-        1848,
+        2786,
         84
       ],
       "flags": {},
@@ -3332,11 +3332,11 @@
       "id": 604,
       "type": "Note",
       "pos": [
-        2158.536315900161,
-        -305.83276098924097
+        1904.23,
+        -305.83
       ],
       "size": [
-        2107,
+        2646,
         56
       ],
       "flags": {},
@@ -5095,7 +5095,7 @@
       ],
       "size": [
         480,
-        96
+        270
       ],
       "flags": {},
       "order": 74,

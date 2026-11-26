@@ -5,52 +5,14 @@
   "last_link_id": 842,
   "nodes": [
     {
-      "id": 95,
-      "type": "Label (rgthree)",
-      "pos": [
-        1287.2230502470466,
-        -743.2053091254716
-      ],
-      "size": [
-        903.1333618164062,
-        50
-      ],
-      "flags": {
-        "allow_interaction": true
-      },
-      "order": 0,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [],
-      "title": "Bilibili: https://space.bilibili.com/389291683   YouTube: https://www.youtube.com/@ivever5   Civitai: https://civitai.com/models/2879272/minimax-h3-remix",
-      "properties": {
-        "fontSize": 50,
-        "fontFamily": "Arial",
-        "fontColor": "#ffffff",
-        "textAlign": "left",
-        "backgroundColor": "transparent",
-        "padding": 0,
-        "borderRadius": 0,
-        "angle": 0,
-        "ue_properties": {
-          "widget_ue_connectable": {},
-          "input_ue_unconnectable": {},
-          "version": "7.5.2"
-        },
-        "widget_ue_connectable": {}
-      },
-      "color": "#fff0",
-      "bgcolor": "#fff0"
-    },
-    {
       "id": 96,
       "type": "Label (rgthree)",
       "pos": [
-        837.2230502470493,
-        -743.2053091254716
+        1230.61,
+        -770
       ],
       "size": [
-        422.23333740234375,
+        2152.78,
         50
       ],
       "flags": {
@@ -60,7 +22,7 @@
       "mode": 0,
       "inputs": [],
       "outputs": [],
-      "title": "By: Xiao Fei Hou (三层楼的小肥猴)",
+      "title": "By: Xiao Fei Hou (三层楼的小肥猴)   WeChat: fx-feihou   LINE: fx-feihou   QQ group: 1091593367",
       "properties": {
         "fontSize": 50,
         "fontFamily": "Arial",
@@ -84,11 +46,11 @@
       "id": 97,
       "type": "Label (rgthree)",
       "pos": [
-        2367.2230502470484,
-        -743.2053091254716
+        617.42,
+        -700
       ],
       "size": [
-        1786.38330078125,
+        3379.15,
         50
       ],
       "flags": {
@@ -98,7 +60,7 @@
       "mode": 0,
       "inputs": [],
       "outputs": [],
-      "title": "WeChat: fx-feihou   LINE: fx-feihou   QQ group: 1091593367   (please say why you add me: group or business)",
+      "title": "Bilibili: https://space.bilibili.com/389291683   YouTube: https://www.youtube.com/@ivever5   Civitai: https://civitai.com/models/2879272/minimax-h3-remix",
       "properties": {
         "fontSize": 50,
         "fontFamily": "Arial",
@@ -175,11 +137,11 @@
       "id": 93,
       "type": "Label (rgthree)",
       "pos": [
-        520.1358012658065,
-        -1050.5995381375471
+        -233.99,
+        -1050
       ],
       "size": [
-        4100.64990234375,
+        5081.98,
         150
       ],
       "flags": {
@@ -475,11 +437,11 @@
       "id": 94,
       "type": "Label (rgthree)",
       "pos": [
-        871.8182403679486,
-        -847.6428543648695
+        188.34,
+        -860
       ],
       "size": [
-        3240,
+        4237.32,
         60
       ],
       "flags": {
@@ -4163,8 +4125,8 @@
         -281.6902489121099
       ],
       "size": [
-        445.5672593772697,
-        117.49349131140275
+        560,
+        190
       ],
       "flags": {},
       "order": 24,
@@ -7507,11 +7469,11 @@
       "id": 542,
       "type": "MarkdownNote",
       "pos": [
-        -1224.1778925344186,
-        -104.19675760070714
+        -1224.18,
+        -51.69
       ],
       "size": [
-        445.5672593772697,
+        560,
         1900
       ],
       "flags": {},
