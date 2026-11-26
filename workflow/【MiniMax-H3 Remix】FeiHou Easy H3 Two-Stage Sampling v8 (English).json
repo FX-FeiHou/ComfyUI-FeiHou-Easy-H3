@@ -6908,181 +6908,6 @@
       "widgets_values_named": {}
     },
     {
-      "id": 537,
-      "type": "FeiHouEasyH3ShotPrompts",
-      "pos": [
-        -83.22525754102419,
-        328.60749789841077
-      ],
-      "size": [
-        465.8844999999999,
-        405.6534999999999
-      ],
-      "flags": {},
-      "order": 45,
-      "mode": 4,
-      "inputs": [
-        {
-          "localized_name": "prompt_text",
-          "name": "prompt_text",
-          "type": "STRING",
-          "widget": {
-            "name": "prompt_text"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "md_path",
-          "name": "md_path",
-          "type": "STRING",
-          "widget": {
-            "name": "md_path"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "start",
-          "name": "start",
-          "type": "COMBO",
-          "widget": {
-            "name": "start"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "shot_numbers",
-          "name": "shot_numbers",
-          "type": "STRING",
-          "widget": {
-            "name": "shot_numbers"
-          },
-          "link": null
-        }
-      ],
-      "outputs": [
-        {
-          "localized_name": "production_shot",
-          "name": "production_shot",
-          "type": "FEIHOU_H3_PRODUCTION_SHOT",
-          "links": []
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfyui-feihou-easy-h3",
-        "ver": "a62b854489ee0388725ff6500f1a25b2908ea25a",
-        "Node name for S&R": "FeiHouEasyH3ShotPrompts",
-        "ue_properties": {
-          "widget_ue_connectable": {},
-          "input_ue_unconnectable": {},
-          "version": "8.0"
-        },
-        "feihou_md_name": ""
-      },
-      "widgets_values": [
-        "",
-        "",
-        "手动设置",
-        "1",
-        null
-      ],
-      "widgets_values_named": {
-        "prompt_text": "",
-        "md_path": "",
-        "start": "手动设置",
-        "shot_numbers": "1",
-        "md: 分镜_科技快讯乌镇峰会.md": null
-      }
-    },
-    {
-      "id": 539,
-      "type": "FeiHouEasyH3ShotPrompts",
-      "pos": [
-        -599.8788879999992,
-        -83.0901635372675
-      ],
-      "size": [
-        459.39999999999986,
-        995.5999999999995
-      ],
-      "flags": {},
-      "order": 46,
-      "mode": 4,
-      "inputs": [
-        {
-          "localized_name": "prompt_text",
-          "name": "prompt_text",
-          "type": "STRING",
-          "widget": {
-            "name": "prompt_text"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "md_path",
-          "name": "md_path",
-          "type": "STRING",
-          "widget": {
-            "name": "md_path"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "start",
-          "name": "start",
-          "type": "COMBO",
-          "widget": {
-            "name": "start"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "shot_numbers",
-          "name": "shot_numbers",
-          "type": "STRING",
-          "widget": {
-            "name": "shot_numbers"
-          },
-          "link": null
-        }
-      ],
-      "outputs": [
-        {
-          "localized_name": "production_shot",
-          "name": "production_shot",
-          "type": "FEIHOU_H3_PRODUCTION_SHOT",
-          "links": [
-            841,
-            842
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfyui-feihou-easy-h3",
-        "ver": "unknown",
-        "Node name for S&R": "FeiHouEasyH3ShotPrompts",
-        "ue_properties": {
-          "widget_ue_connectable": {},
-          "input_ue_unconnectable": {},
-          "version": "8.0.1"
-        },
-        "feihou_md_name": ""
-      },
-      "widgets_values": [
-        "",
-        "",
-        "手动设置",
-        "0",
-        null
-      ],
-      "widgets_values_named": {
-        "prompt_text": "",
-        "md_path": "",
-        "start": "手动设置",
-        "shot_numbers": "0",
-        "md: 分镜_B站年度感谢.md": null
-      }
-    },
-    {
       "id": 541,
       "type": "FeiHouEasyH3ProductionPackLoader",
       "pos": [
@@ -7213,7 +7038,10 @@
           "localized_name": "Production shot",
           "name": "production_shot",
           "type": "FEIHOU_H3_PRODUCTION_SHOT",
-          "links": []
+          "links": [
+            841,
+            842
+          ]
         }
       ],
       "properties": {
@@ -7724,10 +7552,10 @@
         "Node name for S&R": "MarkdownNote"
       },
       "widgets_values": [
-        "Off by default; turn them on with the **Fast Groups Bypasser** switches.\n- 📄 **Shot Prompts / Production Pack**: run a shot md or a production pack shot by shot. 顺序生成 (sequential) runs every shot in order; 手动设置 (manual) runs only `3`, `3-5` or `6,9`.\n- 🎭 **RefMods**: needs ComfyUI-MiniMaxH3Mod.\n- 🙂 **Face Refine** (experimental): re-renders faces after the 2nd pass; images in **Upload Character Images** take priority over Media.\n- 🔗 **Continue & Merge Output**: continue a long video segment by segment (`latent` = from the 2nd pass, `images` = from Face Refine); the last segment joins the full video."
+        "Off by default; turn them on with the **Fast Groups Bypasser** switches.\n- 📦 **Production Pack Loader**: run a production pack (folder or ZIP) shot by shot instead of the Setup prompt. 顺序生成 (sequential) runs every shot in order; 手动设置 (manual) runs only `3`, `3-5` or `6,9`.\n- 🎭 **RefMods**: needs ComfyUI-MiniMaxH3Mod.\n- 🙂 **Face Refine** (experimental): re-renders faces after the 2nd pass; images in **Upload Character Images** take priority over Media.\n- 🔗 **Continue & Merge Output**: continue a long video segment by segment (`latent` = from the 2nd pass, `images` = from Face Refine); the last segment joins the full video."
       ],
       "widgets_values_named": {
-        "text": "Off by default; turn them on with the **Fast Groups Bypasser** switches.\n- 📄 **Shot Prompts / Production Pack**: run a shot md or a production pack shot by shot. 顺序生成 (sequential) runs every shot in order; 手动设置 (manual) runs only `3`, `3-5` or `6,9`.\n- 🎭 **RefMods**: needs ComfyUI-MiniMaxH3Mod.\n- 🙂 **Face Refine** (experimental): re-renders faces after the 2nd pass; images in **Upload Character Images** take priority over Media.\n- 🔗 **Continue & Merge Output**: continue a long video segment by segment (`latent` = from the 2nd pass, `images` = from Face Refine); the last segment joins the full video."
+        "text": "Off by default; turn them on with the **Fast Groups Bypasser** switches.\n- 📦 **Production Pack Loader**: run a production pack (folder or ZIP) shot by shot instead of the Setup prompt. 顺序生成 (sequential) runs every shot in order; 手动设置 (manual) runs only `3`, `3-5` or `6,9`.\n- 🎭 **RefMods**: needs ComfyUI-MiniMaxH3Mod.\n- 🙂 **Face Refine** (experimental): re-renders faces after the 2nd pass; images in **Upload Character Images** take priority over Media.\n- 🔗 **Continue & Merge Output**: continue a long video segment by segment (`latent` = from the 2nd pass, `images` = from Face Refine); the last segment joins the full video."
       },
       "color": "#432",
       "bgcolor": "#653",
@@ -8760,7 +8588,7 @@
     ],
     [
       841,
-      539,
+      541,
       0,
       351,
       2,
@@ -8768,7 +8596,7 @@
     ],
     [
       842,
-      539,
+      541,
       0,
       445,
       0,
@@ -8983,7 +8811,7 @@
         -621.753773,
         -605.0846070000002,
         467.8915609999999,
-        1626.7984060000008
+        464.20147500000047
       ],
       "color": "#b58b2a",
       "flags": {}

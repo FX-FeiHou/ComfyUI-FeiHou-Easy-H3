@@ -81,7 +81,7 @@ Some workflows may also require additional LoRAs or custom nodes. Please check t
 
 ### English workflows
 
-- `【MiniMax-H3 Remix】FeiHou Easy H3 Two-Stage Sampling v8 (English).json`: two-stage sampling (1st pass for motion and composition, 2nd pass latent upscale and refine) for image-to-video, text-to-video, first/last frame, digital humans, character replacement and video editing. Optional groups: shot md / production pack, RefMods, Face Refine, segment-by-segment continuation.
+- `【MiniMax-H3 Remix】FeiHou Easy H3 Two-Stage Sampling v8 (English).json`: two-stage sampling (1st pass for motion and composition, 2nd pass latent upscale and refine) for image-to-video, text-to-video, first/last frame, digital humans, character replacement and video editing. Optional groups: production pack loader, RefMods, Face Refine, segment-by-segment continuation.
 - `【MiniMax-H3 Remix】FeiHou Easy H3 One-Click Long-Video Auto Replacement v2 (English).json`: replaces the person in a long video block by block from a shot md and joins the result into one video, keeping the original motion, camera, background and sound.
 - `【MiniMax-H3 Remix】FeiHou Easy H3 Character Replacement Long-Video One-Click Automation v3 (English).json`: the v3 long-video workflow with Remake swap and context windows, so one-take or few-cut videos keep their quality however long they are. It also does motion transfer.
 
