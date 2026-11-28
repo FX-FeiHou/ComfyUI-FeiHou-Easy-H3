@@ -3140,7 +3140,11 @@ def _trim_reference_video(value: Any, trim_range: Any) -> Mapping:
         raise ValueError("参考视频截取终点必须晚于起点 / Invalid video trim range")
     first = min(total - 1, max(0, round(start * fps)))
     last = min(total, max(first + 1, round(end * fps)))
-    if not isinstance(audio, Mapping) or not isinstance(audio.get("waveform"), torch.Tensor):
+    try:
+        waveform = audio["waveform"] if isinstance(audio, Mapping) else None
+    except Exception:
+        waveform = None
+    if not isinstance(waveform, torch.Tensor) or waveform.numel() == 0:
         audio = None  # video without an audio track
     if audio is not None:
         rate = _audio_sample_rate(audio)

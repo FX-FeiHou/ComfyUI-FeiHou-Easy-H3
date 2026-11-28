@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.6
+
+- 媒体桥接 / Setup: a video with no audio track (VHS gives an empty or unreadable waveform, as on some cloud platforms) now loads as "no soundtrack" instead of crashing Setup when it trims the reference video (`'NoneType' object is not subscriptable`). `_plain_audio` returns no audio for an empty, missing or unreadable waveform, and `_trim_reference_video` drops any audio that is not a real waveform.
+- English workflows: Two-Stage Sampling v8, Long-Video Auto Replacement v2 and Long-Video One-Click Automation v3 (English), plus the `skills` folder with the FeiHou skill zips.
+
 ## v1.5
 
 - 制作包分镜加载器: shots now run like 分镜提示词. The native 生成后操作 (increment / decrement / randomize / fixed, shown as 生成顺序控制) is replaced by 生成方式: 顺序生成 (default) / 手动设置, and 分镜序号 becomes a text field.
