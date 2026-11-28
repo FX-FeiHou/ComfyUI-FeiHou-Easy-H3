@@ -38,9 +38,17 @@ MEDIA_SOURCE = "feihou_easy_h3_media"
 
 def _plain_audio(audio):
     """Copy an AUDIO payload (VHS returns a lazy mapping) into a plain dict."""
-    if not isinstance(audio, Mapping) or "waveform" not in audio:
+    if not isinstance(audio, Mapping):
         return None
-    return {"waveform": audio["waveform"], "sample_rate": int(audio.get("sample_rate") or 44100)}
+    try:
+        # A video without an audio track: VHS gives a None waveform, or raises
+        # when the lazy mapping is first read.  Treat both as "no soundtrack".
+        waveform = audio["waveform"]
+    except Exception:
+        return None
+    if not isinstance(waveform, torch.Tensor) or waveform.numel() == 0:
+        return None
+    return {"waveform": waveform, "sample_rate": int(audio.get("sample_rate") or 44100)}
 
 
 def _linked_input_types(images: int, videos: int, audios: int) -> dict:
